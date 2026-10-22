@@ -485,6 +485,24 @@ async function step(seconds, onFrame) {
 const flush = () => new Promise((r) => setImmediate(r));
 
 /**
+ * Прогон кадров до выполнения условия (а не фиксированное их число).
+ *
+ * Ждать «0.6 с и посмотрим» — источник недетерминированных провалов:
+ * переходы в игре частично асинхронны (`await adapter.interstitial()`
+ * внутри onWaveCleared()), а режиссёр волн может стоять в фазе BREAK с
+ * отсчётом до спавна. Сколько кадров нужно, зависит от случайного pacing'а
+ * предыдущих секций, поэтому ждём состояния, ограничивая его сверху.
+ */
+async function waitFor(pred, seconds) {
+  const frames = Math.round(seconds / DT);
+  for (let i = 0; i < frames; i++) {
+    if (pred()) return true;
+    await step(DT);
+  }
+  return pred();
+}
+
+/**
  * Возвращает игру в состояние PLAYING, из какого бы она ни была.
  * Нужно потому, что часть проверок (урон, пикапы, зачистка волны) имеет смысл
  * только во время боя: вне его game.damageEnemy/damagePlayer честно
@@ -655,11 +673,17 @@ await ensurePlaying();
 const perksBefore = game.perksTaken;
 
 // Зачищаем волну: очередь помечаем отспавненной и убиваем всех врагов.
+// breakTimer обнуляем намеренно: если режиссёр пойман в фазе BREAK, он честно
+// досчитывает 2.4 c до начала спавна и до проверки «все мертвы» не доходит —
+// волна не зачистилась бы, и это была бы ошибка теста, а не игры.
 game.waves.queue.length = game.waves.spawned;
+game.waves.breakTimer = 0;
 for (const e of [...game.enemies.live]) game.damageEnemy(e, 1e6, {});
-await step(0.6);
+await waitFor(() => game.state === 'perk', 6);
 
 ok(game.state === 'perk', 'после зачистки волны открывается выбор перка', game.state);
+// Карточки рисуются после await interstitial(), то есть не в том же кадре.
+await waitFor(() => game.screens.perkCards.children.length > 0, 3);
 const cards = game.screens.perkCards.children;
 ok(cards.length >= 1 && cards.length <= 3, 'предложено 1–3 перка', `${cards.length}`);
 
