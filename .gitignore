@@ -1,0 +1,10 @@
+# Зависимости и сборка в Git не хранятся: архив игры собирается командой npm run zip
+node_modules/
+dist/
+build/
+*.zip
+
+# Локальная отладка
+.DS_Store
+*.log
+.vite/

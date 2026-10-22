@@ -1,0 +1,849 @@
+/* ==========================================================================
+   Мерж Арена 3D — стили интерфейса
+   Требования Яндекс Игр, которые закрываются здесь:
+   1.10 — нет системной прокрутки и свайп-обновления, элементы не обрезаются;
+   1.6  — системное контекстное меню отключено (см. main.js);
+   полноэкранный режим на мобильных, height: 100dvh (адресная строка не режет UI).
+   Шрифты только системные: внешних ресурсов в архиве быть не должно.
+   ========================================================================== */
+
+:root {
+  --bg: #05060f;
+  --bg-soft: rgba(12, 16, 34, 0.82);
+  --line: rgba(120, 190, 255, 0.22);
+  --cyan: #35e6ff;
+  --magenta: #ff3ea5;
+  --violet: #a06bff;
+  --lime: #7dff5e;
+  --amber: #ffc23d;
+  --red: #ff4d5e;
+  --text: #e8f2ff;
+  --muted: #8ea3c4;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#game {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* ---------- Слои ---------- */
+
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#fx-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+  overflow: hidden;
+}
+
+/* ---------- HUD ---------- */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  /* Выше зоны джойстика (8), иначе на тач-устройствах кнопки HUD не нажимаются.
+     pointer-events наследуется как none от #ui, кликабельны только .icon-btn. */
+  z-index: 12;
+  padding: calc(10px + var(--safe-top)) calc(12px + var(--safe-right))
+    calc(10px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+}
+
+.panel {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 7px 11px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.hud-left {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  justify-self: start;
+  min-width: 168px;
+}
+
+.hud-center {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: center;
+  text-align: center;
+}
+
+.hud-right {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.hud-bottom {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  align-self: end;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* Полоса здоровья */
+.hp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.hp-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hp-value {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  position: relative;
+  height: 9px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--lime), var(--cyan));
+  box-shadow: 0 0 12px rgba(53, 230, 255, 0.55);
+  transition: width 0.14s linear;
+}
+
+.bar-fill.low {
+  background: linear-gradient(90deg, var(--red), var(--amber));
+  box-shadow: 0 0 12px rgba(255, 77, 94, 0.6);
+}
+
+/* Волна */
+.wave-title {
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgba(53, 230, 255, 0.6);
+  font-weight: 700;
+}
+
+.wave-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+/* Счётчики справа */
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stat .ico {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.stat.coins {
+  color: var(--amber);
+}
+
+.stat.kills {
+  color: var(--magenta);
+}
+
+.icon-btn {
+  pointer-events: auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.15s ease;
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+.icon-btn.off {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* Слоты оружия */
+.slots {
+  display: flex;
+  gap: 7px;
+}
+
+.slot {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.slot.empty {
+  opacity: 0.34;
+}
+
+.slot .glyph {
+  font-size: 22px;
+  line-height: 1;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+.slot .tier {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  padding: 3px 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.slot .tier i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.28;
+}
+
+.slot .tier i.on {
+  opacity: 1;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.slot .cd {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  transform-origin: bottom;
+  pointer-events: none;
+}
+
+.slot.merge-flash {
+  animation: mergeFlash 0.45s ease-out;
+}
+
+@keyframes mergeFlash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.9);
+    transform: scale(1.18);
+  }
+  100% {
+    box-shadow: 0 0 26px 8px rgba(255, 255, 255, 0);
+    transform: scale(1);
+  }
+}
+
+/* Перки-бейджи */
+.perks-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 46vw;
+  justify-content: flex-end;
+}
+
+.perk-badge {
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.perk-badge b {
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Баннер волны */
+.banner {
+  position: absolute;
+  z-index: 13;
+  left: 50%;
+  top: 26%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.banner.show {
+  animation: bannerIn 1.9s ease-out forwards;
+}
+
+.banner .big {
+  font-size: clamp(26px, 6vw, 52px);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fff, var(--cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 22px rgba(53, 230, 255, 0.65));
+}
+
+.banner .small {
+  margin-top: 4px;
+  font-size: clamp(11px, 2.4vw, 15px);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.banner.boss .big {
+  background: linear-gradient(180deg, #fff, var(--magenta));
+  filter: drop-shadow(0 0 26px rgba(255, 62, 165, 0.75));
+}
+
+@keyframes bannerIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+  16% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+  26% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  74% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -62%) scale(1);
+  }
+}
+
+/* Всплывающие цифры урона: DOM-элементы, позиция проецируется из 3D */
+.float-num {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: 800;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+  will-change: transform, opacity;
+  white-space: nowrap;
+}
+
+.float-num.crit {
+  font-size: 21px;
+  color: var(--amber);
+}
+
+/* Виньетки урона / лечения */
+.vignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.vignette.hurt {
+  background: radial-gradient(ellipse at center, rgba(255, 0, 60, 0) 42%, rgba(255, 20, 70, 0.55) 100%);
+}
+
+.vignette.heal {
+  background: radial-gradient(ellipse at center, rgba(0, 255, 170, 0) 45%, rgba(60, 255, 170, 0.4) 100%);
+}
+
+.vignette.show {
+  animation: vignettePulse 0.42s ease-out;
+}
+
+@keyframes vignettePulse {
+  0% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Джойстик ---------- */
+
+.stick-zone {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  z-index: 8;
+}
+
+.stick {
+  position: absolute;
+  z-index: 9;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  border: 2px solid rgba(120, 190, 255, 0.28);
+  background: radial-gradient(circle, rgba(20, 30, 60, 0.5), rgba(8, 12, 26, 0.28));
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.stick.on {
+  opacity: 1;
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(120, 230, 255, 0.95), rgba(50, 120, 220, 0.6));
+  box-shadow: 0 0 22px rgba(53, 230, 255, 0.55);
+  transform: translate(-50%, -50%);
+}
+
+/* ---------- Экраны ---------- */
+
+.screen {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  place-items: center;
+  padding: calc(18px + var(--safe-top)) 18px calc(18px + var(--safe-bottom));
+  background: radial-gradient(ellipse at 50% 40%, rgba(20, 26, 60, 0.72), rgba(3, 4, 12, 0.94));
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.screen.show {
+  display: grid;
+}
+
+.card {
+  width: min(560px, 100%);
+  text-align: center;
+}
+
+.logo {
+  font-size: clamp(34px, 9vw, 74px);
+  font-weight: 900;
+  line-height: 0.98;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #ffffff 8%, var(--cyan) 46%, var(--magenta) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 6px 34px rgba(53, 230, 255, 0.4));
+}
+
+.logo-sub {
+  margin-top: 8px;
+  font-size: clamp(10px, 2.6vw, 13px);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 30px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 220, 255, 0.4);
+  background: linear-gradient(180deg, rgba(53, 230, 255, 0.24), rgba(53, 140, 255, 0.1));
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 8px 30px rgba(20, 140, 255, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+}
+
+.btn:hover {
+  box-shadow: 0 10px 40px rgba(53, 230, 255, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn.ghost {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line);
+  box-shadow: none;
+  font-size: 13px;
+  padding: 11px 20px;
+}
+
+.btn.magenta {
+  border-color: rgba(255, 110, 190, 0.45);
+  background: linear-gradient(180deg, rgba(255, 62, 165, 0.28), rgba(160, 60, 255, 0.12));
+  box-shadow: 0 8px 30px rgba(255, 62, 165, 0.3);
+}
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 22px;
+}
+
+.hint {
+  margin-top: 20px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.hint kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+}
+
+/* Выбор перка */
+.perk-title {
+  font-size: clamp(20px, 5vw, 30px);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.perk-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.perk-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.perk-card {
+  pointer-events: auto;
+  padding: 16px 12px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(30, 40, 80, 0.72), rgba(10, 14, 30, 0.72));
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.12s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  font-family: inherit;
+  color: var(--text);
+}
+
+.perk-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(120, 230, 255, 0.55);
+  box-shadow: 0 14px 36px rgba(30, 150, 255, 0.24);
+}
+
+.perk-card:active {
+  transform: scale(0.97);
+}
+
+.perk-card .pic {
+  font-size: 30px;
+  line-height: 1;
+  filter: drop-shadow(0 0 14px currentColor);
+}
+
+.perk-card .nm {
+  margin-top: 10px;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.perk-card .ds {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.perk-card .lv {
+  margin-top: 9px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+/* Итоги забега */
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 20px;
+  text-align: left;
+}
+
+.result-item {
+  padding: 10px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.result-item .k {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.result-item .v {
+  margin-top: 3px;
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-tag {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 194, 61, 0.5);
+  background: rgba(255, 194, 61, 0.13);
+  color: var(--amber);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.best-line {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Загрузка */
+#boot {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  transition: opacity 0.4s ease;
+}
+
+#boot.hide {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-inner {
+  text-align: center;
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  border: 3px solid rgba(120, 190, 255, 0.18);
+  border-top-color: var(--cyan);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.boot-text {
+  font-size: 11px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------- Адаптив ---------- */
+
+@media (max-width: 720px) {
+  .hud-left {
+    min-width: 132px;
+  }
+  .slot {
+    width: 46px;
+    height: 46px;
+  }
+  .slot .glyph {
+    font-size: 19px;
+  }
+  .perks-row {
+    display: none;
+  }
+  .perk-cards {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .perk-card {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    grid-template-rows: auto auto;
+    gap: 0 12px;
+    text-align: left;
+    padding: 12px 14px;
+    align-items: center;
+  }
+  .perk-card .pic {
+    grid-row: 1 / span 2;
+    font-size: 26px;
+  }
+  .perk-card .nm {
+    margin-top: 0;
+  }
+  .perk-card .ds {
+    margin-top: 2px;
+  }
+  .perk-card .lv {
+    display: none;
+  }
+  .result-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Короткий экран в альбоме на телефоне — уплотняем HUD */
+@media (max-height: 460px) {
+  .hud {
+    padding-top: calc(6px + var(--safe-top));
+    padding-bottom: calc(6px + var(--safe-bottom));
+  }
+  .slot {
+    width: 42px;
+    height: 42px;
+  }
+  .banner {
+    top: 22%;
+  }
+}
