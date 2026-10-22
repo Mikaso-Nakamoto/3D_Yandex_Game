@@ -19,7 +19,7 @@
  * Запуск: npm run audit
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -140,6 +140,45 @@ for (const [name, owner] of Object.entries(SUBSYSTEMS)) {
   }
 }
 
+/* ---------- 3. CSS-классы: JS ↔ style.css ---------- */
+
+/**
+ * Классы, которые JS навешивает на элементы, но которых нет в стилях,
+ * ломают интерфейс МОЛЧА: ничего не падает, просто HUD или экран едет.
+ * Без браузера это не увидеть, поэтому сверяем statically.
+ */
+const cssPath = join(SRC, 'style.css');
+const cssClasses = new Set();
+if (existsSync(cssPath)) {
+  for (const m of read(cssPath).matchAll(/\.(-?[A-Za-z_][\w-]*)/g)) cssClasses.add(m[1]);
+}
+
+const usedClasses = new Map(); // класс -> файлы, где используется
+function noteClass(className, file) {
+  if (!className) return;
+  for (const c of className.split(/\s+/)) {
+    if (!c) continue;
+    if (!usedClasses.has(c)) usedClasses.set(c, new Set());
+    usedClasses.get(c).add(rel(file));
+  }
+}
+
+for (const file of files) {
+  const src = read(file);
+  // _el('div', 'a b', ...) / createElement + className = '...'
+  for (const m of src.matchAll(/_el\(\s*'[^']*'\s*,\s*'([^']*)'/g)) noteClass(m[1], file);
+  for (const m of src.matchAll(/class(?:Name)?\s*=\s*'([^']*)'/g)) noteClass(m[1], file);
+  for (const m of src.matchAll(/classList\.(?:add|remove|toggle)\(\s*'([^']*)'/g)) noteClass(m[1], file);
+  // class="..." внутри innerHTML-шаблонов
+  for (const m of src.matchAll(/class="([^"]+)"/g)) noteClass(m[1], file);
+}
+
+for (const [cls, where] of usedClasses) {
+  if (!cssClasses.has(cls)) {
+    problems.push({ file: [...where].join(', '), line: 0, expr: `CSS-класс .${cls}` });
+  }
+}
+
 /* ---------- Отчёт ---------- */
 
 console.log('');
@@ -150,6 +189,7 @@ console.log(`  Модулей в src/:            ${files.length}`);
 console.log(`  Game предоставляет:        ${gameApi.size} свойств и методов`);
 console.log(`  Подсистем проверено:       ${Object.keys(SUBSYSTEMS).length}`);
 console.log(`  Обращений сверено:         ${refs}`);
+console.log(`  CSS-классов сверено:       ${usedClasses.size} (в стилях ${cssClasses.size})`);
 console.log('─'.repeat(62));
 
 if (problems.length) {
