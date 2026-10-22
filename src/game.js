@@ -103,11 +103,15 @@ class CameraRig {
 }
 
 export class Game {
-  constructor({ canvas, uiRoot, fxLayer, adapter }) {
+  constructor({ canvas, uiRoot, fxLayer, adapter, createRenderer }) {
     this.canvas = canvas;
     this.uiRoot = uiRoot;
     this.fxLayer = fxLayer;
     this.adapter = adapter;
+    // Seam для тестов: WebGL в Node недоступен, поэтому headless-симуляция
+    // (scripts/runtime-sim.mjs) подставляет свой рендерер с настоящей
+    // THREE.Scene. В браузере параметр не передаётся и используется Renderer.
+    this._createRenderer = createRenderer ?? null;
 
     this.tier = detectTier();
     this.profile = profileFor(this.tier);
@@ -139,7 +143,9 @@ export class Game {
   }
 
   _init() {
-    this.renderer = new Renderer(this.canvas, this.profile);
+    this.renderer = this._createRenderer
+      ? this._createRenderer(this.canvas, this.profile)
+      : new Renderer(this.canvas, this.profile);
     this.scene = this.renderer.scene;
     this.camera = this.renderer.camera;
     this.cameraRig = new CameraRig(this.camera);
