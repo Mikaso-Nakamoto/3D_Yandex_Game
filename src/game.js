@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 import { Renderer } from './world/renderer.js';
 import { Arena } from './world/arena.js';
-import { Player } from './entities/player.js';
+import { Player, BASE_HP } from './entities/player.js';
 import { Enemies } from './entities/enemy.js';
 import { Projectiles } from './entities/projectile.js';
 import { Pickups } from './entities/pickup.js';
@@ -554,8 +554,9 @@ export class Game {
       this.levels[perk.id] = (this.levels[perk.id] ?? 0) + 1;
       this.perksTaken++;
       if (perk.id === 'hp') {
-        // maxHpBonus уже увеличен в apply; синхронизируем текущий максимум.
-        this.player.maxHp = 100 + this.stats.maxHpBonus;
+        // apply() уже увеличил maxHpBonus; пересчитываем максимум из него,
+        // а не хардкодим базовое значение — иначе расходится с BASE_HP.
+        this.player.maxHp = BASE_HP + this.stats.maxHpBonus;
       }
     }
 
