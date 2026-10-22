@@ -33,9 +33,27 @@ const STATE = {
   OVER: 'over',
 };
 
+/**
+ * Опорная дистанция от камеры до игрока, для которой подобрана плотность
+ * тумана в профилях качества (см. core/quality.js).
+ *
+ * Туман в three.js считается как 1 − exp(−(density · depth)²), то есть его
+ * сила зависит от РАССТОЯНИЯ до камеры. А расстояние у нас плавает от ~35
+ * (альбом) до ~47 (портрет), потому что в портрете камера выше и дальше.
+ * Значит одна абсолютная плотность физически не может быть правильной для
+ * всех разрезов: на альбоме ещё терпимо, а на телефоне в портрете герой
+ * уходит в туман на 60–80% и игра превращается в мутную кашу.
+ *
+ * Поэтому плотность нормализуется на фактическую дистанцию — вклад тумана
+ * в изображение героя становится одинаковым на любом экране.
+ */
+const REF_FOG_DIST = 35;
+
 class CameraRig {
-  constructor(camera) {
+  constructor(camera, fog = null, profile = null) {
     this.camera = camera;
+    this.fog = fog;
+    this.profile = profile;
     this.billboard = new THREE.Quaternion();
     this.target = new THREE.Vector3();
     this.desired = new THREE.Vector3(0, 24, 17);
@@ -82,6 +100,13 @@ class CameraRig {
     if (this.camera.fov !== fov) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
+    }
+
+    // Нормализация тумана на дистанцию: иначе в портрете, где камера дальше,
+    // герой тонет в пелене, а в альбоме остаётся чистым.
+    if (this.fog && this.profile) {
+      const dist = this.desired.length() || REF_FOG_DIST;
+      this.fog.density = this.profile.fogDensity * (REF_FOG_DIST / dist);
     }
   }
 
@@ -178,7 +203,7 @@ export class Game {
       : new Renderer(this.canvas, this.profile);
     this.scene = this.renderer.scene;
     this.camera = this.renderer.camera;
-    this.cameraRig = new CameraRig(this.camera);
+    this.cameraRig = new CameraRig(this.camera, this.scene.fog, this.profile);
 
     this.audio = new Audio();
     this.input = new Input(this.canvas, this.uiRoot);

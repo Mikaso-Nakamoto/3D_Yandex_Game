@@ -330,6 +330,12 @@ let rafCallback = null;
 
 function createFakeRenderer(_canvas, profile) {
   const scene = new THREE.Scene();
+  // Зеркалим настройку сцены из настоящего Renderer: фон и туман.
+  // Без FogExp2 CameraRig молча пропускал нормализацию плотности
+  // (ветка `if (this.fog && this.profile)`), и проверка тумана теряла смысл.
+  scene.background = new THREE.Color(0x05060f);
+  scene.fog = new THREE.FogExp2(0x070a1a, profile.fogDensity);
+
   const camera = new THREE.PerspectiveCamera(52, 1280 / 720, 0.5, 220);
   camera.position.set(0, 25, 18);
   camera.lookAt(0, 0, 0);
@@ -372,6 +378,7 @@ function createFakeRenderer(_canvas, profile) {
 const { Game } = await import('../src/game.js');
 const { WebAdapter } = await import('../src/platform/web.js');
 const { MAX_TIER, WEAPONS } = await import('../src/systems/weapons.js');
+const { profileFor, TIER } = await import('../src/core/quality.js');
 
 let failures = 0;
 let checks = 0;
@@ -881,6 +888,141 @@ for (const [label, w, h] of VIEWPORTS) {
 }
 
 // Возвращаем рабочий viewport.
+fakeWindow.innerWidth = 1280;
+fakeWindow.innerHeight = 720;
+game.renderer._onResize();
+game.cameraRig.snap(game.player);
+
+section('12. Освещённость и туман (видимость сцены)');
+
+/**
+ * Сцена может быть логически правильной, но выглядеть чёрной или затянутой
+ * туманом — ни симуляция логики, ни аудит API этого не ловят, а без браузера
+ * глазами не увидеть. Поэтому проверяем аналитически.
+ *
+ * FogExp2 в three.js: fogFactor = 1 − exp(−(density · depth)²),
+ * где depth — расстояние от камеры до фрагмента.
+ *
+ * Критично: дистанция до камеры сильно зависит от ориентации (в портрете
+ * камера выше и дальше), поэтому ОДНА фиксированная плотность тумана не может
+ * быть правильной для всех разрезов. Это и было багом — после отъезда камеры
+ * в портрете герой оказался затянут туманом почти полностью.
+ */
+
+const FOG_AT = (density, depth) => 1 - Math.exp(-Math.pow(density * depth, 2));
+
+// Плотности берём ИЗ НАСТОЯЩИХ профилей качества, а не хардкодим здесь:
+// продублированные константы однажды уже разошлись с кодом (OWN_TYPE_BIAS
+// в проверке дропа), и тест начал проверять выдуманную игру.
+const TIERS = [
+  ['LOW', profileFor(TIER.LOW).fogDensity],
+  ['MID', profileFor(TIER.MID).fogDensity],
+  ['HIGH', profileFor(TIER.HIGH).fogDensity],
+];
+
+// Интегральная яркость сцены: без света всё чёрное независимо от тумана.
+let lightIntensity = 0;
+let lightCount = 0;
+game.scene.traverse((o) => {
+  if (o.isLight) {
+    lightCount++;
+    lightIntensity += o.intensity ?? 0;
+  }
+});
+ok(lightCount >= 2, 'в сцене есть источники света', `${lightCount}`);
+ok(lightIntensity > 0.5, 'суммарная интенсивность света ненулевая', lightIntensity.toFixed(2));
+
+// Граф сцены: пол, игрок и стены должны присутствовать и быть видимыми.
+let meshes = 0;
+let invisibleMeshes = 0;
+game.scene.traverse((o) => {
+  if (o.isMesh) {
+    meshes++;
+    if (!o.visible) invisibleMeshes++;
+  }
+});
+ok(meshes >= 5, 'в сцене есть геометрия (пол, стены, декор)', `${meshes} мешей`);
+ok(invisibleMeshes < meshes * 0.9, 'сцена не состоит почти целиком из невидимых мешей', `${invisibleMeshes}/${meshes}`);
+
+// Видимость героя имеет смысл проверять только во время боя: в меню
+// _clearRun() скрывает его намеренно, чтобы не мешать облёту арены.
+await ensurePlaying();
+ok(game.player.group.visible, 'группа игрока видима во время забега');
+
+const fogByTier = new Map();
+console.log('  разрез              | дист. | туман на игроке | туман на краю обзора');
+for (const [label, w, h] of VIEWPORTS) {
+  fakeWindow.innerWidth = w;
+  fakeWindow.innerHeight = h;
+  game.renderer._onResize();
+  game.player.x = 0;
+  game.player.z = 0;
+  game.cameraRig.snap(game.player);
+  game.camera.updateMatrixWorld(true);
+
+  const dist = game.camera.position.distanceTo(
+    new THREE.Vector3(game.player.x, 1.0, game.player.z),
+  );
+  // Дальний край игрового пространства: видимый радиус от игрока.
+  const vis = measureVisibleRadius(game.player.x, game.player.z);
+  const farDepth = dist + vis.max * 0.6;
+
+  for (const [tierName, baseDensity] of TIERS) {
+    // Подставляем плотность профиля и даём настоящему CameraRig применить
+    // свою нормализацию — измеряем результат, а не собственную арифметику.
+    game.profile.fogDensity = baseDensity;
+    game.cameraRig.snap(game.player);
+    const density = game.scene.fog.density;
+
+    const fogPlayer = FOG_AT(density, dist);
+    const fogFar = FOG_AT(density, farDepth);
+
+    // Точную формулу плотности не сверяем: rig нормализует на desired.length(),
+    // а не на дистанцию до точки на высоте героя, и это деталь реализации.
+    // Проверяем инвариант, ради которого нормализация введена: один и тот же
+    // профиль качества должен давать ОДИНАКОВЫЙ вклад тумана в изображение
+    // героя на любом разрезе экрана.
+    if (!fogByTier.has(tierName)) fogByTier.set(tierName, []);
+    fogByTier.get(tierName).push({ label, fogPlayer, density, baseDensity });
+
+    // Герой обязан оставаться читаемым: не более ~18% тумана.
+    ok(
+      fogPlayer <= 0.18,
+      `${label} / ${tierName}: игрок не затянут туманом`,
+      `${(fogPlayer * 100).toFixed(0)}% при дистанции ${dist.toFixed(1)}`,
+    );
+    // Но глубина должна читаться: на краю обзора туман заметнее.
+    ok(
+      fogFar > fogPlayer + 0.05,
+      `${label} / ${tierName}: туман даёт глубину, а не плоскую пелену`,
+      `игрок ${(fogPlayer * 100).toFixed(0)}% → край ${(fogFar * 100).toFixed(0)}%`,
+    );
+    ok(fogFar <= 0.85, `${label} / ${tierName}: дальний край не исчезает в тумане`, `${(fogFar * 100).toFixed(0)}%`);
+
+    if (tierName === 'LOW' || tierName === 'HIGH') {
+      console.log(
+        `  ${label.padEnd(19)} | ${dist.toFixed(1).padStart(5)} | ` +
+          `${(fogPlayer * 100).toFixed(0).padStart(6)}% (${tierName})   | ${(fogFar * 100).toFixed(0).padStart(6)}%`,
+      );
+    }
+  }
+}
+
+// Инвариант нормализации: разброс вклада тумана между разрезами экрана
+// должен быть пренебрежимым. До нормализации разброс составлял 41%→82%.
+for (const [tierName, rows] of fogByTier) {
+  const values = rows.map((r) => r.fogPlayer);
+  const spread = Math.max(...values) - Math.min(...values);
+  ok(
+    spread < 0.02,
+    `туман на герое одинаков на всех разрезах (${tierName})`,
+    `разброс ${(spread * 100).toFixed(1)} п.п.: ` + rows.map((r) => `${(r.fogPlayer * 100).toFixed(0)}%`).join(' / '),
+  );
+  // Нормализация действительно применялась, а не была no-op.
+  const changed = rows.filter((r) => Math.abs(r.density - r.baseDensity) > 1e-9);
+  ok(changed.length === rows.length, `CameraRig пересчитывает плотность (${tierName})`, `${changed.length}/${rows.length}`);
+}
+
 fakeWindow.innerWidth = 1280;
 fakeWindow.innerHeight = 720;
 game.renderer._onResize();

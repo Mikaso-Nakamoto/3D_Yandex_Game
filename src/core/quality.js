@@ -31,7 +31,21 @@ export function detectTier() {
   return TIER.HIGH;
 }
 
-/** Настройки под уровень устройства. */
+/**
+ * Настройки под уровень устройства.
+ *
+ * ВАЖНО про fogDensity: это НЕ абсолютная плотность, а плотность при опорной
+ * дистанции до камеры REF_FOG_DIST = 35 (см. game.js). CameraRig каждый кадр
+ * пересчитывает её как `fogDensity · 35 / фактическая_дистанция`, потому что
+ * в three.js туман считается как 1 − exp(−(density · depth)²) и его сила
+ * зависит от расстояния. А расстояние у нас плавает от ~35 (альбом) до ~47
+ * (портрет) — в портрете камера выше и дальше.
+ *
+ * Без нормализации одно число не могло быть правильным для всех экранов:
+ * на альбоме герой был затянут на 41–61%, а на телефоне в портрете — на
+ * 62–82%, то есть основная аудитория Яндекс Игр почти не видела собственного
+ * персонажа. Сейчас вклад тумана в изображение героя одинаков на любом разрезе.
+ */
 export function profileFor(tier) {
   switch (tier) {
     case TIER.LOW:
@@ -43,7 +57,7 @@ export function profileFor(tier) {
         maxProjectiles: 130,
         particles: 260,
         lights: false,
-        fogDensity: 0.028,
+        fogDensity: 0.0118,
         gridDetail: 0.5,
       };
     case TIER.MID:
@@ -56,7 +70,7 @@ export function profileFor(tier) {
         maxProjectiles: 200,
         particles: 480,
         lights: true,
-        fogDensity: 0.024,
+        fogDensity: 0.0105,
         gridDetail: 1,
       };
     default:
@@ -69,7 +83,7 @@ export function profileFor(tier) {
         maxProjectiles: 300,
         particles: 760,
         lights: true,
-        fogDensity: 0.021,
+        fogDensity: 0.0092,
         gridDetail: 1,
       };
   }
