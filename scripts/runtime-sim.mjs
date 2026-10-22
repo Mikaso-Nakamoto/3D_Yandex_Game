@@ -354,6 +354,15 @@ function createFakeRenderer(_canvas, profile) {
     disableBloom() {},
     downgradePixelRatio() {},
     resize() {},
+    // Зеркалит Renderer._onResize: aspect и проекция — зона рендерера,
+    // а FOV и геометрию кадра задаёт CameraRig._computeOffset().
+    _onResize() {
+      const w = fakeWindow.innerWidth;
+      const h = fakeWindow.innerHeight;
+      if (!w || !h) return;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    },
     dispose() {},
   };
 }
@@ -752,6 +761,130 @@ ok(game.state === 'menu', 'возврат в меню', game.state);
 ok(game.enemies.aliveCount === 0, 'в меню арена пуста');
 await step(2);
 ok(violations.nan === 0, 'нет NaN в меню');
+
+section('11. Композиция кадра (математика проекции)');
+
+/**
+ * Реальная проверка того, что игрок видит арену, а не её угол.
+ *
+ * Проекция считается настоящей математикой three.js — WebGL для этого не
+ * нужен. Главный риск здесь игровой, а не технический: враги спавнятся
+ * в 20–22 единицах от игрока (arena.edgeSpawnPoint), и если видимый радиус
+ * меньше, игрок получает урон «из ниоткуда». Несправедливые смерти —
+ * самая частая причина низкого retention в survivor-играх.
+ */
+
+const _projV = new THREE.Vector3();
+
+function ndcOf(x, y, z) {
+  _projV.set(x, y, z).project(game.camera);
+  return { x: _projV.x, y: _projV.y, z: _projV.z };
+}
+
+function onScreen(p) {
+  return p.x >= -1 && p.x <= 1 && p.y >= -1 && p.y <= 1 && p.z < 1;
+}
+
+/** Максимальная дистанция по земле от игрока, ещё попадающая в кадр, по 8 направлениям. */
+function measureVisibleRadius(px, pz) {
+  const dirs = [];
+  for (let i = 0; i < 8; i++) dirs.push((i / 8) * Math.PI * 2);
+  const perDir = dirs.map((a) => {
+    const dx = Math.cos(a);
+    const dz = Math.sin(a);
+    let lastVisible = 0;
+    // Шагаем наружу с шагом 0.5 и запоминаем последнюю видимую точку.
+    for (let d = 0; d <= 60; d += 0.5) {
+      const p = ndcOf(px + dx * d, 0.9, pz + dz * d);
+      if (onScreen(p)) lastVisible = d;
+    }
+    return { angle: a, radius: lastVisible };
+  });
+  return {
+    perDir,
+    min: Math.min(...perDir.map((d) => d.radius)),
+    max: Math.max(...perDir.map((d) => d.radius)),
+  };
+}
+
+const VIEWPORTS = [
+  ['десктоп 1920×1080', 1920, 1080],
+  ['ноутбук 1440×900', 1440, 900],
+  ['ультраширокий 2560×1080', 2560, 1080],
+  ['планшет 820×1180', 820, 1180],
+  ['телефон портрет 390×844', 390, 844],
+  ['телефон альбом 844×390', 844, 390],
+];
+
+// SPAWN_DIST должен совпадать с минимальной дистанцией в arena.edgeSpawnPoint.
+const SPAWN_DIST = 20;
+const REACTION_MIN = 13.0; // ≈1.0 c реакции при скорости бегуна 13.8 ед/с
+
+console.log('  экран                     | игрок NDC     | видимый радиус (мин/макс) | реакция');
+for (const [label, w, h] of VIEWPORTS) {
+  fakeWindow.innerWidth = w;
+  fakeWindow.innerHeight = h;
+  // Идём настоящим путём ресайза. Задавать FOV вручную здесь нельзя:
+  // иначе тест замаскировал бы расхождение между Renderer и CameraRig,
+  // которые оба претендовали на владение композицией кадра.
+  game.renderer._onResize();
+
+  // Ставим игрока в типичную позицию и обновляем настоящим ригом камеры.
+  game.player.x = 4;
+  game.player.z = -3;
+  game.cameraRig.snap(game.player); // сошедшаяся позиция, без переходного damp()
+  game.camera.updateMatrixWorld(true);
+
+  ok(
+    game.camera.fov === (w / h < 1 ? 66 : 50),
+    `${label}: FOV выставлен CameraRig (портрет 66 / альбом 50)`,
+    `fov ${game.camera.fov}`,
+  );
+
+  const me = ndcOf(game.player.x, 1.0, game.player.z);
+  const vis = measureVisibleRadius(game.player.x, game.player.z);
+
+  ok(onScreen(me), `${label}: игрок в кадре`, `NDC ${me.x.toFixed(2)},${me.y.toFixed(2)}`);
+  ok(Math.abs(me.x) < 0.62, `${label}: игрок не прижат к краю по X`, me.x.toFixed(2));
+  ok(Math.abs(me.y) < 0.86, `${label}: игрок не прижат к краю по Y`, me.y.toFixed(2));
+  ok(game.camera.position.y > 2, `${label}: камера не уходит под землю`, game.camera.position.y.toFixed(1));
+
+  ok(
+    vis.min >= REACTION_MIN,
+    `${label}: видно минимум ${REACTION_MIN} ед. во все стороны (реакция на спавн в ${SPAWN_DIST})`,
+    `мин ${vis.min.toFixed(1)}`,
+  );
+  ok(vis.max <= 200, `${label}: дальность обзора конечна`, vis.max.toFixed(1));
+
+  console.log(
+    `  ${label.padEnd(27)} | ${me.x.toFixed(2)},${me.y.toFixed(2)}      | ` +
+      `${vis.min.toFixed(1).padStart(5)} / ${vis.max.toFixed(1).padStart(5)}          | ` +
+      `${vis.min >= SPAWN_DIST ? 'спавн виден' : `спавн за кадром, видно ${vis.min.toFixed(0)} ед.`}`,
+  );
+  console.log(`      по направлениям: ${vis.perDir.map((d) => d.radius.toFixed(0)).join(' ')}`);
+}
+
+// Враг на дистанции спавна должен быть виден хотя бы в портрете и альбоме,
+// иначе игрок реагирует только на уже подошедшего противника.
+for (const [label, w, h] of VIEWPORTS) {
+  fakeWindow.innerWidth = w;
+  fakeWindow.innerHeight = h;
+  game.renderer._onResize();
+  game.player.x = 0;
+  game.player.z = 0;
+  game.cameraRig.snap(game.player); // сошедшаяся позиция, без переходного damp()
+  game.camera.updateMatrixWorld(true);
+
+  const foe = ndcOf(0, 1.2, -SPAWN_DIST); // враг впереди на дистанции спавна
+  const foeBehind = ndcOf(0, 1.2, SPAWN_DIST); // враг позади
+  ok(onScreen(foe) || onScreen(foeBehind), `${label}: хотя бы один враг на дистанции спавна виден`);
+}
+
+// Возвращаем рабочий viewport.
+fakeWindow.innerWidth = 1280;
+fakeWindow.innerHeight = 720;
+game.renderer._onResize();
+game.cameraRig.snap(game.player);
 
 /* ==================== Итог ==================== */
 

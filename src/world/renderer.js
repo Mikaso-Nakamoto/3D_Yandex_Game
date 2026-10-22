@@ -78,9 +78,10 @@ export class Renderer {
     const w = window.innerWidth;
     const h = window.innerHeight;
     if (!w || !h) return;
+    // Здесь — только aspect и размер вьюпорта. FOV, высоту и отлёт камеры
+    // задаёт CameraRig._computeOffset(): композиция кадра должна настраиваться
+    // в одном месте, иначе два файла со временем начинают спорить.
     this.camera.aspect = w / h;
-    // На очень узких экранах расширяем FOV, чтобы игрок всегда видел врагов вокруг.
-    this.camera.fov = w / h < 1 ? 62 : 52;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
     if (this.composer) this.composer.setSize(w, h);
