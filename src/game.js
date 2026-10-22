@@ -7,15 +7,15 @@ import { Enemies } from './entities/enemy.js';
 import { Projectiles } from './entities/projectile.js';
 import { Pickups } from './entities/pickup.js';
 import { Effects } from './entities/effects.js';
-import { Weapons, WEAPONS, MAX_TIER } from './systems/weapons.js';
-import { Waves, WAVE_STATE } from './systems/waves.js';
+import { Weapons, WEAPONS } from './systems/weapons.js';
+import { Waves } from './systems/waves.js';
 import { defaultStats, rollChoices, perkById } from './systems/perks.js';
 import { Input } from './core/input.js';
 import { Audio } from './core/audio.js';
 import { Hud } from './ui/hud.js';
 import { Screens } from './ui/screens.js';
-import { SpatialGrid, clamp, damp, fmt } from './core/utils.js';
-import { detectTier, profileFor, AutoQuality, TIER } from './core/quality.js';
+import { SpatialGrid, clamp, damp } from './core/utils.js';
+import { detectTier, profileFor, AutoQuality } from './core/quality.js';
 
 /**
  * Игра целиком: состояние, порядок систем, камера, прогресс и сохранение.
@@ -709,5 +709,3 @@ export class Game {
     return this.magnetBoost.mul;
   }
 }
-
-export { STATE, MAX_TIER, fmt, WAVE_STATE, TIER, clamp };

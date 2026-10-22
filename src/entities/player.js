@@ -290,4 +290,4 @@ export class Player {
   }
 }
 
-export { BASE_HP, BASE_MAGNET, BASE_SPEED };
+export { BASE_HP };

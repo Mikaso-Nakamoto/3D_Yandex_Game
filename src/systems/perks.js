@@ -1,4 +1,3 @@
-import { sample } from '../core/utils.js';
 import { MAX_SLOTS } from './weapons.js';
 
 /**
@@ -205,5 +204,3 @@ export function rollChoices(levels, weapons) {
   }
   return chosen;
 }
-
-export { sample };
