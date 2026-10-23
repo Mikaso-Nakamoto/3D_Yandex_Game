@@ -186,19 +186,22 @@ export class World {
   }
 
   #buildDragLine() {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-    const mat = new THREE.LineBasicMaterial({
-      color: 0xf0d38a,
-      transparent: true,
-      opacity: 0.95,
-      depthTest: false,
-    });
-    this.dragLine = new THREE.Line(geo, mat);
-    this.dragLine.visible = false;
-    this.dragLine.renderOrder = 10;
-    this.dragLine.frustumCulled = false;
-    this.scene.add(this.dragLine);
+    // Arrows live in the 2D overlay (src/render/arrows.js); nothing 3D to build here.
+    this.previewArrowData = null;
+  }
+
+  showPreviewArrow(fromId, point, valid = true) {
+    this.previewArrowData = { from: fromId, point, valid };
+    this.callbacks.onArrowPreview?.(this.previewArrowData);
+  }
+
+  hidePreviewArrow() {
+    this.previewArrowData = null;
+    this.callbacks.onArrowPreview?.(null);
+  }
+
+  clearMarchArrows() {
+    // Kept for API symmetry: march arrows are driven by the ArrowLayer.
   }
 
   // ---------------------------------------------------------------- colors
@@ -499,7 +502,7 @@ export class World {
     this.dragStartPoint = null;
     this.dragHover = null;
     this.validTargets = new Set();
-    this.dragLine.visible = false;
+    this.hidePreviewArrow();
     this.callbacks.onDragCancel?.();
     this.#refreshGlow();
     if (targetId) this.#setHover(targetId);
@@ -539,12 +542,8 @@ export class World {
       this.raycaster.ray.intersectPlane(plane, hit);
       if (hit) end = { x: hit.x, z: hit.z };
     }
-    const pos = this.dragLine.geometry.attributes.position;
-    pos.setXYZ(0, province.centroid[0], 0.06, province.centroid[1]);
-    pos.setXYZ(1, end.x, 0.06, end.z);
-    pos.needsUpdate = true;
-    this.dragLine.geometry.computeBoundingSphere();
-    this.dragLine.visible = true;
+    const valid = overId ? this.validTargets.has(overId) : true;
+    this.showPreviewArrow(this.dragFrom, [end.x, end.z], valid);
   }
 
   // ---------------------------------------------------------------- frame

@@ -21,6 +21,7 @@
     <div id="app">
       <canvas id="view"></canvas>
       <div class="vignette"></div>
+      <canvas id="arrows" class="arrow-layer"></canvas>
       <div id="labels" class="label-layer"></div>
       <div id="armies" class="army-layer"></div>
       <div id="toasts" class="toasts"></div>
@@ -47,24 +48,34 @@
       </section>
 
       <!-- Выбор державы -->
-      <section id="screen-nation" class="screen hidden">
-        <aside class="panel nation-panel">
-          <div class="panel-head">
+      <section id="screen-nation" class="screen nation-screen hidden">
+        <div class="select-shell">
+          <header class="select-head">
             <button id="btn-back" class="btn-icon" title="Назад" data-icon="arrowLeft"></button>
-            <div>
-              <div class="eyebrow" id="nation-era">1815</div>
-              <h2 id="nation-scenario">Венский концерт</h2>
+            <div class="select-heading">
+              <div class="eyebrow">
+                <span id="nation-era">1815</span>
+                <span class="sep">·</span>
+                <span id="nation-scenario">Венский концерт</span>
+              </div>
+              <h2>Выберите державу</h2>
             </div>
+            <ol class="steps" aria-label="Этапы">
+              <li class="done">Эпоха</li>
+              <li class="active">Держава</li>
+              <li>Война</li>
+            </ol>
+          </header>
+          <div class="select-body">
+            <div class="nation-grid" id="nation-list" role="listbox" aria-label="Державы"></div>
+            <aside class="nation-detail panel" id="nation-detail"></aside>
           </div>
-          <p class="panel-hint">Выберите державу на карте или в списке</p>
-          <div id="nation-list" class="nation-list"></div>
-          <div class="doctrine-block">
-            <div class="eyebrow">Доктрина правления</div>
-            <div id="doctrine-list" class="doctrine-list"></div>
-          </div>
-          <button id="btn-start" class="btn primary" disabled>Начать правление</button>
-        </aside>
-        <div class="map-hint">Колесо — зум · Перетаскивание — панорама</div>
+          <footer class="select-foot">
+            <span id="nation-count">11 держав</span>
+            <span class="sep">·</span>
+            <span>Нажмите на державу на карте или в списке</span>
+          </footer>
+        </div>
       </section>
 
       <!-- Партия -->
@@ -79,16 +90,26 @@
             <div class="progress-bar"><div id="hud-progress-fill"></div></div>
             <span id="hud-progress-text">0/41</span>
           </div>
-          <div class="chip resource gold" title="Казна">
+          <div class="chip resource gold" title="Казна: тратится на улучшения и приказы">
             <span class="ico" data-icon="gold"></span>
-            <span id="hud-gold">0</span>
-            <span class="rate" id="hud-income">+0.0</span>
+            <span class="chip-text">
+              <span class="rate" id="hud-income">+0.0/с</span>
+              <span id="hud-gold">0</span>
+            </span>
+            <span class="chip-label">казна</span>
           </div>
-          <div class="chip resource manpower" title="Рекруты">
+          <div class="chip resource manpower" title="Рекруты: из них пополняются гарнизоны">
             <span class="ico" data-icon="manpower"></span>
-            <span id="hud-manpower">0</span>
-            <span class="rate" id="hud-mp-rate">+0.0</span>
+            <span class="chip-text">
+              <span class="rate" id="hud-mp-rate">+0.00/с</span>
+              <span id="hud-manpower">0</span>
+            </span>
+            <span class="chip-label">рекруты</span>
           </div>
+          <button id="btn-rankings" class="chip chip-button" title="Сводка по державам">
+            <span class="ico" data-icon="list"></span>
+            <span class="chip-label-inline">Державы</span>
+          </button>
           <div class="speed-group" id="speed-group">
             <button data-speed="0" class="speed-btn" title="Пауза (Пробел)" data-icon="pause"></button>
             <button data-speed="1" class="speed-btn active">1×</button>
@@ -152,6 +173,19 @@
           <span><kbd>Esc</kbd> меню</span>
         </div>
         <button class="btn primary" data-close="modal-howto">Понятно</button>
+      </div>
+    </div>
+
+    <!-- Сводка по державам -->
+    <div id="modal-rankings" class="modal hidden">
+      <div class="modal-card wide">
+        <button class="modal-close" data-close="modal-rankings">✕</button>
+        <div class="eyebrow">Обстановка</div>
+        <h2>Державы Европы</h2>
+        <p class="modal-sub">
+          Армия — все войска на карте, включая идущие. Доход и рекруты — производство в секунду.
+        </p>
+        <div class="rank-table" id="rank-table"></div>
       </div>
     </div>
 

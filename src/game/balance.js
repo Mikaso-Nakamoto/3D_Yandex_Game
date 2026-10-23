@@ -60,18 +60,21 @@ export const UPGRADES = {
     name: 'Мануфактура',
     icon: 'factory',
     description: '+40% дохода, +25% рекрутов',
+    short: '+40% дохода провинции',
   },
   fort: {
     id: 'fort',
     name: 'Крепость',
     icon: 'fort',
     description: '+30% к обороне за уровень',
+    short: '+30% к обороне провинции',
   },
   barracks: {
     id: 'barracks',
     name: 'Казармы',
     icon: 'barracks',
     description: '+18% к гарнизону за уровень',
+    short: '+18% к гарнизону и пополнению',
   },
 };
 

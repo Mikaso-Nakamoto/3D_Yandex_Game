@@ -251,6 +251,7 @@ export const DOCTRINES = [
     name: 'Оружие',
     icon: 'sword',
     description: '+20% к силе атаки. Война кормит войну.',
+    effectLabel: '+20% атака',
     effects: { attack: 0.2 },
   },
   {
@@ -258,6 +259,7 @@ export const DOCTRINES = [
     name: 'Казна',
     icon: 'coin',
     description: '+30% к доходу. Золото покупает армии.',
+    effectLabel: '+30% доход',
     effects: { income: 0.3 },
   },
   {
@@ -265,6 +267,7 @@ export const DOCTRINES = [
     name: 'Стены',
     icon: 'wall',
     description: '+40% к обороне и +15% к гарнизону. Держать своё.',
+    effectLabel: '+40% оборона',
     effects: { defense: 0.4, garrison: 0.15 },
   },
 ];

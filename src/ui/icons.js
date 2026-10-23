@@ -18,6 +18,12 @@ const PATHS = {
   pause: '<path d="M8 5v14M16 5v14"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   arrowLeft: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
+  list: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+  shield: '<path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z"/>',
+  flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
+  swing: '<path d="M4 20 20 4"/><path d="m14 4 6 0 0 6"/>',
+  arrowUp: '<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>',
+  arrowDown: '<path d="M12 5v14"/><path d="m6 13 6 6 6-6"/>',
 };
 
 export function icon(name, size = 16, className = 'ico') {

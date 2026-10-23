@@ -1,5 +1,6 @@
 import { World } from '../render/world.js';
 import { LabelLayer } from '../render/labels.js';
+import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
 import { SCENARIOS, DOCTRINES, getScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
@@ -28,7 +29,9 @@ export class App {
       onDragCancel: () => this.#dragCancel(),
       onClick: (id) => this.#click(id),
       onHover: (id) => this.#hover(id),
+      onArrowPreview: (preview) => this.arrowLayer.setPreview(preview),
     });
+    this.arrowLayer = new ArrowLayer($('#arrows'), this.world);
     this.labels = new LabelLayer($('#labels'), map);
     this.labels.setVisible(false);
 
@@ -185,8 +188,6 @@ export class App {
     this.world.zoomTarget = 1;
     this.world.setOwnership(this.#previewColors(this.scenario));
     this.#renderNations();
-    this.#renderDoctrinePicker();
-    this.#updateStartButton();
   }
 
   #previewColors(scenario) {
@@ -198,44 +199,108 @@ export class App {
     return colors;
   }
 
+  #nationPreview(nation) {
+    let pop = 0;
+    let income = 0;
+    let army = 0;
+    let recruits = 0;
+    for (const id of nation.provinces) {
+      const province = this.mapById[id];
+      if (!province) continue;
+      pop += province.pop;
+      income += BAL.incomeBase + province.pop * BAL.incomePop;
+      army += BAL.garrisonBase + province.pop * BAL.garrisonPop;
+      recruits += BAL.manpowerBase + province.pop * BAL.manpowerPop;
+    }
+    return { pop, income, army: Math.round(army), recruits };
+  }
+
   #renderNations() {
     const list = $('#nation-list');
     list.innerHTML = '';
-    for (const nation of this.scenario.nations) {
-      const pop = nation.provinces.reduce((acc, id) => acc + (this.mapById[id]?.pop ?? 0), 0);
+    const nations = [...this.scenario.nations].sort((a, b) => {
+      const pa = this.#nationPreview(a);
+      const pb = this.#nationPreview(b);
+      return pb.army - pa.army;
+    });
+    for (const nation of nations) {
+      const preview = this.#nationPreview(nation);
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'nation-item';
+      item.className = 'nation-tile';
       item.dataset.nation = nation.id;
+      item.setAttribute('role', 'option');
       item.style.setProperty('--swatch', nation.color);
       item.innerHTML = `
-        <span class="swatch"></span>
-        <span>
-          <span class="n-name">${nation.short}</span><br>
-          <span class="n-sub">${nation.provinces.length} пров. · ${pop.toFixed(1)} млн</span>
-        </span>
-        <span class="n-count">${nation.provinces.length}</span>`;
+        <span class="tile-bar"></span>
+        <span class="tile-body">
+          <span class="tile-name">${nation.short}</span>
+          <span class="tile-sub">${nation.provinces.length} пров. · ${preview.pop.toFixed(1)} млн</span>
+          <span class="tile-army">Армия ${fmt(preview.army)}</span>
+        </span>`;
       item.addEventListener('click', () => this.#selectNation(nation.id, true));
       list.appendChild(item);
     }
+    $('#nation-count').textContent = `${this.scenario.nations.length} держав · ${this.scenario.era}`;
+    this.#renderNationDetail();
+  }
+
+  #renderNationDetail() {
+    const detail = $('#nation-detail');
+    const nation = this.scenario?.nations.find((n) => n.id === this.selectedNation);
+    if (!nation) {
+      detail.innerHTML = `
+        <div class="detail-empty">
+          <span class="detail-empty-icon">${icon('crown', 30)}</span>
+          <h3>Держава не выбрана</h3>
+          <p>Нажмите на страну на карте или выберите из списка. Затем задайте доктрину и начните правление.</p>
+        </div>`;
+      return;
+    }
+    const preview = this.#nationPreview(nation);
+    const doctrine = DOCTRINES.find((d) => d.id === this.doctrine) ?? DOCTRINES[0];
+    detail.innerHTML = `
+      <div class="detail-head">
+        <span class="detail-crest" style="--swatch:${nation.color}">${icon('flag', 22)}</span>
+        <div>
+          <div class="eyebrow">${this.scenario.era} · ${nation.provinces.length} провинций</div>
+          <h3>${nation.name}</h3>
+        </div>
+      </div>
+      <div class="detail-stats">
+        <div class="ds"><span class="k">Население</span><span class="v">${preview.pop.toFixed(1)} млн</span></div>
+        <div class="ds"><span class="k">Доход</span><span class="v gold">+${preview.income.toFixed(1)}/с</span></div>
+        <div class="ds"><span class="k">Армия на старте</span><span class="v">${fmt(preview.army)}</span></div>
+        <div class="ds"><span class="k">Рекруты</span><span class="v">+${(preview.recruits * 60).toFixed(0)}/мин</span></div>
+      </div>
+      <div class="detail-doctrine">
+        <div class="eyebrow">Доктрина <span class="eyebrow-note">действует всю партию</span></div>
+        <div id="doctrine-list" class="doctrine-list"></div>
+        <p class="doctrine-note">${doctrine.description}</p>
+      </div>
+      <button id="btn-start" class="btn primary">Начать правление</button>
+    `;
+    this.#renderDoctrinePicker();
   }
 
   #renderDoctrinePicker() {
     const list = $('#doctrine-list');
+    if (!list) return;
     list.innerHTML = '';
     for (const doctrine of DOCTRINES) {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = `doctrine${this.doctrine === doctrine.id ? ' active' : ''}`;
       item.dataset.doctrine = doctrine.id;
+      item.title = doctrine.description;
       item.innerHTML = `
         <span class="d-icon">${icon(doctrine.icon, 20)}</span>
         <span class="d-name">${doctrine.name}</span>
-        <span class="d-desc">${doctrine.description}</span>`;
+        <span class="d-desc">${doctrine.effectLabel ?? doctrine.description.split('.')[0]}</span>`;
       item.addEventListener('click', () => {
         this.doctrine = doctrine.id;
         sfx.click();
-        this.#renderDoctrinePicker();
+        this.#renderNationDetail();
       });
       list.appendChild(item);
     }
@@ -252,17 +317,11 @@ export class App {
     sfx.click();
     for (const item of $('#nation-list').children) {
       item.classList.toggle('active', item.dataset.nation === id);
+      item.setAttribute('aria-selected', String(item.dataset.nation === id));
     }
     this.world.setAccent(nation.provinces);
     if (focus) this.world.focusOn(nation.capital);
-    this.#updateStartButton();
-  }
-
-  #updateStartButton() {
-    const button = $('#btn-start');
-    const nation = this.scenario?.nations.find((n) => n.id === this.selectedNation);
-    button.disabled = !nation;
-    button.textContent = nation ? `Играть за ${nation.short}` : 'Выберите державу';
+    this.#renderNationDetail();
   }
 
   // ---------------------------------------------------------------- game lifecycle
@@ -480,21 +539,31 @@ export class App {
   }
 
   #hover(provinceId) {
+    if (this.world.dragFrom) {
+      this.#tooltip(null);
+      return;
+    }
     if (this.screen === 'game' && this.game) {
       const province = this.game.state.provinces[provinceId];
       if (province) {
         const owner = province.owner ? this.game.state.nations[province.owner] : null;
-        this.#tooltip(
-          provinceId,
-          `${this.game.provinceName(provinceId)} · ${owner ? owner.short : 'нейтральная'} · ${Math.round(province.garrison)}`,
-        );
+        const defense = this.game.defenseValue(province.id);
+        this.#tooltip(provinceId, {
+          title: this.game.provinceName(provinceId),
+          owner: owner ? owner.name : 'Нейтральная территория',
+          lines: [
+            `Гарнизон ${Math.round(province.garrison)}`,
+            `Оборона ${Math.round(defense)}`,
+            owner && owner.id !== this.game.state.nationId ? 'Можно атаковать' : 'Ваши земли',
+          ],
+        });
       } else {
         this.#tooltip(null);
       }
     }
   }
 
-  #tooltip(provinceId, text) {
+  #tooltip(provinceId, content) {
     let el = $('#tooltip');
     if (!el) {
       el = document.createElement('div');
@@ -511,7 +580,11 @@ export class App {
       return;
     }
     const pos = this.world.projectProvince(provinceId);
-    el.textContent = text;
+    el.innerHTML = `
+      <span class="tt-title">${content.title}</span>
+      <span class="tt-owner">${content.owner}</span>
+      <span class="tt-lines">${content.lines.map((line) => `<b>${line}</b>`).join('')}</span>`;
+    el.classList.add('tt');
     el.style.display = 'block';
     el.style.left = `${pos.x}px`;
     el.style.top = `${pos.y}px`;
@@ -530,9 +603,9 @@ export class App {
     $('#hud-color').style.color = player.color;
     $('#hud-date').textContent = game.dateLabel;
     $('#hud-gold').textContent = fmt(player.gold);
-    $('#hud-income').textContent = `+${player.income.toFixed(1)}`;
+    $('#hud-income').textContent = `+${player.income.toFixed(1)}/с`;
     $('#hud-manpower').textContent = fmt(player.manpower);
-    $('#hud-mp-rate').textContent = `+${(player.manpowerRate ?? 0).toFixed(2)}`;
+    $('#hud-mp-rate').textContent = `+${((player.manpowerRate ?? 0) * 60).toFixed(0)}/мин`;
     $('#hud-progress-text').textContent = `${progress.owned}/${progress.total}`;
     $('#hud-progress-fill').style.width = `${(progress.share * 100).toFixed(1)}%`;
 
@@ -542,6 +615,7 @@ export class App {
     }
     this.#updateOrders();
     if (this.selectedProvince) this.#renderProvincePanel();
+    if (!$('#modal-rankings').classList.contains('hidden')) this.#renderRankings();
   }
 
   #updateOrders() {
@@ -584,50 +658,80 @@ export class App {
     const isMine = province.owner === game.state.nationId;
     const max = game.maxGarrison(province.id);
     const defense = game.defenseValue(province.id);
+    const share = clamp(province.garrison / Math.max(1, max), 0, 1);
+    const regen = max * BAL.reinforceShare * (1 + province.barracks * 0.12);
+    const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
+    const doctrineIncome = 1 + (game.player.doctrine === 'coin' ? 0.3 : 0);
+    const recruits = (BAL.manpowerBase + province.pop * BAL.manpowerPop) * (1 + province.factory * BAL.factoryManpower);
 
     const upgrades = Object.values(UPGRADES)
       .map((upgrade) => {
         const level = province[upgrade.id] ?? 0;
         const maxed = level >= BAL.maxLevel;
-        const cost = maxed ? null : BAL.upgradeCosts[upgrade.id][level];
-        const affordable = cost !== null && game.player.gold >= cost;
+        const cost = maxed ? 0 : BAL.upgradeCosts[upgrade.id][level];
+        const affordable = !maxed && game.player.gold >= cost;
+        const pips = Array.from({ length: BAL.maxLevel }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
+        const shortfall = !maxed && !affordable ? `не хватает ${Math.ceil(cost - game.player.gold)}` : null;
         return `
-          <button class="upg" data-kind="${upgrade.id}" ${!isMine || maxed || !affordable ? 'disabled' : ''}>
-            <span class="u-icon">${icon(upgrade.icon, 15)}</span>
-            <span>
-              <span class="u-name">${upgrade.name}</span>
-              <span class="u-sub">ур. ${level}/${BAL.maxLevel} · ${upgrade.description}</span>
+          <button class="upg ${maxed ? 'is-max' : ''}" data-kind="${upgrade.id}"
+            ${!isMine || maxed || !affordable ? 'disabled' : ''}
+            title="${upgrade.description}">
+            <span class="u-icon">${icon(upgrade.icon, 16)}</span>
+            <span class="u-body">
+              <span class="u-line">
+                <span class="u-name">${upgrade.name}</span>
+                <span class="u-pips">${pips}</span>
+              </span>
+              <span class="u-sub">${maxed ? 'максимальный уровень' : shortfall ?? upgrade.short ?? upgrade.description}</span>
             </span>
-            <span class="u-cost ${maxed ? 'max' : ''}">${maxed ? 'макс' : `◈ ${cost}`}</span>
+            <span class="u-cost">${maxed ? '—' : `${cost} золота`}</span>
           </button>`;
       })
       .join('');
 
-    const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
-
     panel.innerHTML = `
       <div class="pp-head">
-        <div>
+        <span class="pp-swatch" style="--swatch:${owner?.color ?? '#7c8794'}"></span>
+        <div class="pp-title">
           <h3 class="pp-name">${game.provinceName(province.id)}</h3>
           <div class="pp-owner">
-            <span class="dot" style="--owner:${owner?.color ?? '#7c8794'}"></span>
             ${owner ? owner.name : 'Нейтральная территория'}
+            ${isMine ? '<span class="pp-badge">ваша</span>' : ''}
           </div>
         </div>
-        <button class="pp-close" data-close>✕</button>
+        <button class="pp-close" data-close title="Закрыть">✕</button>
       </div>
-      <div class="pp-stats">
-        <div class="pp-stat"><div class="k">Гарнизон</div><div class="v">${fmt(province.garrison)} / ${fmt(max)}</div></div>
-        <div class="pp-stat"><div class="k">Оборона</div><div class="v">${fmt(defense)}</div></div>
-        <div class="pp-stat"><div class="k">Население</div><div class="v">${province.pop.toFixed(1)} млн</div></div>
-        <div class="pp-stat"><div class="k">${isMine ? 'Доход' : 'Укрепления'}</div><div class="v">${isMine ? `◈ ${(income * (1 + (game.player.doctrine === 'coin' ? 0.3 : 0))).toFixed(2)}/с` : `⛨ ${province.fort}`}</div></div>
+
+      <div class="pp-meter">
+        <div class="meter-head">
+          <span class="meter-label">Гарнизон</span>
+          <span class="meter-value">${fmt(province.garrison)} <s>/ ${fmt(max)}</s></span>
+        </div>
+        <div class="meter"><i style="width:${(share * 100).toFixed(1)}%"></i></div>
+        <div class="meter-foot">
+          <span>Пополнение ${isMine ? `+${regen.toFixed(1)}/с` : 'нет'}</span>
+          <span>Оборона <b>${fmt(defense)}</b></span>
+        </div>
+      </div>
+
+      <div class="pp-rows">
+        <div class="pp-row"><span>Население</span><b>${province.pop.toFixed(1)} млн</b></div>
+        <div class="pp-row"><span>Доход провинции</span><b class="gold">${isMine ? `+${(income * doctrineIncome).toFixed(2)} золота/с` : '—'}</b></div>
+        <div class="pp-row"><span>Прирост рекрутов</span><b>${isMine ? `+${(recruits * 60).toFixed(0)}/мин` : '—'}</b></div>
+        <div class="pp-row"><span>Крепость</span><b>${province.fort > 0 ? `уровень ${province.fort} из ${BAL.maxLevel}` : 'нет'}</b></div>
+      </div>
+
+      <div class="pp-section">
+        <span>Развитие провинции</span>
+        ${isMine ? '' : '<span class="pp-section-note">только для своих земель</span>'}
       </div>
       <div class="pp-upgrades">${upgrades}</div>
-      ${
+      <p class="pp-hint">${
         isMine
-          ? '<p class="pp-hint">Перетащите гарнизон на соседнюю провинцию, чтобы атаковать или усилить её.</p>'
-          : `<p class="pp-hint">Чужая земля. Атакуйте, перетащив сюда войска из соседней своей провинции. Оборона: ${fmt(defense)}.</p>`
-      }`;
+          ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать. Сейчас отправится ${Math.round(game.state.sendRatio * 100)}% гарнизона.`
+          : `Чтобы атаковать, перетащите войска сюда из своей соседней провинции. Гарнизон здесь ${fmt(province.garrison)}, оборона ${fmt(defense)}.`
+      }</p>
+    `;
   }
 
   #buildOrders() {
@@ -691,8 +795,72 @@ export class App {
 
   // ---------------------------------------------------------------- armies
 
+  #armyTotal(nationId) {
+    const game = this.game;
+    let total = 0;
+    for (const province of Object.values(game.state.provinces)) {
+      if (province.owner === nationId) total += province.garrison;
+    }
+    for (const army of game.state.armies) if (army.owner === nationId) total += army.troops;
+    return total;
+  }
+
+  #openRankings() {
+    if (!this.game) return;
+    sfx.click();
+    $('#modal-rankings').classList.remove('hidden');
+    this.#renderRankings();
+  }
+
+  #renderRankings() {
+    if (!this.game) return;
+    const game = this.game;
+    const playerId = game.state.nationId;
+    const rows = Object.values(game.state.nations)
+      .map((nation) => ({
+        nation,
+        army: this.#armyTotal(nation.id),
+        provinces: game.provinceCount(nation.id),
+        income: nation.income ?? 0,
+        recruits: (nation.manpowerRate ?? 0) * 60,
+      }))
+      .sort((a, b) => b.army - a.army || b.provinces - a.provinces);
+
+    const totalProvinces = Object.keys(game.state.provinces).length;
+    $('#rank-table').innerHTML = `
+      <div class="rank-row rank-head">
+        <span>Держава</span><span>Земли</span><span>Армия</span><span>Доход</span><span>Рекруты</span>
+      </div>
+      ${rows
+        .map(
+          (row) => `
+        <div class="rank-row ${row.nation.id === playerId ? 'is-player' : ''} ${row.nation.alive ? '' : 'is-dead'}">
+          <span class="rank-nation">
+            <i class="rank-swatch" style="--swatch:${row.nation.color}"></i>
+            <span class="rank-name">${row.nation.short}${row.nation.id === playerId ? '<em>вы</em>' : ''}</span>
+          </span>
+          <span class="rank-cell">
+            <b>${row.provinces}</b>
+            <span class="rank-bar"><i style="width:${((row.provinces / totalProvinces) * 100).toFixed(0)}%"></i></span>
+          </span>
+          <span class="rank-cell"><b>${fmt(row.army)}</b></span>
+          <span class="rank-cell">${row.nation.alive ? `+${row.income.toFixed(1)}/с` : '—'}</span>
+          <span class="rank-cell">${row.nation.alive ? `+${row.recruits.toFixed(0)}/мин` : '—'}</span>
+        </div>`,
+        )
+        .join('')}
+    `;
+  }
+
   #syncArmies() {
     if (!this.game) return;
+    this.arrowLayer.setArmies(
+      this.game.state.armies.map((army) => ({
+        ...army,
+        isPlayer: army.owner === this.game.state.nationId,
+      })),
+      this.game.state.nations,
+    );
     const seen = new Set();
     for (const army of this.game.state.armies) {
       seen.add(army.id);
@@ -726,6 +894,7 @@ export class App {
   #clearArmies() {
     for (const token of this.armyTokens.values()) token.remove();
     this.armyTokens.clear();
+    this.arrowLayer.setArmies([], {});
   }
 
   // ---------------------------------------------------------------- colors
@@ -765,7 +934,9 @@ export class App {
       sfx.click();
       this.showMenu();
     });
-    $('#btn-start').addEventListener('click', () => {
+    $('#nation-detail').addEventListener('click', (event) => {
+      const button = event.target.closest('#btn-start');
+      if (!button || button.disabled) return;
       sfx.select();
       this.startGame();
     });
@@ -790,6 +961,7 @@ export class App {
       });
     }
     $('#btn-pause-menu').addEventListener('click', () => this.openPause());
+    $('#btn-rankings').addEventListener('click', () => this.#openRankings());
 
     for (const button of $('#ratio-group').children) {
       button.addEventListener('click', () => {
@@ -859,6 +1031,7 @@ export class App {
       if (document.hidden) this.save();
     });
     window.addEventListener('beforeunload', () => this.save());
+    window.addEventListener('resize', () => this.arrowLayer.resize());
   }
 
   #bindKeyboard() {
@@ -912,6 +1085,8 @@ export class App {
     this.lastFrame = now;
 
     this.world.update(dt);
+    this.arrowLayer.setPreview(this.world.previewArrowData);
+    this.arrowLayer.draw(dt);
     if (this.game && this.screen === 'game') {
       if (this.game.state.status === 'playing') {
         this.game.update(dt * (this.game.state.speed ?? 0));
