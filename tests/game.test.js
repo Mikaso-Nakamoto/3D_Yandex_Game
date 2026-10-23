@@ -761,3 +761,41 @@ test('the player winning takes priority over a rival at the same moment', () => 
   game.update(0.1);
   assert.equal(game.state.status, 'victory');
 });
+
+// ---------------------------------------------------------------- map integrity
+
+test('every theatre is a single connected graph', () => {
+  for (const [name, theatreMap] of Object.entries(MAPS)) {
+    const byId = Object.fromEntries(theatreMap.provinces.map((p) => [p.id, p]));
+    const seen = new Set();
+    const start = theatreMap.provinces[0].id;
+    const stack = [start];
+    seen.add(start);
+    while (stack.length) {
+      const id = stack.pop();
+      for (const neighbour of byId[id].neighbors) {
+        if (seen.has(neighbour)) continue;
+        seen.add(neighbour);
+        stack.push(neighbour);
+      }
+    }
+    assert.equal(
+      seen.size,
+      theatreMap.provinces.length,
+      `${name}: disconnected provinces — ${theatreMap.provinces
+        .filter((p) => !seen.has(p.id))
+        .map((p) => p.id)
+        .join(', ')}`,
+    );
+  }
+});
+
+test('no province geometry is empty or degenerate', () => {
+  for (const [name, theatreMap] of Object.entries(MAPS)) {
+    for (const province of theatreMap.provinces) {
+      assert.ok(province.rings[0].length >= 3, `${name}/${province.id}: ring too short`);
+      assert.ok(province.area > 0.05, `${name}/${province.id}: area ${province.area}`);
+      assert.ok(province.centroid.every(Number.isFinite), `${name}/${province.id}: bad centroid`);
+    }
+  }
+});
