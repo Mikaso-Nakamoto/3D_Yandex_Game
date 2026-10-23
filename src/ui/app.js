@@ -1,0 +1,937 @@
+import { World } from '../render/world.js';
+import { LabelLayer } from '../render/labels.js';
+import { Game } from '../game/game.js';
+import { SCENARIOS, DOCTRINES, getScenario } from '../data/scenarios.js';
+import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
+import { platform } from '../platform/yandex.js';
+import { sfx } from '../audio.js';
+import { icon } from './icons.js';
+
+const SAVE_KEY = 'crowns.save.v1';
+const SETTINGS_KEY = 'crowns.settings.v1';
+const DIFFICULTY_LEVEL = { 'Низко': 1, 'Средне': 2, 'Высоко': 3 };
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const fmt = (n) => Math.round(n).toLocaleString('ru-RU');
+
+export class App {
+  constructor(map) {
+    this.map = map;
+    this.mapById = Object.fromEntries(map.provinces.map((p) => [p.id, p]));
+    this.settings = this.#loadSettings();
+
+    this.world = new World($('#view'), map, {
+      canDrag: (id) => this.#canStartDrag(id),
+      onDragStart: (id) => this.#dragStart(id),
+      onDrop: (from, to) => this.#dragDrop(from, to),
+      onDragCancel: () => this.#dragCancel(),
+      onClick: (id) => this.#click(id),
+      onHover: (id) => this.#hover(id),
+    });
+    this.labels = new LabelLayer($('#labels'), map);
+    this.labels.setVisible(false);
+
+    this.screen = 'menu';
+    this.game = null;
+    this.scenario = null;
+    this.selectedNation = null;
+    this.doctrine = 'coin';
+    this.selectedProvince = null;
+    this.lastSpeed = 1;
+    this.hudTimer = 0;
+    this.saveTimer = 10;
+    this.colorSignature = '';
+    this.armyTokens = new Map();
+    this.lastBattleSound = 0;
+    this.hasSave = this.#readSave() !== null;
+
+    this.#hydrateIcons();
+    this.#buildMenu();
+    this.#buildDoctrines();
+    this.#buildOrders();
+    this.#bindUi();
+    this.#bindKeyboard();
+
+    this.showMenu();
+    this.lastFrame = performance.now();
+    this.loop = this.loop.bind(this);
+    requestAnimationFrame(this.loop);
+  }
+
+  #hydrateIcons() {
+    for (const node of document.querySelectorAll('[data-icon]')) {
+      node.innerHTML = icon(node.dataset.icon, node.classList.contains('brand-crown') ? 34 : 16);
+    }
+  }
+
+  // ---------------------------------------------------------------- settings & save
+
+  #loadSettings() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      return { sound: raw.sound !== false, labels: raw.labels !== false };
+    } catch {
+      return { sound: true, labels: true };
+    }
+  }
+
+  #saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  #readSave() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.game ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  save() {
+    if (!this.game || this.game.state.status !== 'playing') return;
+    const payload = { savedAt: Date.now(), game: this.game.serialize() };
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+      this.hasSave = true;
+      $('#btn-continue')?.classList.remove('hidden');
+    } catch (error) {
+      console.info('save failed', error?.message);
+    }
+    platform.save({ save: JSON.stringify(payload) });
+  }
+
+  async #resumeFromStorage() {
+    let saved = this.#readSave();
+    if (!saved) {
+      const cloud = await platform.load();
+      if (cloud?.save) {
+        try {
+          saved = JSON.parse(cloud.save);
+        } catch {
+          saved = null;
+        }
+      }
+    }
+    return saved;
+  }
+
+  // ---------------------------------------------------------------- menu
+
+  #buildMenu() {
+    const list = $('#scenario-list');
+    list.innerHTML = '';
+    for (const scenario of SCENARIOS) {
+      const level = DIFFICULTY_LEVEL[scenario.difficulty] ?? 2;
+      const dots = Array.from({ length: 3 }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
+      const card = document.createElement('button');
+      card.className = 'scenario-card';
+      card.type = 'button';
+      card.innerHTML = `
+        <div class="scenario-era">${scenario.era}</div>
+        <div class="scenario-title">${scenario.title}</div>
+        <div class="scenario-desc">${scenario.blurb}</div>
+        <div class="scenario-meta">
+          <span>${scenario.nations.length} держав</span>
+          <span class="difficulty">${dots}<span>${scenario.difficulty}</span></span>
+        </div>`;
+      card.addEventListener('click', () => {
+        sfx.select();
+        this.openNationSelect(scenario.id);
+      });
+      list.appendChild(card);
+    }
+    $('#btn-continue').classList.toggle('hidden', !this.hasSave);
+  }
+
+  showMenu() {
+    this.game = null;
+    this.selectedProvince = null;
+    this.#setScreen('menu');
+    this.#clearArmies();
+    this.labels.setVisible(false);
+    this.world.setSelected(null);
+    this.world.setAccent([]);
+    this.world.setValidTargets([]);
+    this.world.resetView();
+    this.world.setAutoPan(true);
+    const preview = getScenario('eve1939');
+    this.world.setOwnership(this.#previewColors(preview));
+    $('#province-panel').classList.add('hidden');
+    platform.gameplayStop();
+  }
+
+  openNationSelect(scenarioId) {
+    this.scenario = getScenario(scenarioId);
+    this.selectedNation = null;
+    this.selectedProvince = null;
+    this.doctrine = 'coin';
+    this.#setScreen('nation');
+    $('#nation-era').textContent = this.scenario.era;
+    $('#nation-scenario').textContent = this.scenario.title;
+    $('#province-panel').classList.add('hidden');
+    this.labels.setVisible(false);
+    this.world.setSelected(null);
+    this.world.setAccent([]);
+    this.world.resetView();
+    this.world.setAutoPan(false);
+    this.world.zoomTarget = 1;
+    this.world.setOwnership(this.#previewColors(this.scenario));
+    this.#renderNations();
+    this.#renderDoctrinePicker();
+    this.#updateStartButton();
+  }
+
+  #previewColors(scenario) {
+    const colors = {};
+    for (const province of this.map.provinces) colors[province.id] = '#59626e';
+    for (const nation of scenario.nations) {
+      for (const provinceId of nation.provinces) colors[provinceId] = nation.color;
+    }
+    return colors;
+  }
+
+  #renderNations() {
+    const list = $('#nation-list');
+    list.innerHTML = '';
+    for (const nation of this.scenario.nations) {
+      const pop = nation.provinces.reduce((acc, id) => acc + (this.mapById[id]?.pop ?? 0), 0);
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'nation-item';
+      item.dataset.nation = nation.id;
+      item.style.setProperty('--swatch', nation.color);
+      item.innerHTML = `
+        <span class="swatch"></span>
+        <span>
+          <span class="n-name">${nation.short}</span><br>
+          <span class="n-sub">${nation.provinces.length} пров. · ${pop.toFixed(1)} млн</span>
+        </span>
+        <span class="n-count">${nation.provinces.length}</span>`;
+      item.addEventListener('click', () => this.#selectNation(nation.id, true));
+      list.appendChild(item);
+    }
+  }
+
+  #renderDoctrinePicker() {
+    const list = $('#doctrine-list');
+    list.innerHTML = '';
+    for (const doctrine of DOCTRINES) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `doctrine${this.doctrine === doctrine.id ? ' active' : ''}`;
+      item.dataset.doctrine = doctrine.id;
+      item.innerHTML = `
+        <span class="d-icon">${icon(doctrine.icon, 20)}</span>
+        <span class="d-name">${doctrine.name}</span>
+        <span class="d-desc">${doctrine.description}</span>`;
+      item.addEventListener('click', () => {
+        this.doctrine = doctrine.id;
+        sfx.click();
+        this.#renderDoctrinePicker();
+      });
+      list.appendChild(item);
+    }
+  }
+
+  #buildDoctrines() {
+    this.#renderDoctrinePicker();
+  }
+
+  #selectNation(id, focus = false) {
+    this.selectedNation = id;
+    const nation = this.scenario.nations.find((n) => n.id === id);
+    if (!nation) return;
+    sfx.click();
+    for (const item of $('#nation-list').children) {
+      item.classList.toggle('active', item.dataset.nation === id);
+    }
+    this.world.setAccent(nation.provinces);
+    if (focus) this.world.focusOn(nation.capital);
+    this.#updateStartButton();
+  }
+
+  #updateStartButton() {
+    const button = $('#btn-start');
+    const nation = this.scenario?.nations.find((n) => n.id === this.selectedNation);
+    button.disabled = !nation;
+    button.textContent = nation ? `Играть за ${nation.short}` : 'Выберите державу';
+  }
+
+  // ---------------------------------------------------------------- game lifecycle
+
+  startGame() {
+    if (!this.selectedNation) return;
+    const game = new Game({
+      scenarioId: this.scenario.id,
+      nationId: this.selectedNation,
+      doctrineId: this.doctrine,
+      map: this.map,
+      seed: (Math.random() * 2 ** 31) | 0,
+    });
+    this.#attachGame(game);
+    this.#enterGameScreen();
+  }
+
+  #attachGame(game) {
+    this.game = game;
+    this.scenario = getScenario(game.state.scenarioId);
+    this.selectedNation = game.state.nationId;
+    this.selectedProvince = null;
+    this.colorSignature = '';
+    this.#clearArmies();
+    $('#log').innerHTML = '';
+    game.state.log.length = 0;
+
+    game.on((type, payload) => {
+      if (type === 'log') this.#addLog(payload);
+      if (type === 'capture') {
+        this.world.flashProvince(payload.provinceId, 1);
+        if (payload.to === game.state.nationId) {
+          sfx.capture();
+          this.#toast(`Провинция ${game.provinceName(payload.provinceId)} взята`, 'good');
+          if (this.selectedProvince === payload.provinceId) this.#renderProvincePanel();
+        } else if (payload.from === game.state.nationId) {
+          sfx.loss();
+          this.#toast(`Потеряна ${game.provinceName(payload.provinceId)}`, 'bad');
+        }
+      }
+      if (type === 'battle') {
+        const now = performance.now();
+        if (now - this.lastBattleSound > 700) {
+          this.lastBattleSound = now;
+          sfx.battle();
+        }
+      }
+      if (type === 'end') this.#endGame(payload);
+    });
+  }
+
+  #enterGameScreen() {
+    this.#setScreen('game');
+    this.world.setSelected(null);
+    this.world.setAccent([]);
+    this.world.setValidTargets([]);
+    this.world.resetView();
+    this.world.setAutoPan(false);
+    this.world.zoomTarget = 1;
+    this.labels.setVisible(this.settings.labels);
+    this.#syncColors(true);
+    this.#updateHud();
+    this.#renderProvincePanel();
+    this.#updateOrders();
+    $('#hint-bar').style.opacity = '1';
+    setTimeout(() => {
+      const hint = $('#hint-bar');
+      if (hint) hint.style.opacity = '0';
+    }, 14000);
+    this.#onboard();
+
+    const nation = this.game.player;
+    this.#addLog({
+      text: `${nation.name}: правление началось. Доктрина «${DOCTRINES.find((d) => d.id === nation.doctrine)?.name ?? ''}»`,
+      kind: 'order',
+      year: Math.floor(this.game.state.months / 12),
+    });
+    this.save();
+    platform.gameplayStart();
+  }
+
+  #onboard() {
+    this.onboardTimers?.forEach(clearTimeout);
+    const timers = [];
+    timers.push(
+      setTimeout(() => {
+        if (this.screen !== 'game') return;
+        this.#toast('Зажмите свою провинцию и отпустите на соседней', 'info');
+      }, 1200),
+    );
+    timers.push(
+      setTimeout(() => {
+        if (this.screen !== 'game') return;
+        this.#toast('Клик по провинции открывает улучшения и приказы', 'info');
+      }, 7000),
+    );
+    this.onboardTimers = timers;
+  }
+
+  #endGame({ result }) {
+    const game = this.game;
+    game.state.speed = 0;
+    this.#clearArmies();
+    localStorage.removeItem(SAVE_KEY);
+    this.hasSave = false;
+    $('#btn-continue').classList.add('hidden');
+    platform.gameplayStop();
+
+    const victory = result === 'victory';
+    $('#end-emblem').textContent = victory ? '♛' : '☠';
+    $('#end-eyebrow').textContent = victory ? 'Европа ваша' : 'Держава пала';
+    $('#end-title').textContent = victory ? 'Победа' : 'Поражение';
+    $('#end-text').textContent = victory
+      ? 'Половина континента признала вашу корону. Историки будут спорить о методах, но не о результате.'
+      : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
+    const stats = game.state.stats;
+    $('#end-stats').innerHTML = `
+      <div class="end-stat"><div class="k">Провинций</div><div class="v">${game.progress.owned}</div></div>
+      <div class="end-stat"><div class="k">Захвачено</div><div class="v">${stats.captured}</div></div>
+      <div class="end-stat"><div class="k">Битв</div><div class="v">${stats.battles}</div></div>
+      <div class="end-stat"><div class="k">Пик империи</div><div class="v">${stats.peak}</div></div>
+      <div class="end-stat"><div class="k">Потеряно</div><div class="v">${stats.lostProvinces}</div></div>
+      <div class="end-stat"><div class="k">Лет правления</div><div class="v">${Math.max(1, Math.round((game.state.months - this.scenario.startYear * 12) / 12))}</div></div>
+      <div class="end-stat"><div class="k">Отбито атак</div><div class="v">${stats.battlesWon ?? 0}</div></div>`;
+    $('#screen-end').classList.remove('hidden');
+    if (victory) sfx.victory();
+    else sfx.defeat();
+    setTimeout(() => platform.showInterstitial(), 1600);
+  }
+
+  #restart() {
+    if (!this.scenario || !this.selectedNation) return;
+    this.startGame();
+  }
+
+  // ---------------------------------------------------------------- screens
+
+  #setScreen(name) {
+    this.screen = name;
+    for (const id of ['menu', 'nation', 'game']) {
+      $(`#screen-${id}`).classList.toggle('hidden', id !== name);
+    }
+  }
+
+  /** Called when a cloud save is found after the SDK initialises. */
+  enableContinue(saved) {
+    if (this.hasSave || !saved?.game) return;
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(saved));
+    } catch {
+      return;
+    }
+    this.hasSave = true;
+    $('#btn-continue').classList.remove('hidden');
+  }
+
+  // ---------------------------------------------------------------- map interaction
+
+  #canStartDrag(provinceId) {
+    if (this.screen !== 'game' || !this.game) return false;
+    const province = this.game.state.provinces[provinceId];
+    if (!province || province.owner !== this.game.state.nationId) return false;
+    return this.game.state.status === 'playing';
+  }
+
+  #dragStart(provinceId) {
+    if (!this.game) return;
+    const targets = this.game
+      .neighbors(provinceId)
+      .filter((id) => id !== provinceId && !this.game.state.armies.some((a) => a.from === provinceId));
+    this.world.setValidTargets(targets);
+    this.world.setSelected(provinceId);
+    sfx.click();
+  }
+
+  #dragCancel() {
+    this.world.setValidTargets([]);
+    this.world.setSelected(this.selectedProvince);
+  }
+
+  #dragDrop(from, to) {
+    if (!this.game) return;
+    const result = this.game.sendTroops(from, to);
+    if (!result.ok) {
+      this.#toast(result.reason, 'bad');
+      return;
+    }
+    sfx.march();
+    this.#toast(`${fmt(result.amount)} в походе${result.sea ? ' морем' : ''}`, 'good');
+    this.world.setValidTargets([]);
+    this.selectedProvince = from;
+    this.world.setSelected(from);
+    this.#renderProvincePanel();
+    this.#updateHud();
+  }
+
+  #click(provinceId) {
+    if (this.screen === 'nation') {
+      if (!provinceId) return;
+      const owner = this.scenario.nations.find((n) => n.provinces.includes(provinceId));
+      if (owner) this.#selectNation(owner.id, false);
+      return;
+    }
+    if (this.screen !== 'game' || !this.game) return;
+    if (!provinceId) {
+      this.selectedProvince = null;
+      this.world.setSelected(null);
+      $('#province-panel').classList.add('hidden');
+      return;
+    }
+    this.selectedProvince = provinceId;
+    this.world.setSelected(provinceId);
+    this.#renderProvincePanel();
+    sfx.click();
+  }
+
+  #hover(provinceId) {
+    if (this.screen === 'game' && this.game) {
+      const province = this.game.state.provinces[provinceId];
+      if (province) {
+        const owner = province.owner ? this.game.state.nations[province.owner] : null;
+        this.#tooltip(
+          provinceId,
+          `${this.game.provinceName(provinceId)} · ${owner ? owner.short : 'нейтральная'} · ${Math.round(province.garrison)}`,
+        );
+      } else {
+        this.#tooltip(null);
+      }
+    }
+  }
+
+  #tooltip(provinceId, text) {
+    let el = $('#tooltip');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tooltip';
+      el.className = 'toast';
+      el.style.position = 'absolute';
+      el.style.zIndex = '7';
+      el.style.pointerEvents = 'none';
+      el.style.transform = 'translate(-50%, -140%)';
+      $('#armies').appendChild(el);
+    }
+    if (!provinceId) {
+      el.style.display = 'none';
+      return;
+    }
+    const pos = this.world.projectProvince(provinceId);
+    el.textContent = text;
+    el.style.display = 'block';
+    el.style.left = `${pos.x}px`;
+    el.style.top = `${pos.y}px`;
+  }
+
+  // ---------------------------------------------------------------- HUD
+
+  #updateHud() {
+    if (!this.game) return;
+    const game = this.game;
+    const player = game.player;
+    const progress = game.progress;
+
+    $('#hud-nation').textContent = player.short;
+    $('#hud-color').style.background = player.color;
+    $('#hud-color').style.color = player.color;
+    $('#hud-date').textContent = game.dateLabel;
+    $('#hud-gold').textContent = fmt(player.gold);
+    $('#hud-income').textContent = `+${player.income.toFixed(1)}`;
+    $('#hud-manpower').textContent = fmt(player.manpower);
+    $('#hud-mp-rate').textContent = `+${(player.manpowerRate ?? 0).toFixed(2)}`;
+    $('#hud-progress-text').textContent = `${progress.owned}/${progress.total}`;
+    $('#hud-progress-fill').style.width = `${(progress.share * 100).toFixed(1)}%`;
+
+    for (const button of $('#speed-group').children) {
+      const speed = Number(button.dataset.speed);
+      button.classList.toggle('active', speed === game.state.speed);
+    }
+    this.#updateOrders();
+    if (this.selectedProvince) this.#renderProvincePanel();
+  }
+
+  #updateOrders() {
+    if (!this.game) return;
+    const game = this.game;
+    const state = game.state;
+    for (const button of $('#orders-bar').children) {
+      const kind = button.dataset.order;
+      const cooldown = state.orders[`${kind}Ready`] - state.time;
+      const buffActive =
+        (kind === 'tax' && state.time < state.orders.taxUntil) ||
+        (kind === 'march' && state.time < state.orders.marchUntil);
+      const cd = button.querySelector('.o-cd');
+      const cost = BAL.orderGold[kind];
+      if (cooldown > 0) {
+        cd.textContent = Math.ceil(cooldown);
+        cd.classList.remove('hidden');
+      } else {
+        cd.classList.add('hidden');
+      }
+      button.classList.toggle('active-buff', buffActive);
+      button.disabled = cooldown > 0 || game.player.gold < cost || state.status !== 'playing';
+    }
+  }
+
+  #renderProvincePanel() {
+    const panel = $('#province-panel');
+    if (!this.game || !this.selectedProvince) {
+      panel.classList.add('hidden');
+      return;
+    }
+    const game = this.game;
+    const province = game.state.provinces[this.selectedProvince];
+    if (!province) {
+      panel.classList.add('hidden');
+      return;
+    }
+    panel.classList.remove('hidden');
+    const owner = province.owner ? game.state.nations[province.owner] : null;
+    const isMine = province.owner === game.state.nationId;
+    const max = game.maxGarrison(province.id);
+    const defense = game.defenseValue(province.id);
+
+    const upgrades = Object.values(UPGRADES)
+      .map((upgrade) => {
+        const level = province[upgrade.id] ?? 0;
+        const maxed = level >= BAL.maxLevel;
+        const cost = maxed ? null : BAL.upgradeCosts[upgrade.id][level];
+        const affordable = cost !== null && game.player.gold >= cost;
+        return `
+          <button class="upg" data-kind="${upgrade.id}" ${!isMine || maxed || !affordable ? 'disabled' : ''}>
+            <span class="u-icon">${icon(upgrade.icon, 15)}</span>
+            <span>
+              <span class="u-name">${upgrade.name}</span>
+              <span class="u-sub">ур. ${level}/${BAL.maxLevel} · ${upgrade.description}</span>
+            </span>
+            <span class="u-cost ${maxed ? 'max' : ''}">${maxed ? 'макс' : `◈ ${cost}`}</span>
+          </button>`;
+      })
+      .join('');
+
+    const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
+
+    panel.innerHTML = `
+      <div class="pp-head">
+        <div>
+          <h3 class="pp-name">${game.provinceName(province.id)}</h3>
+          <div class="pp-owner">
+            <span class="dot" style="--owner:${owner?.color ?? '#7c8794'}"></span>
+            ${owner ? owner.name : 'Нейтральная территория'}
+          </div>
+        </div>
+        <button class="pp-close" data-close>✕</button>
+      </div>
+      <div class="pp-stats">
+        <div class="pp-stat"><div class="k">Гарнизон</div><div class="v">${fmt(province.garrison)} / ${fmt(max)}</div></div>
+        <div class="pp-stat"><div class="k">Оборона</div><div class="v">${fmt(defense)}</div></div>
+        <div class="pp-stat"><div class="k">Население</div><div class="v">${province.pop.toFixed(1)} млн</div></div>
+        <div class="pp-stat"><div class="k">${isMine ? 'Доход' : 'Укрепления'}</div><div class="v">${isMine ? `◈ ${(income * (1 + (game.player.doctrine === 'coin' ? 0.3 : 0))).toFixed(2)}/с` : `⛨ ${province.fort}`}</div></div>
+      </div>
+      <div class="pp-upgrades">${upgrades}</div>
+      ${
+        isMine
+          ? '<p class="pp-hint">Перетащите гарнизон на соседнюю провинцию, чтобы атаковать или усилить её.</p>'
+          : `<p class="pp-hint">Чужая земля. Атакуйте, перетащив сюда войска из соседней своей провинции. Оборона: ${fmt(defense)}.</p>`
+      }`;
+  }
+
+  #buildOrders() {
+    const bar = $('#orders-bar');
+    bar.innerHTML = '';
+    for (const order of Object.values(ORDERS)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'order';
+      button.dataset.order = order.id;
+      button.title = order.description;
+      button.innerHTML = `
+        <span class="o-icon">${icon(order.icon, 16)}</span>
+        <span class="o-name">${order.name}</span>
+        <span class="o-cost">◈ ${BAL.orderGold[order.id]}</span>
+        <span class="o-cd hidden"></span>`;
+      button.addEventListener('click', () => this.#castOrder(order.id));
+      bar.appendChild(button);
+    }
+  }
+
+  #castOrder(kind) {
+    if (!this.game) return;
+    const result = this.game.castOrder(kind);
+    if (!result.ok) {
+      this.#toast(result.reason, 'bad');
+      return;
+    }
+    sfx.coin();
+    this.#updateHud();
+  }
+
+  // ---------------------------------------------------------------- log & toasts
+
+  #addLog(entry) {
+    const line = document.createElement('div');
+    line.className = `log-line ${entry.kind ?? 'info'}`;
+    const year = document.createElement('span');
+    year.className = 't';
+    year.textContent = entry.year ?? '';
+    const text = document.createElement('span');
+    text.className = 'x';
+    text.textContent = entry.text;
+    line.append(year, text);
+    const log = $('#log');
+    log.prepend(line);
+    while (log.children.length > 7) log.lastChild.remove();
+  }
+
+  #toast(text, kind = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${kind}`;
+    toast.textContent = text;
+    $('#toasts').appendChild(toast);
+    setTimeout(() => {
+      toast.style.transition = 'opacity .3s ease';
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 320);
+    }, 1900);
+  }
+
+  // ---------------------------------------------------------------- armies
+
+  #syncArmies() {
+    if (!this.game) return;
+    const seen = new Set();
+    for (const army of this.game.state.armies) {
+      seen.add(army.id);
+      let token = this.armyTokens.get(army.id);
+      if (!token) {
+        token = document.createElement('div');
+        token.className = `army-token${army.sea ? ' sea' : ''}`;
+        token.style.setProperty('--token-color', this.game.state.nations[army.owner]?.color ?? '#d9b45a');
+        $('#armies').appendChild(token);
+        this.armyTokens.set(army.id, token);
+      }
+      const from = this.mapById[army.from]?.centroid ?? [0, 0];
+      const to = this.mapById[army.to]?.centroid ?? [0, 0];
+      const t = clamp(army.t / army.duration, 0, 1);
+      const x = from[0] + (to[0] - from[0]) * t;
+      const z = from[1] + (to[1] - from[1]) * t;
+      const pos = this.world.projectPoint(x, z, 0.35);
+      const lift = 16;
+      token.style.display = pos.visible ? 'flex' : 'none';
+      token.style.transform = `translate(-50%, -50%) translate(${pos.x}px, ${pos.y - lift}px)`;
+      token.textContent = fmt(army.troops);
+    }
+    for (const [id, token] of this.armyTokens) {
+      if (!seen.has(id)) {
+        token.remove();
+        this.armyTokens.delete(id);
+      }
+    }
+  }
+
+  #clearArmies() {
+    for (const token of this.armyTokens.values()) token.remove();
+    this.armyTokens.clear();
+  }
+
+  // ---------------------------------------------------------------- colors
+
+  #syncColors(force = false) {
+    if (!this.game) return;
+    const provinces = this.game.state.provinces;
+    const signature = Object.keys(provinces)
+      .sort()
+      .map((id) => provinces[id].owner ?? '-')
+      .join('');
+    if (!force && signature === this.colorSignature) return;
+    this.colorSignature = signature;
+    const colors = {};
+    for (const province of Object.values(provinces)) {
+      colors[province.id] = province.owner
+        ? this.game.state.nations[province.owner].color
+        : '#59626e';
+    }
+    this.world.setOwnership(colors);
+  }
+
+  // ---------------------------------------------------------------- UI bindings
+
+  #bindUi() {
+    $('#btn-howto').addEventListener('click', () => {
+      sfx.click();
+      $('#modal-howto').classList.remove('hidden');
+    });
+    for (const button of document.querySelectorAll('[data-close]')) {
+      button.addEventListener('click', () => {
+        sfx.click();
+        $(`#${button.dataset.close}`).classList.add('hidden');
+      });
+    }
+    $('#btn-back').addEventListener('click', () => {
+      sfx.click();
+      this.showMenu();
+    });
+    $('#btn-start').addEventListener('click', () => {
+      sfx.select();
+      this.startGame();
+    });
+    $('#btn-continue').addEventListener('click', async () => {
+      sfx.select();
+      const saved = await this.#resumeFromStorage();
+      const game = saved ? Game.deserialize(saved.game, this.map) : null;
+      if (!game) {
+        this.#toast('Сохранение не найдено', 'bad');
+        this.hasSave = false;
+        $('#btn-continue').classList.add('hidden');
+        return;
+      }
+      this.#attachGame(game);
+      this.#enterGameScreen();
+    });
+
+    for (const button of $('#speed-group').children) {
+      button.addEventListener('click', () => {
+        const speed = Number(button.dataset.speed);
+        this.setSpeed(speed);
+      });
+    }
+    $('#btn-pause-menu').addEventListener('click', () => this.openPause());
+
+    for (const button of $('#ratio-group').children) {
+      button.addEventListener('click', () => {
+        const ratio = Number(button.dataset.ratio);
+        if (this.game) this.game.setSendRatio(ratio);
+        for (const other of $('#ratio-group').children) {
+          other.classList.toggle('active', other === button);
+        }
+        sfx.click();
+      });
+    }
+
+    $('#province-panel').addEventListener('click', (event) => {
+      const close = event.target.closest('[data-close]');
+      if (close) {
+        this.selectedProvince = null;
+        this.world.setSelected(null);
+        $('#province-panel').classList.add('hidden');
+        return;
+      }
+      const upgrade = event.target.closest('.upg');
+      if (!upgrade || !this.game) return;
+      const result = this.game.upgrade(this.selectedProvince, upgrade.dataset.kind);
+      if (!result.ok) this.#toast(result.reason, 'bad');
+      else {
+        sfx.coin();
+        this.world.flashProvince(this.selectedProvince, 0.45);
+        this.#renderProvincePanel();
+        this.#updateHud();
+      }
+    });
+
+    $('#btn-resume').addEventListener('click', () => this.closePause());
+    $('#btn-restart').addEventListener('click', () => {
+      $('#modal-pause').classList.add('hidden');
+      this.#restart();
+    });
+    $('#btn-menu').addEventListener('click', () => {
+      this.save();
+      $('#modal-pause').classList.add('hidden');
+      this.showMenu();
+    });
+    $('#toggle-sound').addEventListener('change', (event) => {
+      this.settings.sound = event.target.checked;
+      sfx.setEnabled(this.settings.sound);
+      this.#saveSettings();
+    });
+    $('#toggle-labels').addEventListener('change', (event) => {
+      this.settings.labels = event.target.checked;
+      this.labels.setVisible(this.settings.labels && this.screen === 'game');
+      this.#saveSettings();
+    });
+    $('#toggle-sound').checked = this.settings.sound;
+    $('#toggle-labels').checked = this.settings.labels;
+    sfx.setEnabled(this.settings.sound);
+
+    $('#btn-again').addEventListener('click', () => {
+      $('#screen-end').classList.add('hidden');
+      this.#restart();
+    });
+    $('#btn-end-menu').addEventListener('click', () => {
+      $('#screen-end').classList.add('hidden');
+      this.showMenu();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.save();
+    });
+    window.addEventListener('beforeunload', () => this.save());
+  }
+
+  #bindKeyboard() {
+    window.addEventListener('keydown', (event) => {
+      if (this.screen !== 'game' || !this.game) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        this.setSpeed(this.game.state.speed === 0 ? this.lastSpeed : 0);
+      } else if (event.key === '1') this.setSpeed(1);
+      else if (event.key === '2') this.setSpeed(2);
+      else if (event.key === '4') this.setSpeed(4);
+      else if (event.key === 'Escape') this.openPause();
+      else if (event.key === '+' || event.key === '=') this.world.zoomBy(1.12);
+      else if (event.key === '-' || event.key === '_') this.world.zoomBy(0.89);
+      else if (event.key === 'ArrowLeft' || event.key === 'a') this.world.panBy(-2, 0);
+      else if (event.key === 'ArrowRight' || event.key === 'd') this.world.panBy(2, 0);
+      else if (event.key === 'ArrowUp' || event.key === 'w') this.world.panBy(0, -2);
+      else if (event.key === 'ArrowDown' || event.key === 's') this.world.panBy(0, 2);
+    });
+  }
+
+  setSpeed(speed) {
+    if (!this.game) return;
+    if (speed > 0) this.lastSpeed = speed;
+    this.game.setSpeed(speed);
+    this.#updateHud();
+  }
+
+  openPause() {
+    if (!this.game || this.screen !== 'game') return;
+    if (this.game.state.speed > 0) this.lastSpeed = this.game.state.speed;
+    this.game.setSpeed(0);
+    this.save();
+    $('#modal-pause').classList.remove('hidden');
+    platform.gameplayStop();
+    this.#updateHud();
+  }
+
+  closePause() {
+    $('#modal-pause').classList.add('hidden');
+    if (this.game) {
+      this.setSpeed(this.lastSpeed || 1);
+      platform.gameplayStart();
+    }
+  }
+
+  // ---------------------------------------------------------------- frame loop
+
+  loop(now) {
+    const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
+    this.lastFrame = now;
+
+    this.world.update(dt);
+    if (this.game && this.screen === 'game') {
+      if (this.game.state.status === 'playing') {
+        this.game.update(dt * (this.game.state.speed ?? 0));
+      }
+      this.#syncColors();
+      this.labels.update(this.world, this.game, this.selectedProvince, this.world.hovered);
+      this.#syncArmies();
+
+      this.hudTimer -= dt;
+      if (this.hudTimer <= 0) {
+        this.hudTimer = 0.2;
+        this.#updateHud();
+      }
+      this.saveTimer -= dt;
+      if (this.saveTimer <= 0) {
+        this.saveTimer = 12;
+        this.save();
+      }
+    }
+    this.world.render();
+    requestAnimationFrame(this.loop);
+  }
+}

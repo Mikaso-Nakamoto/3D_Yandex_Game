@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#070d16" />
+    <title>Короны Европы — стратегия завоевания</title>
+    <meta
+      name="description"
+      content="Короны Европы — браузерная стратегия в реальном времени: выберите эпоху и державу, захватите половину Европы."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070d16'/%3E%3Ctext x='32' y='45' font-size='36' text-anchor='middle' fill='%23d9b45a'%3E%E2%99%9B%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+      <div class="vignette"></div>
+      <div id="labels" class="label-layer"></div>
+      <div id="armies" class="army-layer"></div>
+      <div id="toasts" class="toasts"></div>
+
+      <!-- Меню -->
+      <section id="screen-menu" class="screen menu-screen">
+        <div class="menu-wrap">
+          <div class="brand">
+            <div class="brand-crown" data-icon="crown"></div>
+            <h1>Короны Европы</h1>
+            <p class="tagline">Захвати континент. Оставь след в истории.</p>
+          </div>
+          <div id="scenario-list" class="scenario-list"></div>
+          <div class="menu-actions">
+            <button id="btn-continue" class="btn ghost hidden">Продолжить партию</button>
+            <button id="btn-howto" class="btn ghost">Как играть</button>
+          </div>
+        </div>
+        <div class="menu-foot">
+          <span>Карта: Natural Earth (public domain)</span>
+          <span class="dot-sep">·</span>
+          <span>Движок: three.js</span>
+        </div>
+      </section>
+
+      <!-- Выбор державы -->
+      <section id="screen-nation" class="screen hidden">
+        <aside class="panel nation-panel">
+          <div class="panel-head">
+            <button id="btn-back" class="btn-icon" title="Назад" data-icon="arrowLeft"></button>
+            <div>
+              <div class="eyebrow" id="nation-era">1815</div>
+              <h2 id="nation-scenario">Венский концерт</h2>
+            </div>
+          </div>
+          <p class="panel-hint">Выберите державу на карте или в списке</p>
+          <div id="nation-list" class="nation-list"></div>
+          <div class="doctrine-block">
+            <div class="eyebrow">Доктрина правления</div>
+            <div id="doctrine-list" class="doctrine-list"></div>
+          </div>
+          <button id="btn-start" class="btn primary" disabled>Начать правление</button>
+        </aside>
+        <div class="map-hint">Колесо — зум · Перетаскивание — панорама</div>
+      </section>
+
+      <!-- Партия -->
+      <section id="screen-game" class="screen game-screen hidden">
+        <header class="hud-top">
+          <div class="chip nation-chip">
+            <span id="hud-color" class="dot"></span>
+            <span id="hud-nation">—</span>
+          </div>
+          <div class="chip" id="hud-date">—</div>
+          <div class="progress-wrap" title="Прогресс завоевания">
+            <div class="progress-bar"><div id="hud-progress-fill"></div></div>
+            <span id="hud-progress-text">0/41</span>
+          </div>
+          <div class="chip resource gold" title="Казна">
+            <span class="ico" data-icon="gold"></span>
+            <span id="hud-gold">0</span>
+            <span class="rate" id="hud-income">+0.0</span>
+          </div>
+          <div class="chip resource manpower" title="Рекруты">
+            <span class="ico" data-icon="manpower"></span>
+            <span id="hud-manpower">0</span>
+            <span class="rate" id="hud-mp-rate">+0.0</span>
+          </div>
+          <div class="speed-group" id="speed-group">
+            <button data-speed="0" class="speed-btn" title="Пауза (Пробел)" data-icon="pause"></button>
+            <button data-speed="1" class="speed-btn active">1×</button>
+            <button data-speed="2" class="speed-btn">2×</button>
+            <button data-speed="4" class="speed-btn">4×</button>
+          </div>
+          <button id="btn-pause-menu" class="btn-icon" title="Меню" data-icon="menu"></button>
+        </header>
+
+        <div class="province-panel panel hidden" id="province-panel"></div>
+        <div class="orders-bar" id="orders-bar"></div>
+        <div class="log" id="log"></div>
+        <div class="send-ratio" id="send-ratio">
+          <span class="eyebrow">В поход</span>
+          <div class="segmented" id="ratio-group">
+            <button data-ratio="0.25">25%</button>
+            <button data-ratio="0.5" class="active">50%</button>
+            <button data-ratio="0.75">75%</button>
+            <button data-ratio="1">100%</button>
+          </div>
+        </div>
+        <div class="hint-bar" id="hint-bar">
+          Перетащите войска из своей провинции в соседнюю · клик по провинции — улучшения
+        </div>
+      </section>
+    </div>
+
+    <!-- Как играть -->
+    <div id="modal-howto" class="modal hidden">
+      <div class="modal-card">
+        <button class="modal-close" data-close="modal-howto">✕</button>
+        <div class="eyebrow">Правила</div>
+        <h2>Как играть</h2>
+        <div class="howto-grid">
+          <div>
+            <h3>1. Выберите эпоху и державу</h3>
+            <p>Три сценария — три расклада сил. Доктрина даёт бонус на всю партию.</p>
+            <h3>2. Двигайте войска</h3>
+            <p>
+              Зажмите свою провинцию и отпустите на соседней. Доля отправленных войск
+              задаётся внизу. Острова соединены морскими маршрутами.
+            </p>
+          </div>
+          <div>
+            <h3>3. Развивайте земли</h3>
+            <p>
+              Двойной клик по своей провинции открывает улучшения: мануфактура, крепость,
+              казармы. Гарнизон сам восстанавливается из рекрутов.
+            </p>
+            <h3>4. Побеждайте</h3>
+            <p>
+              Захватите половину провинций Европы. Приказы и доктрина помогут переломить
+              ход войны.
+            </p>
+          </div>
+        </div>
+        <div class="hotkeys">
+          <span><kbd>Пробел</kbd> пауза</span>
+          <span><kbd>1</kbd><kbd>2</kbd><kbd>4</kbd> скорость</span>
+          <span><kbd>Shift</kbd> + перетаскивание — все войска</span>
+          <span><kbd>Esc</kbd> меню</span>
+        </div>
+        <button class="btn primary" data-close="modal-howto">Понятно</button>
+      </div>
+    </div>
+
+    <!-- Пауза -->
+    <div id="modal-pause" class="modal hidden">
+      <div class="modal-card narrow">
+        <div class="eyebrow">Партия</div>
+        <h2>Пауза</h2>
+        <button class="btn primary" id="btn-resume">Вернуться в игру</button>
+        <button class="btn ghost" id="btn-restart">Начать заново</button>
+        <button class="btn ghost" id="btn-menu">Выйти в меню</button>
+        <div class="settings-row">
+          <label class="switch">
+            <input type="checkbox" id="toggle-sound" checked />
+            <span>Звук</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="toggle-labels" checked />
+            <span>Подписи</span>
+          </label>
+        </div>
+        <p class="save-note" id="save-note">Прогресс сохраняется автоматически</p>
+      </div>
+    </div>
+
+    <!-- Итог -->
+    <div id="screen-end" class="modal end hidden">
+      <div class="modal-card end-card">
+        <div class="end-emblem" id="end-emblem">♛</div>
+        <div class="eyebrow" id="end-eyebrow">Итог</div>
+        <h2 id="end-title">Победа</h2>
+        <p id="end-text"></p>
+        <div class="end-stats" id="end-stats"></div>
+        <div class="end-actions">
+          <button class="btn primary" id="btn-again">Сыграть ещё</button>
+          <button class="btn ghost" id="btn-end-menu">В меню</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

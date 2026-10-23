@@ -1,0 +1,22 @@
+{
+  "name": "crowns-of-europe",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Crowns of Europe — real-time grand strategy for Yandex Games",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "geo": "node tools/build-map.mjs",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "three": "^0.186.1",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5",
+    "world-atlas": "^2.0.2"
+  }
+}
