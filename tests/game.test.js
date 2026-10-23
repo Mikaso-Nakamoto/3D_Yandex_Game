@@ -7,6 +7,9 @@ import { normalizeRules, DEFAULT_RULES } from '../src/game/rules.js';
 import { BAL } from '../src/game/balance.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
+const americaMap = JSON.parse(readFileSync(new URL('../src/data/map-america.json', import.meta.url), 'utf8'));
+const MAPS = { europe: map, america: americaMap };
+const mapFor = (scenario) => MAPS[scenario.theatre ?? 'europe'];
 const makeGame = (opts = {}) => {
   const { ai = false, ...rest } = opts;
   const game = new Game({ scenarioId: 'concert', nationId: 'FRA', doctrineId: 'coin', map, seed: 42, ...rest });
@@ -35,8 +38,8 @@ test('adjacency is symmetric', () => {
 });
 
 test('every scenario assigns lands that exist and leaves no nation landless', () => {
-  const ids = new Set(map.provinces.map((p) => p.id));
   for (const scenario of SCENARIOS) {
+    const ids = new Set(mapFor(scenario).provinces.map((p) => p.id));
     const seen = new Set();
     for (const nation of scenario.nations) {
       assert.ok(nation.provinces.length > 0, `${nation.id} has no provinces`);
@@ -418,7 +421,7 @@ test('a level-1 factory pays for itself well inside a match', () => {
   // A match lasts roughly 600-900 game seconds; the richest province of every
   // scenario should return the price of its first factory in under 3 minutes.
   for (const scenario of SCENARIOS) {
-    const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map });
+    const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map: mapFor(scenario) });
     const owned = Object.values(game.state.provinces).filter((p) => p.owner);
     const richest = owned.sort((a, b) => b.pop - a.pop)[0];
     const gain = game.upgradePreview(richest.id, 'factory').gold;
@@ -480,4 +483,54 @@ test('the war tax order repays its price for a mid-size nation', () => {
   const income = game.player.income;
   const gain = income * BAL.buffDuration.tax;
   assert.ok(gain > BAL.orderGold.tax, `tax returns ${gain.toFixed(1)} for ${BAL.orderGold.tax} gold`);
+});
+
+
+// ---------------------------------------------------------------- america theatre
+
+test('the american theatre is fully wired: lands, borders, sea routes', () => {
+  const ids = new Set(americaMap.provinces.map((p) => p.id));
+  assert.equal(americaMap.theatre, 'america');
+  assert.equal(americaMap.provinces.length, 13);
+  for (const province of americaMap.provinces) {
+    assert.ok(province.rings.length > 0, `${province.id} has no shape`);
+    assert.ok(province.pop > 0, `${province.id} has no population`);
+    assert.ok(province.neighbors.length > 0, `${province.id} is isolated`);
+    for (const neighbour of province.neighbors) {
+      assert.ok(ids.has(neighbour), `${province.id} -> unknown ${neighbour}`);
+    }
+  }
+});
+
+test('american adjacency is symmetric and does not link a province to itself', () => {
+  const byId = Object.fromEntries(americaMap.provinces.map((p) => [p.id, p]));
+  for (const province of americaMap.provinces) {
+    for (const neighbour of province.neighbors) {
+      assert.notEqual(neighbour, province.id, `${province.id} neighbours itself`);
+      assert.ok(byId[neighbour].neighbors.includes(province.id), `${province.id}/${neighbour} not symmetric`);
+    }
+  }
+});
+
+test('the new world scenario fills every province of its theatre', () => {
+  const scenario = SCENARIOS.find((s) => s.id === 'neworld');
+  assert.ok(scenario, 'scenario exists');
+  const game = new Game({ scenarioId: 'neworld', nationId: 'USA', map: americaMap });
+  for (const province of americaMap.provinces) {
+    const owner = game.state.provinces[province.id].owner;
+    assert.ok(owner, `${province.id} is unowned`);
+  }
+  assert.equal(game.state.nations.USA.isPlayer, true);
+  assert.equal(game.provinceCount('USA'), 6);
+});
+
+test('a game refuses a map from the wrong theatre', () => {
+  assert.throws(
+    () => new Game({ scenarioId: 'neworld', nationId: 'USA', map }),
+    /театр/i,
+  );
+  assert.throws(
+    () => new Game({ scenarioId: 'concert', nationId: 'FRA', map: americaMap }),
+    /театр/i,
+  );
 });

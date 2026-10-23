@@ -77,6 +77,45 @@ export class World {
     this.callbacks = callbacks;
   }
 
+  /** Swaps the whole theatre under the same renderer and canvas. */
+  setMap(map) {
+    if (!map || map === this.map) return;
+    this.scene.traverse((object) => {
+      if (object.geometry) object.geometry.dispose();
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : object.material
+          ? [object.material]
+          : [];
+      for (const material of materials) material.dispose();
+    });
+    this.scene.clear();
+    this.map = map;
+    this.byId = Object.fromEntries(map.provinces.map((p) => [p.id, p]));
+    this.meshes = [];
+    this.groups.clear();
+    this.materials.clear();
+    this.ownerColors.clear();
+    this.flash.clear();
+    this.hovered = null;
+    this.dragFrom = null;
+    this.dragHover = null;
+    this.validTargets = new Set();
+    this.accent = new Set();
+    this.selected = null;
+    this.selectionLine = null;
+    this.zoom = 1;
+    this.zoomTarget = 1;
+    this.target.set(0, 0, 0);
+    this.panTarget.set(0, 0, 0);
+    this.#buildLights();
+    this.#buildWater();
+    this.#buildProvinces();
+    this.#buildBorders();
+    this.resize();
+    this.resetView();
+  }
+
   // ---------------------------------------------------------------- build
 
   #buildLights() {

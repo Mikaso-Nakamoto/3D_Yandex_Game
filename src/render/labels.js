@@ -34,6 +34,36 @@ export class LabelLayer {
     this.placed = [];
   }
 
+  /** Rebuilds labels for another theatre. */
+  setMap(map) {
+    this.container.innerHTML = '';
+    this.map = map;
+    this.items.clear();
+    for (const province of map.provinces) {
+      const el = document.createElement('div');
+      el.className = 'province-label';
+      el.innerHTML =
+        '<span class="pl-name"></span>' +
+        '<span class="pl-troops"><span class="pl-troops-value"></span><span class="pl-over"></span></span>';
+      el.style.display = 'none';
+      this.container.appendChild(el);
+      this.items.set(province.id, {
+        el,
+        name: el.querySelector('.pl-name'),
+        troops: el.querySelector('.pl-troops'),
+        troopsValue: el.querySelector('.pl-troops-value'),
+        over: el.querySelector('.pl-over'),
+        area: province.area ?? 0,
+        lastTroops: null,
+        lastOver: null,
+        lastOwner: null,
+        lastText: null,
+        visible: false,
+      });
+    }
+    this.visible = true;
+  }
+
   setVisible(visible) {
     this.visible = visible;
     if (!visible) {

@@ -2,7 +2,7 @@ import { World } from '../render/world.js';
 import { LabelLayer } from '../render/labels.js';
 import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
-import { SCENARIOS, DOCTRINES, getScenario } from '../data/scenarios.js';
+import { SCENARIOS, DOCTRINES, THEATRES, getScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
 import {
   DEFAULT_RULES,
@@ -26,13 +26,15 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const fmt = (n) => Math.round(n).toLocaleString('ru-RU');
 
 export class App {
-  constructor(map) {
-    this.map = map;
-    this.mapById = Object.fromEntries(map.provinces.map((p) => [p.id, p]));
+  constructor(maps) {
+    this.maps = maps;
+    this.theatre = 'europe';
+    this.map = maps[this.theatre];
+    this.mapById = Object.fromEntries(this.map.provinces.map((p) => [p.id, p]));
     this.settings = this.#loadSettings();
     this.pendingRules = normalizeRules(this.settings.rules ?? {});
 
-    this.world = new World($('#view'), map, {
+    this.world = new World($('#view'), this.map, {
       canDrag: (id) => this.#canStartDrag(id),
       onDragStart: (id) => this.#dragStart(id),
       onDrop: (from, to) => this.#dragDrop(from, to),
@@ -42,7 +44,7 @@ export class App {
       onArrowPreview: (preview) => this.arrowLayer.setPreview(preview),
     });
     this.arrowLayer = new ArrowLayer($('#arrows'), this.world);
-    this.labels = new LabelLayer($('#labels'), map);
+    this.labels = new LabelLayer($('#labels'), this.map);
     this.labels.setVisible(false);
 
     this.screen = 'menu';
@@ -110,7 +112,7 @@ export class App {
 
   save() {
     if (!this.game || this.game.state.status !== 'playing') return;
-    const payload = { savedAt: Date.now(), game: this.game.serialize() };
+    const payload = { savedAt: Date.now(), theatre: this.theatre, game: this.game.serialize() };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
       this.hasSave = true;
@@ -136,6 +138,24 @@ export class App {
     return saved;
   }
 
+  // ---------------------------------------------------------------- theatres
+
+  /** Switches the rendered map. Safe to call when the theatre is already active. */
+  setTheatre(theatreId) {
+    const id = this.maps[theatreId] ? theatreId : 'europe';
+    if (id === this.theatre && this.map === this.maps[id]) return this.theatre;
+    this.theatre = id;
+    this.map = this.maps[id];
+    this.mapById = Object.fromEntries(this.map.provinces.map((p) => [p.id, p]));
+    this.world.setMap(this.map);
+    this.labels.setMap(this.map);
+    this.#clearArmies();
+    this.selectedProvince = null;
+    this.colorSignature = '';
+    $('#province-panel').classList.add('hidden');
+    return this.theatre;
+  }
+
   // ---------------------------------------------------------------- menu
 
   #buildMenu() {
@@ -152,6 +172,7 @@ export class App {
         <div class="scenario-title">${scenario.title}</div>
         <div class="scenario-desc">${scenario.blurb}</div>
         <div class="scenario-meta">
+          <span>${THEATRES[scenario.theatre]?.title ?? 'Европа'}</span>
           <span>${scenario.nations.length} держав</span>
           <span class="difficulty">${dots}<span>${scenario.difficulty}</span></span>
         </div>`;
@@ -175,14 +196,14 @@ export class App {
     this.world.setValidTargets([]);
     this.world.resetView();
     this.world.setAutoPan(true);
-    const preview = getScenario('eve1939');
-    this.world.setOwnership(this.#previewColors(preview));
+    this.world.setOwnership(this.#previewColors(this.scenario ?? getScenario('concert')));
     $('#province-panel').classList.add('hidden');
     platform.gameplayStop();
   }
 
   openNationSelect(scenarioId) {
     this.scenario = getScenario(scenarioId);
+    this.setTheatre(this.scenario.theatre ?? 'europe');
     this.selectedNation = null;
     this.selectedProvince = null;
     this.doctrine = 'coin';
@@ -365,6 +386,7 @@ export class App {
   #attachGame(game) {
     this.game = game;
     this.scenario = getScenario(game.state.scenarioId);
+    this.setTheatre(this.scenario.theatre ?? 'europe');
     this.selectedNation = game.state.nationId;
     this.selectedProvince = null;
     this.colorSignature = '';
@@ -1168,6 +1190,9 @@ export class App {
     $('#btn-continue').addEventListener('click', async () => {
       sfx.select();
       const saved = await this.#resumeFromStorage();
+      // Old saves have no theatre field: fall back to the scenario it belongs to.
+      const theatre = saved?.theatre ?? getScenario(saved?.game?.state?.scenarioId)?.theatre ?? 'europe';
+      this.setTheatre(theatre);
       const game = saved ? Game.deserialize(saved.game, this.map) : null;
       if (!game) {
         this.#toast('Сохранение не найдено', 'bad');

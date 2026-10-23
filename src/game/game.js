@@ -14,6 +14,11 @@ export class Game {
   constructor({ scenarioId, nationId, doctrineId = 'coin', map, seed = 20261023, rules = {} }) {
     this.scenario = getScenario(scenarioId);
     this.rules = normalizeRules(rules);
+    if (map.theatre && this.scenario.theatre && map.theatre !== this.scenario.theatre) {
+      throw new Error(
+        `Сценарий «${this.scenario.title}» относится к театру ${this.scenario.theatre}, а передана карта ${map.theatre}`,
+      );
+    }
     this.map = map;
     this.byId = Object.fromEntries(map.provinces.map((p) => [p.id, p]));
     this.seaSet = new Set();

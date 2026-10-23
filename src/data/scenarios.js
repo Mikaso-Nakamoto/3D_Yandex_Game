@@ -1,7 +1,21 @@
 // Scenario data: who owns what in each era. All sets, names and balance values are original.
+export const THEATRES = {
+  europe: {
+    id: 'europe',
+    title: 'Европа',
+    blurb: 'Плотная карта: короткие границы, много соседей, быстрые войны.',
+  },
+  america: {
+    id: 'america',
+    title: 'Северная Америка',
+    blurb: 'Простор: огромные расстояния, редкие границы, морские пути вдоль берегов.',
+  },
+};
+
 export const SCENARIOS = [
   {
     id: 'concert',
+    theatre: 'europe',
     title: 'Венский концерт',
     era: '1815',
     startYear: 1815,
@@ -86,6 +100,7 @@ export const SCENARIOS = [
   },
   {
     id: 'eve1939',
+    theatre: 'europe',
     title: 'Канун войны',
     era: '1939',
     startYear: 1939,
@@ -240,6 +255,7 @@ export const SCENARIOS = [
   },
   {
     id: 'mosaic',
+    theatre: 'europe',
     title: 'Мозаика',
     era: '1444',
     startYear: 1444,
@@ -324,6 +340,52 @@ export const SCENARIOS = [
       { province: 'RO', garrison: 0.65, fort: 1 },
     ],
     balance: { aiAggression: 1.0, aiEco: 1.0, neutralStrength: 0.9 },
+  },
+  {
+    id: 'neworld',
+    theatre: 'america',
+    title: 'Новый Свет',
+    era: '1815',
+    startYear: 1815,
+    startMonth: 6,
+    monthsPerSecond: 0.3,
+    difficulty: 'Средне',
+    blurb:
+      'Молодая республика на востоке, британские земли на севере, испанские вице-королевства на юге и русская колония на краю света. Атлантика далеко, а соседи близко.',
+    nations: [
+      {
+        id: 'USA',
+        army: 1.1,
+        name: 'Соединённые Штаты', short: 'США', color: '#3f6fb5', capital: 'NE',
+        provinces: ['NE', 'MW', 'SO', 'PL', 'WE', 'FL'], ai: { aggression: 1.0, eco: 1.1 },
+      },
+      {
+        id: 'BNA',
+        army: 1.2,
+        name: 'Британская Северная Америка', short: 'Британия', color: '#b04a4a', capital: 'CA',
+        provinces: ['CA', 'NW', 'GL'], ai: { aggression: 0.85, eco: 1.05 },
+      },
+      {
+        id: 'ESP',
+        army: 0.9,
+        name: 'Испанские колонии', short: 'Испания', color: '#b5651d', capital: 'MX',
+        provinces: ['MX', 'CU'], ai: { aggression: 0.85, eco: 1.0 },
+      },
+      {
+        id: 'RUS',
+        army: 1.0,
+        name: 'Российско-американская компания', short: 'Русская Америка', color: '#4f8a5b', capital: 'AK',
+        provinces: ['AK'], ai: { aggression: 0.7, eco: 0.95 },
+      },
+      {
+        id: 'HAI',
+        army: 0.6,
+        name: 'Государство Гаити', short: 'Гаити', color: '#8a6aa8', capital: 'HI',
+        provinces: ['HI'], ai: { aggression: 0.75, eco: 0.9 },
+      },
+    ],
+    neutrals: [],
+    balance: { aiAggression: 0.9, aiEco: 1.0, neutralStrength: 0.9 },
   },
 ];
 
