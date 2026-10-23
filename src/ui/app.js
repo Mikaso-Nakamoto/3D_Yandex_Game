@@ -1104,7 +1104,7 @@ export class App {
     const totalProvinces = Object.keys(game.state.provinces).length;
     $('#rank-table').innerHTML = `
       <div class="rank-row rank-head">
-        <span>Держава</span><span>Земли</span><span>Армия</span><span>Дух</span><span>Усталость</span><span>Доход</span>
+        <span>Держава</span><span>Земли</span><span>Армия</span><span>Дух</span><span>Усталость</span><span>Доход</span><span>Рекруты</span>
       </div>
       ${rows
         .map(
@@ -1122,6 +1122,7 @@ export class App {
           <span class="rank-cell ${row.morale <= 40 ? 'is-bad' : row.morale >= 65 ? 'is-good' : ''}">${row.nation.alive ? row.morale : '—'}</span>
           <span class="rank-cell ${row.exhaustion >= 55 ? 'is-bad' : ''}">${row.nation.alive ? `${row.exhaustion}%` : '—'}</span>
           <span class="rank-cell">${row.nation.alive ? `+${row.income.toFixed(1)}/с` : '—'}</span>
+          <span class="rank-cell">${row.nation.alive ? `+${row.recruits.toFixed(0)}/мин` : '—'}</span>
         </div>`,
         )
         .join('')}
@@ -1416,6 +1417,8 @@ export class App {
   #bindKeyboard() {
     window.addEventListener('keydown', (event) => {
       if (this.screen !== 'game' || !this.game) return;
+      // Never hijack typing (rules inputs, future chat fields).
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.code === 'Space') {
         event.preventDefault();
         this.setSpeed(this.game.state.speed === 0 ? this.lastSpeed : 0);
@@ -1429,7 +1432,27 @@ export class App {
       else if (event.key === 'ArrowRight' || event.key === 'd') this.world.panBy(2, 0);
       else if (event.key === 'ArrowUp' || event.key === 'w') this.world.panBy(0, -2);
       else if (event.key === 'ArrowDown' || event.key === 's') this.world.panBy(0, 2);
+      else if (event.key === 'm' || event.key === 'ь' || event.key === 'M') this.#castOrder('mobilize');
+      else if (event.key === 't' || event.key === 'е' || event.key === 'T') this.#castOrder('tax');
+      else if (event.key === 'f' || event.key === 'а' || event.key === 'F') this.#castOrder('march');
+      else if (event.key === 'r' || event.key === 'к' || event.key === 'R') this.#openRankings();
+      else if (event.key === 'Tab') {
+        event.preventDefault();
+        this.#cycleRatio();
+      }
     });
+  }
+
+  #cycleRatio() {
+    const steps = [0.25, 0.5, 0.75, 1];
+    const current = this.game.state.sendRatio;
+    const index = steps.findIndex((v) => Math.abs(v - current) < 0.01);
+    const next = steps[(index + 1) % steps.length];
+    this.game.setSendRatio(next);
+    for (const button of $('#ratio-group').children) {
+      button.classList.toggle('active', Math.abs(Number(button.dataset.ratio) - next) < 0.01);
+    }
+    this.#toast(`В поход уйдёт ${Math.round(next * 100)}% гарнизона`, 'info');
   }
 
   setSpeed(speed) {

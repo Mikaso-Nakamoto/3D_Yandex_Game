@@ -2323,7 +2323,7 @@ kbd {
 
 .rank-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.5fr) 90px 80px 84px 92px;
+  grid-template-columns: minmax(130px, 1.5fr) 74px 70px 44px 74px 76px 84px;
   gap: 8px;
   align-items: center;
   padding: 7px 9px;
@@ -2637,7 +2637,7 @@ kbd {
 }
 
 .rank-row {
-  grid-template-columns: minmax(120px, 1.4fr) 80px 74px 52px 74px 84px;
+  grid-template-columns: minmax(100px, 1.3fr) 58px 60px 38px 62px 66px 70px;
 }
 
 .rank-cell.is-good {
@@ -2892,4 +2892,19 @@ kbd {
 .board-rank {
   color: var(--gold);
   font-weight: 700;
+}
+
+
+@media (max-width: 720px) {
+  .rank-row {
+    grid-template-columns: minmax(72px, 1.2fr) 46px 52px 34px 52px;
+    gap: 5px;
+    font-size: 10.5px;
+  }
+
+  /* Morale and weariness are the least actionable on a phone; keep the rest. */
+  .rank-row > :nth-child(6),
+  .rank-row > :nth-child(7) {
+    display: none;
+  }
 }
