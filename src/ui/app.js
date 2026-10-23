@@ -682,6 +682,7 @@ export class App {
     const max = game.maxGarrison(province.id);
     const defense = game.defenseValue(province.id);
     const share = clamp(province.garrison / Math.max(1, max), 0, 1);
+    const over = Math.max(0, Math.round(province.garrison - max));
     const regen = max * BAL.reinforceShare * (1 + province.barracks * 0.12);
     const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
     const doctrineIncome = 1 + (game.player.doctrine === 'coin' ? 0.3 : 0);
@@ -730,9 +731,15 @@ export class App {
           <span class="meter-label">Гарнизон</span>
           <span class="meter-value">${fmt(province.garrison)} <s>/ ${fmt(max)}</s></span>
         </div>
-        <div class="meter"><i style="width:${(share * 100).toFixed(1)}%"></i></div>
+        <div class="meter ${over > 0 ? 'is-over' : ''}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>
         <div class="meter-foot">
-          <span>Пополнение ${isMine ? `+${regen.toFixed(1)}/с` : 'нет'}</span>
+          <span>${
+            over > 0
+              ? `<b class="over-note">сверх нормы +${fmt(over)}</b>`
+              : isMine
+                ? `Пополнение +${regen.toFixed(1)}/с`
+                : 'Пополнение нет'
+          }</span>
           <span>Оборона <b>${fmt(defense)}</b></span>
         </div>
       </div>
@@ -751,7 +758,7 @@ export class App {
       <div class="pp-upgrades">${upgrades}</div>
       <p class="pp-hint">${
         isMine
-          ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать. Сейчас отправится ${Math.round(game.state.sendRatio * 100)}% гарнизона.`
+          ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать. Сейчас отправится ${Math.round(game.state.sendRatio * 100)}% гарнизона. Подкрепления складываются сверх нормы и не пропадают.`
           : `Чтобы атаковать, перетащите войска сюда из своей соседней провинции. Гарнизон здесь ${fmt(province.garrison)}, оборона ${fmt(defense)}.`
       }</p>
     `;

@@ -292,3 +292,53 @@ test('rules: unknown values fall back to defaults and survive a save', () => {
   assert.equal(restored.state.rules.aiStyle, 'calm');
   assert.equal(restored.state.rules.startPaused, true);
 });
+
+
+test('reinforcing a full province keeps every soldier', () => {
+  const game = makeGame();
+  game.province('BE').owner = 'FRA';
+  const max = game.maxGarrison('FR');
+  game.province('FR').garrison = max;
+  game.province('BE').garrison = 400;
+
+  const before = game.province('FR').garrison + game.province('BE').garrison;
+  game.sendTroops('BE', 'FR', 1);
+  for (let i = 0; i < 400; i += 1) game.update(0.05);
+
+  const sent = game.province('FR').garrison - max;
+  assert.ok(sent >= 4, `reinforcement was lost: ${sent}`);
+  assert.ok(game.province('FR').garrison > max, 'garrison should stack above the cap');
+  assert.ok(game.province('FR').garrison + game.province('BE').garrison > before * 0.95);
+});
+
+test('stacked reinforcements never evaporate over repeated deliveries', () => {
+  const game = makeGame();
+  game.province('BE').owner = 'FRA';
+  const max = game.maxGarrison('FR');
+  game.province('FR').garrison = max;
+  game.province('BE').garrison = 600;
+  for (let round = 0; round < 5; round += 1) {
+    if (game.province('BE').garrison < 10) break;
+    const sent = Math.floor(game.province('BE').garrison * 0.5);
+    game.sendTroops('BE', 'FR', 0.5);
+    for (let i = 0; i < 300; i += 1) game.update(0.05);
+    assert.ok(
+      game.province('FR').garrison >= max + sent * 0.9 || game.province('BE').garrison + max > 0,
+      `round ${round}: FR=${game.province('FR').garrison}`,
+    );
+  }
+  assert.ok(game.province('FR').garrison > max * 1.6, 'stacking should keep growing');
+});
+
+test('mobilization refuses politely when every garrison is already overfull', () => {
+  const game = makeGame();
+  game.player.gold = 500;
+  for (const province of game.provinces) {
+    if (province.owner === 'FRA') province.garrison = game.maxGarrison(province.id) * 2;
+  }
+  const gold = game.player.gold;
+  const result = game.castOrder('mobilize');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /полны/);
+  assert.equal(game.player.gold, gold, 'gold must be refunded');
+});

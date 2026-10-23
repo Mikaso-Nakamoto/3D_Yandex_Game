@@ -1239,6 +1239,16 @@ body {
   transition: width 0.25s ease;
 }
 
+.meter.is-over i {
+  background: linear-gradient(90deg, #a8792f, #f2d788);
+  box-shadow: 0 0 10px rgba(242, 215, 136, 0.45);
+}
+
+.over-note {
+  color: #f2d788;
+  font-weight: 600;
+}
+
 .meter-foot {
   display: flex;
   justify-content: space-between;

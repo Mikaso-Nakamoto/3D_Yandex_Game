@@ -331,8 +331,14 @@ export class Game {
 
     if (kind === 'mobilize') {
       const owned = this.#ownedProvinces(nation.id);
-      const wants = owned.map((p) => Math.min(this.#maxGarrison(p) * BAL.mobilizeShare, this.#maxGarrison(p) - p.garrison));
+      const wants = owned.map((p) =>
+        Math.max(0, Math.min(this.#maxGarrison(p) * BAL.mobilizeShare, this.#maxGarrison(p) - p.garrison)),
+      );
       const totalWanted = wants.reduce((a, b) => a + b, 0);
+      if (totalWanted < 1) {
+        nation.gold += cost;
+        return { ok: false, reason: 'Все гарнизоны уже полны' };
+      }
       const budget = Math.min(nation.manpower, totalWanted);
       if (budget < 1) {
         nation.gold += cost;
@@ -443,10 +449,18 @@ export class Game {
     const attacker = s.nations[army.owner];
     if (!target || !attacker) return;
 
-    // Friendly move: reinforce.
+    // Friendly move: reinforce. Troops stack above the garrison cap instead of
+    // evaporating, and the excess is reported so the player can see it.
     if (target.owner === army.owner) {
-      const max = this.#maxGarrison(target);
-      target.garrison = Math.min(max * 1.5, target.garrison + army.troops);
+      const before = target.garrison;
+      target.garrison += army.troops;
+      const over = target.garrison - this.#maxGarrison(target);
+      if (over > 0) {
+        this.#emit('overstack', { provinceId: target.id, troops: army.troops, over });
+      }
+      if (this.state.provinces[army.to] && before !== target.garrison && army.owner === this.state.nationId) {
+        this.#log(`${this.provinceName(target.id)}: подкрепление +${Math.round(army.troops)}`, 'good');
+      }
       return;
     }
 
