@@ -873,7 +873,11 @@ export class App {
             ? `<div class="defense-note">${
                 over > 0
                   ? `Из них ${fmt(breakdown.above)} сверх нормы бьются вполсилы (×${BAL.overstackDefense}), ${
-                      regen > 0 ? `набор идёт дальше: +${regen.toFixed(2)}/с` : 'набор остановлен на пределе'
+                      province.garrison >= game.garrisonCeiling(province.id)
+                        ? 'дальше набирать некуда — предел снабжения'
+                        : game.player.manpower > 0
+                          ? `набор идёт дальше: +${regen.toFixed(2)}/с`
+                          : 'набор ждёт рекрутов'
                     }. `
                   : ''
               }Крепость ×${breakdown.fortMul.toFixed(2)} · доктрина ×${breakdown.doctrineMul.toFixed(2)} · дух ×${breakdown.moraleMul.toFixed(2)}</div>`
