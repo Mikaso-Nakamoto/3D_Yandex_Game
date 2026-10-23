@@ -32,42 +32,41 @@ function build(game, nation, owned) {
       const t = state.provinces[nid];
       return !t.owner || t.owner !== nation.id;
     });
+  const pressured = (p) =>
+    border(p) &&
+    game.neighbors(p.id)
+      .filter((nid) => state.provinces[nid].owner && state.provinces[nid].owner !== nation.id)
+      .reduce((acc, nid) => acc + game.defenseValue(nid), 0) > game.defenseValue(p.id);
 
-  const threatened = owned
-    .filter(border)
-    .map((p) => ({
-      p,
-      pressure: game.neighbors(p.id)
-        .filter((nid) => state.provinces[nid].owner && state.provinces[nid].owner !== nation.id)
-        .reduce((acc, nid) => acc + game.defenseValue(nid), 0) - game.defenseValue(p.id),
-    }))
-    .sort((a, b) => b.pressure - a.pressure);
-
+  // Value per gold, with a planning horizon of roughly four minutes of play.
+  const HORIZON = 240;
   const candidates = [];
-  if (threatened.length && threatened[0].pressure > 0) {
-    const fortLevel = threatened[0].p.fort;
-    const cost = upgradeCost('fort', fortLevel);
-    if (fortLevel < BAL.maxLevel && nation.gold >= cost) candidates.push({ p: threatened[0].p, kind: 'fort', cost, weight: 3 });
-  }
-  const byPop = [...owned].sort((a, b) => b.pop - a.pop);
-  for (const p of byPop.slice(0, 3)) {
-    const cost = upgradeCost('factory', p.factory);
-    if (p.factory < BAL.maxLevel && nation.gold >= cost) {
-      candidates.push({ p, kind: 'factory', cost, weight: 2 });
-      break;
+  for (const p of owned) {
+    const threat = pressured(p);
+    for (const kind of ['factory', 'barracks', 'fort']) {
+      if (p[kind] >= BAL.maxLevel) continue;
+      const cost = upgradeCost(kind, p[kind]);
+      if (nation.gold < cost) continue;
+      const preview = game.upgradePreview(p.id, kind);
+      if (!preview) continue;
+      let value = 0;
+      if (kind === 'factory') value = (preview.gold ?? 0) * HORIZON;
+      else if (kind === 'barracks') value = (preview.garrison ?? 0) * (border(p) ? 1.6 : 1);
+      else value = (preview.defense ?? 0) * (threat ? 1.8 : 0.5);
+      if (value <= 0) continue;
+      candidates.push({ p, kind, cost, score: value / cost });
     }
   }
-  const barracksTarget = byPop.find((p) => border(p) && p.barracks < BAL.maxLevel);
-  if (barracksTarget) {
-    const cost = upgradeCost('barracks', barracksTarget.barracks);
-    if (nation.gold >= cost) candidates.push({ p: barracksTarget, kind: 'barracks', cost, weight: 1 });
-  }
   if (!candidates.length) return;
+  candidates.sort((a, b) => b.score - a.score);
 
-  const pick = game.rng.chance(0.6) ? candidates[0] : game.rng.pick(candidates);
+  // Mostly buy the best value, sometimes a near-best option so AI play varies.
+  const pool = candidates.slice(0, 3);
+  const pick = game.rng.chance(0.6) ? pool[0] : game.rng.pick(pool);
   if (pick.cost > nation.gold) return;
   nation.gold -= pick.cost;
   pick.p[pick.kind] += 1;
+  game.state.stats.aiUpgrades = (game.state.stats.aiUpgrades ?? 0) + 1;
 }
 
 function attack(game, nation, owned) {

@@ -683,7 +683,7 @@ export class App {
     const over = Math.max(0, Math.round(province.garrison - max));
     const marching = game.troopsInTransit(province.id);
     const marchingCount = game.armiesFrom(province.id).length;
-    const regen = max * BAL.reinforceShare * (1 + province.barracks * 0.12);
+    const regen = max * BAL.reinforceShare * (1 + province.barracks * BAL.barracksReinforce);
     const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
     const doctrineIncome = 1 + (game.player.doctrine === 'coin' ? 0.3 : 0);
     const recruits = (BAL.manpowerBase + province.pop * BAL.manpowerPop) * (1 + province.factory * BAL.factoryManpower);
@@ -696,6 +696,7 @@ export class App {
         const affordable = !maxed && game.player.gold >= cost;
         const pips = Array.from({ length: BAL.maxLevel }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
         const shortfall = !maxed && !affordable ? `не хватает ${Math.ceil(cost - game.player.gold)}` : null;
+        const preview = maxed ? null : game.upgradePreview(province.id, upgrade.id);
         return `
           <button class="upg ${maxed ? 'is-max' : ''}" data-kind="${upgrade.id}"
             ${!isMine || maxed || !affordable ? 'disabled' : ''}
@@ -706,7 +707,7 @@ export class App {
                 <span class="u-name">${upgrade.name}</span>
                 <span class="u-pips">${pips}</span>
               </span>
-              <span class="u-sub">${maxed ? 'максимальный уровень' : shortfall ?? upgrade.short ?? upgrade.description}</span>
+              <span class="u-sub">${maxed ? 'максимальный уровень' : shortfall ?? preview?.text ?? upgrade.short}</span>
             </span>
             <span class="u-cost">${maxed ? '—' : `${cost} золота`}</span>
           </button>`;

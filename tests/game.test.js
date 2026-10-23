@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Game } from '../src/game/game.js';
 import { SCENARIOS } from '../src/data/scenarios.js';
 import { normalizeRules, DEFAULT_RULES } from '../src/game/rules.js';
+import { BAL } from '../src/game/balance.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const makeGame = (opts = {}) => {
@@ -408,4 +409,75 @@ test('two armies from one province arrive independently', () => {
   for (let i = 0; i < 600; i += 1) game.update(0.05);
   assert.equal(game.province('BE').owner, 'FRA');
   assert.equal(game.province('IT').owner, 'FRA');
+});
+
+// ---------------------------------------------------------------- upgrade balance
+
+test('a level-1 factory pays for itself well inside a match', () => {
+  // Design intent: building must be a real alternative to hoarding gold.
+  // A match lasts roughly 600-900 game seconds; the richest province of every
+  // scenario should return the price of its first factory in under 3 minutes.
+  for (const scenario of SCENARIOS) {
+    const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map });
+    const owned = Object.values(game.state.provinces).filter((p) => p.owner);
+    const richest = owned.sort((a, b) => b.pop - a.pop)[0];
+    const gain = game.upgradePreview(richest.id, 'factory').gold;
+    const payback = BAL.upgradeCosts.factory[0] / gain;
+    assert.ok(payback < 180, `${scenario.id}: factory payback ${payback.toFixed(0)}s is too slow`);
+  }
+});
+
+test('level-1 upgrades are affordable within a minute or two of income', () => {
+  const game = makeGame();
+  const income = Object.values(game.state.provinces)
+    .filter((p) => p.owner === 'FRA')
+    .reduce((sum, p) => sum + (BAL.incomeBase + p.pop * BAL.incomePop), 0);
+  assert.ok(BAL.upgradeCosts.factory[0] <= income * 60, 'factory should pay off within a minute');
+  for (const kind of ['fort', 'barracks']) {
+    assert.ok(
+      BAL.upgradeCosts[kind][0] <= income * 90,
+      `${kind} level 1 costs more than 90s of income`,
+    );
+  }
+});
+
+test('upgrade previews match what the upgrade actually does', () => {
+  const game = makeGame();
+  game.player.gold = 10_000;
+  const p = game.province('FR');
+  const preview = game.upgradePreview('FR', 'barracks');
+  const before = game.maxGarrison('FR');
+  game.upgrade('FR', 'barracks');
+  assert.equal(game.maxGarrison('FR') - before, Math.round(preview.garrison));
+
+  const defenseBefore = game.defenseValue('FR');
+  const fortPreview = game.upgradePreview('FR', 'fort');
+  game.upgrade('FR', 'fort');
+  assert.ok(game.defenseValue('FR') - defenseBefore > 0);
+  assert.equal(Math.round(game.defenseValue('FR') - defenseBefore), Math.round(fortPreview.defense));
+  assert.ok(p.factory === 0);
+});
+
+test('barracks speed up reinforcement as advertised', () => {
+  const game = makeGame();
+  game.player.gold = 10_000;
+  game.province('FR').garrison = 10;
+  const before = game.province('FR').garrison;
+  for (let i = 0; i < 10; i += 1) game.update(0.1);
+  const plain = game.province('FR').garrison - before;
+
+  game.upgrade('FR', 'barracks');
+  game.province('FR').garrison = 10;
+  const before2 = game.province('FR').garrison;
+  for (let i = 0; i < 10; i += 1) game.update(0.1);
+  const boosted = game.province('FR').garrison - before2;
+  assert.ok(boosted > plain * 1.1, 'reinforcement should be noticeably faster');
+});
+
+test('the war tax order repays its price for a mid-size nation', () => {
+  const game = makeGame();
+  game.update(0.1); // let the economy tick once so income is known
+  const income = game.player.income;
+  const gain = income * BAL.buffDuration.tax;
+  assert.ok(gain > BAL.orderGold.tax, `tax returns ${gain.toFixed(1)} for ${BAL.orderGold.tax} gold`);
 });

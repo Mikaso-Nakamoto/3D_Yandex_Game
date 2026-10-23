@@ -332,6 +332,31 @@ export class Game {
     return { ok: true, level: level + 1, cost };
   }
 
+  /** What one more level of an upgrade would change in this province right now. */
+  upgradePreview(provinceId, kind) {
+    const p = this.state.provinces[provinceId];
+    if (!p || !UPGRADES[kind]) return null;
+    if (kind === 'factory') {
+      const gold = (BAL.incomeBase + p.pop * BAL.incomePop) * BAL.factoryIncome;
+      const recruits = (BAL.manpowerBase + p.pop * BAL.manpowerPop) * BAL.factoryManpower;
+      return {
+        gold,
+        recruits,
+        text: `+${gold.toFixed(2)} золота/с, +${Math.round(recruits * 60)} рекрутов/мин`,
+      };
+    }
+    if (kind === 'barracks') {
+      const before = this.#maxGarrison(p);
+      const after = this.#maxGarrison({ ...p, barracks: p.barracks + 1 });
+      return {
+        garrison: after - before,
+        text: `+${Math.round(after - before)} к гарнизону, быстрее пополнение`,
+      };
+    }
+    const defense = p.garrison * BAL.fortDefense;
+    return { defense, text: `+${Math.round(defense)} к обороне сейчас` };
+  }
+
   castOrder(kind) {
     const nation = this.player;
     const o = this.state.orders;
@@ -438,7 +463,7 @@ export class Game {
       if (!nation?.alive) continue;
       const max = this.#maxGarrison(p);
       if (p.garrison >= max || nation.manpower <= 0) continue;
-      const rate = max * BAL.reinforceShare * (1 + p.barracks * 0.12) * dt;
+      const rate = max * BAL.reinforceShare * (1 + p.barracks * BAL.barracksReinforce) * dt;
       const amount = Math.min(rate, max - p.garrison, nation.manpower);
       p.garrison += amount;
       nation.manpower -= amount;

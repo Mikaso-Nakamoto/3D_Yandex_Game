@@ -3,12 +3,12 @@ export const BAL = {
   victoryShare: 0.5,
 
   // Province economy
-  incomeBase: 0.02,
-  incomePop: 0.0042,
-  factoryIncome: 0.4,
+  incomeBase: 0.025,
+  incomePop: 0.005,
+  factoryIncome: 0.5,
   manpowerBase: 0.035,
   manpowerPop: 0.0011,
-  factoryManpower: 0.25,
+  factoryManpower: 0.3,
   manpowerCapBase: 150,
   manpowerCapPop: 4,
   startManpower: 320,
@@ -18,7 +18,8 @@ export const BAL = {
   // Garrisons
   garrisonBase: 20,
   garrisonPop: 1.9,
-  barracksGarrison: 0.18,
+  barracksGarrison: 0.3,
+  barracksReinforce: 0.15, // extra reinforce speed per level
   reinforceShare: 0.006, // share of max garrison per second
 
   // Combat
@@ -34,47 +35,52 @@ export const BAL = {
 
   // Upgrades
   maxLevel: 3,
+  // Priced against a match of roughly 10-15 minutes at speed x1: a level-1
+  // improvement in a mid-size province pays for itself in about a third of
+  // that, so building is a real alternative to hoarding gold for mobilisation.
   upgradeCosts: {
-    factory: [45, 85, 140],
-    fort: [40, 75, 120],
-    barracks: [35, 65, 105],
+    factory: [20, 36, 58],
+    fort: [30, 52, 82],
+    barracks: [24, 42, 66],
   },
 
   // Orders
   orderCooldown: 55,
-  orderGold: { mobilize: 45, tax: 30, march: 25 },
-  buffDuration: { tax: 18, march: 22 },
+  orderGold: { mobilize: 45, tax: 15, march: 20 },
+  buffDuration: { tax: 40, march: 24 },
   mobilizeShare: 0.35,
 
   // Economy multipliers for AI
-  aiSpendReserve: 100,
+  aiSpendReserve: 45,
   aiThinkBase: 4.2,
 
   // Log
   logLimit: 50,
 };
 
+const pct = (v) => `${Math.round(v * 100)}%`;
+
 export const UPGRADES = {
   factory: {
     id: 'factory',
     name: 'Мануфактура',
     icon: 'factory',
-    description: '+40% дохода, +25% рекрутов',
-    short: '+40% дохода провинции',
+    description: `+${pct(BAL.factoryIncome)} дохода, +${pct(BAL.factoryManpower)} рекрутов за уровень`,
+    short: `+${pct(BAL.factoryIncome)} дохода провинции`,
   },
   fort: {
     id: 'fort',
     name: 'Крепость',
     icon: 'fort',
-    description: '+30% к обороне за уровень',
-    short: '+30% к обороне провинции',
+    description: `+${pct(BAL.fortDefense)} к обороне за уровень`,
+    short: `+${pct(BAL.fortDefense)} к обороне провинции`,
   },
   barracks: {
     id: 'barracks',
     name: 'Казармы',
     icon: 'barracks',
-    description: '+18% к гарнизону за уровень',
-    short: '+18% к гарнизону и пополнению',
+    description: `+${pct(BAL.barracksGarrison)} к гарнизону и +${pct(BAL.barracksReinforce)} к пополнению за уровень`,
+    short: `+${pct(BAL.barracksGarrison)} к гарнизону провинции`,
   },
 };
 
@@ -89,13 +95,13 @@ export const ORDERS = {
     id: 'tax',
     name: 'Военный налог',
     icon: 'tax',
-    description: 'Двойной доход на 18 секунд',
+    description: `Двойной доход на ${BAL.buffDuration.tax} секунд`,
   },
   march: {
     id: 'march',
     name: 'Форсированный марш',
     icon: 'march',
-    description: '+60% к скорости армий на 22 секунды',
+    description: `+60% к скорости армий на ${BAL.buffDuration.march} секунд`,
   },
 };
 
