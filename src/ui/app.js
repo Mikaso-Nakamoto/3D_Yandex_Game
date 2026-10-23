@@ -872,12 +872,12 @@ export class App {
           isMine && breakdown
             ? `<div class="defense-note">${
                 over > 0
-                  ? `Из них ${fmt(breakdown.above)} сверх нормы бьются вполсилы (×${BAL.overstackDefense}), ${
+                  ? `Сверх нормы ${fmt(breakdown.above)} — вполсилы (×${BAL.overstackDefense}); ${
                       province.garrison >= game.garrisonCeiling(province.id)
-                        ? 'дальше набирать некуда — предел снабжения'
+                        ? 'предел снабжения'
                         : game.player.manpower > 0
-                          ? `набор идёт дальше: +${regen.toFixed(2)}/с`
-                          : 'набор ждёт рекрутов'
+                          ? `набор +${regen.toFixed(2)}/с`
+                          : 'нет рекрутов'
                     }. `
                   : ''
               }Крепость ×${breakdown.fortMul.toFixed(2)} · доктрина ×${breakdown.doctrineMul.toFixed(2)} · дух ×${breakdown.moraleMul.toFixed(2)}</div>`
