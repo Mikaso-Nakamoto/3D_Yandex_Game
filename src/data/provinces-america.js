@@ -20,7 +20,7 @@ export const AMERICA = {
     },
     {
       id: 'MW', source: 'United States of America', name: 'Midwest', nameRu: 'Средний Запад',
-      pop: 45, seed: [-91, 42], neighbors: ['NE', 'SO', 'PL', 'WE', 'CA'], ringBox: [-130, -60, 24, 50],
+      pop: 45, seed: [-91, 42], neighbors: ['NE', 'SO', 'PL', 'WE', 'CA', 'NW'], ringBox: [-130, -60, 24, 50],
     },
     {
       id: 'SO', source: 'United States of America', name: 'The South', nameRu: 'Юг',
@@ -36,7 +36,7 @@ export const AMERICA = {
     },
     {
       id: 'WE', source: 'United States of America', name: 'The West', nameRu: 'Запад',
-      pop: 55, seed: [-116, 40], neighbors: ['PL', 'MW', 'SO', 'MX', 'NW'], ringBox: [-130, -60, 24, 50],
+      pop: 55, seed: [-116, 40], neighbors: ['PL', 'MW', 'SO', 'MX', 'NW', 'CA'], ringBox: [-130, -60, 24, 50],
     },
     {
       id: 'AK', source: 'United States of America', name: 'Alaska', nameRu: 'Аляска',
@@ -45,11 +45,11 @@ export const AMERICA = {
     // --- Canada --------------------------------------------------------------
     {
       id: 'CA', source: 'Canada', name: 'Canada', nameRu: 'Канада',
-      pop: 20, seed: [-75, 48], neighbors: ['NE', 'MW', 'NW', 'GL'],
+      pop: 20, seed: [-75, 48], neighbors: ['NE', 'MW', 'NW', 'GL', 'WE'],
     },
     {
       id: 'NW', source: 'Canada', name: 'Northwest Lands', nameRu: 'Северо-Западные земли',
-      pop: 18, seed: [-112, 60], neighbors: ['CA', 'WE', 'AK'],
+      pop: 18, seed: [-112, 60], neighbors: ['CA', 'WE', 'AK', 'MW'],
     },
     // --- The rest ------------------------------------------------------------
     {

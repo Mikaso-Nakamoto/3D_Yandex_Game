@@ -740,3 +740,24 @@ test('score never goes negative', () => {
   game.state.months = game.scenario.startYear * 12 + 12 * 60;
   assert.equal(game.score().total, 0);
 });
+
+test('a rival reaching the victory share ends the match as a defeat', () => {
+  const game = makeGame();
+  const total = Object.keys(game.state.provinces).length;
+  const need = Math.ceil(total * game.rules.victoryShare);
+  const others = Object.values(game.state.provinces).filter((p) => p.owner !== 'FRA' && p.owner);
+  for (const province of others.slice(0, need)) province.owner = 'PRU';
+  // Keep the player alive with their own land.
+  game.province('FR').owner = 'FRA';
+  game.update(0.1);
+  assert.equal(game.state.status, 'defeat');
+  assert.equal(game.state.nations.PRU.alive, true);
+});
+
+test('the player winning takes priority over a rival at the same moment', () => {
+  const game = makeGame();
+  // Give the player the whole map: they hit the share first.
+  for (const province of Object.values(game.state.provinces)) province.owner = 'FRA';
+  game.update(0.1);
+  assert.equal(game.state.status, 'victory');
+});

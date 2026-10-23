@@ -478,7 +478,7 @@ export class App {
     this.onboardTimers = timers;
   }
 
-  #endGame({ result }) {
+  #endGame({ result, reason, rival }) {
     const game = this.game;
     game.state.speed = 0;
     this.#clearArmies();
@@ -493,9 +493,12 @@ export class App {
     const place = theatre?.id === 'america' ? 'Новый Свет' : 'Европа';
     $('#end-eyebrow').textContent = victory ? `${place} ваш` : 'Держава пала';
     $('#end-title').textContent = victory ? 'Победа' : 'Поражение';
+    const rivalName = rival ? this.game?.state?.nations?.[rival]?.short : null;
     $('#end-text').textContent = victory
       ? `Половина ${place === 'Европа' ? 'континента' : 'Нового Света'} признала вашу корону. Историки будут спорить о методах, но не о результате.`
-      : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
+      : reason === 'rival'
+        ? `${rivalName ?? 'Соперник'} собрал(а) половину ${place === 'Европа' ? 'континента' : 'Нового Света'} раньше вас. В следующий раз бейте по слабейшему соседу, а не по сильнейшему.`
+        : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
     const stats = game.state.stats;
     $('#end-stats').innerHTML = `
       <div class="end-stat"><div class="k">Провинций</div><div class="v">${game.progress.owned}</div></div>

@@ -824,7 +824,20 @@ export class Game {
     if (!player.alive) {
       s.status = 'defeat';
       this.#log('Поражение: держава потеряла все земли', 'bad');
-      this.#emit('end', { result: 'defeat', owned, total });
+      this.#emit('end', { result: 'defeat', reason: 'eliminated', owned, total });
+      return;
+    }
+
+    // Another power can win the theatre too: if an AI reaches the victory share,
+    // the player has lost the race and the match is over.
+    for (const nation of Object.values(s.nations)) {
+      if (nation.isPlayer || !nation.alive) continue;
+      const theirs = this.#provinceCount(nation.id);
+      if (theirs / total < s.rules.victoryShare) continue;
+      s.status = 'defeat';
+      this.#log(`${nation.short} собрала ${Math.round(s.rules.victoryShare * 100)}% земель: вы проиграли гонку`, 'bad');
+      this.#emit('end', { result: 'defeat', reason: 'rival', rival: nation.id, owned, total });
+      return;
     }
   }
 
