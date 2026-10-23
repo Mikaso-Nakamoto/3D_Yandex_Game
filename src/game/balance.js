@@ -44,6 +44,23 @@ export const BAL = {
     barracks: [24, 42, 66],
   },
 
+  // Morale and war weariness
+  moraleStart: 55,
+  moraleDrift: 0.55, // per second toward the neutral value
+  moraleNeutral: 55,
+  moraleRange: 0.18, // attack/defence multiplier spread at morale 0 and 100
+  moraleWin: 5.5,
+  moraleLose: 7,
+  exhaustionWin: 1.5,
+  exhaustionLose: 3.5,
+  exhaustionCapture: 4,
+  exhaustionDecay: 0.5, // per second while not fighting
+  exhaustionCalmAfter: 35, // seconds without battles before decay starts
+  exhaustionIncome: 0.3, // income penalty at 100 % weariness
+  peaceOfferAt: 55, // exhaustion level that makes an AI sue for peace
+  peaceTruce: 150, // seconds of truce after a peace deal
+  peaceRelief: 28, // exhaustion removed by a peace deal
+
   // Orders
   orderCooldown: 55,
   orderGold: { mobilize: 45, tax: 15, march: 20 },

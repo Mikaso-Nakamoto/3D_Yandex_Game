@@ -98,6 +98,14 @@
             </span>
             <span class="chip-label">казна</span>
           </div>
+          <div class="chip spirit" id="hud-spirit" title="Боевой дух и военная усталость">
+            <span class="ico" data-icon="spirit"></span>
+            <span class="chip-text">
+              <span class="rate" id="hud-morale-label">дух</span>
+              <span id="hud-morale">55</span>
+            </span>
+            <span class="chip-label" id="hud-exhaustion">усталость 0%</span>
+          </div>
           <div class="chip resource manpower" title="Рекруты: из них пополняются гарнизоны">
             <span class="ico" data-icon="manpower"></span>
             <span class="chip-text">
@@ -121,6 +129,7 @@
 
         <div class="province-panel panel hidden" id="province-panel"></div>
         <div class="orders-bar" id="orders-bar"></div>
+        <div class="offer-card hidden" id="offer-card"></div>
         <div class="log" id="log"></div>
         <div class="send-ratio" id="send-ratio">
           <span class="eyebrow">В поход</span>
@@ -181,11 +190,12 @@
       <div class="modal-card wide">
         <button class="modal-close" data-close="modal-rankings">✕</button>
         <div class="eyebrow">Обстановка</div>
-        <h2>Державы Европы</h2>
+        <h2>Обстановка</h2>
         <p class="modal-sub">
-          Армия — все войска на карте, включая идущие. Доход и рекруты — производство в секунду.
+          Армия — все войска на карте, включая идущие. Дух и усталость влияют на бой и доход.
         </p>
         <div class="rank-table" id="rank-table"></div>
+        <div class="diplo" id="diplo-block"></div>
       </div>
     </div>
 

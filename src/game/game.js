@@ -53,6 +53,9 @@ export class Game {
       orders: { mobilizeReady: 0, taxReady: 0, marchReady: 0, taxUntil: 0, marchUntil: 0 },
       stats: { battles: 0, captured: 0, lostProvinces: 0, battlesWon: 0, peak: 0 },
       sendRatio: 0.5,
+      relations: {},
+      offers: [],
+      nextOfferId: 1,
       nextArmyId: 1,
       nextLogId: 1,
       playerAggro: false,
@@ -88,6 +91,9 @@ export class Game {
         isPlayer,
         pop: 0,
         income: 0,
+        morale: BAL.moraleStart,
+        exhaustion: 0,
+        lastClash: -999,
         ai: {
           aggression: n.ai?.aggression ?? 0.9,
           eco: n.ai?.eco ?? 1,
@@ -181,11 +187,12 @@ export class Game {
   defenseValue(provinceId) {
     const p = this.state.provinces[provinceId];
     const owner = p.owner ? this.state.nations[p.owner] : null;
-    return p.garrison * (1 + p.fort * BAL.fortDefense) * (1 + doctrineMod(owner?.doctrine, 'defense'));
+    const morale = owner ? this.moraleModifier(owner.id) : 1;
+    return p.garrison * (1 + p.fort * BAL.fortDefense) * (1 + doctrineMod(owner?.doctrine, 'defense')) * morale;
   }
 
   attackModifier(nationId) {
-    return 1 + doctrineMod(this.state.nations[nationId]?.doctrine, 'attack');
+    return (1 + doctrineMod(this.state.nations[nationId]?.doctrine, 'attack')) * this.moraleModifier(nationId);
   }
 
   #provinceCount(nationId, state = this.state) {
@@ -316,6 +323,138 @@ export class Game {
     return amount;
   }
 
+  // ---------------------------------------------------------------- morale & peace
+
+  static pairKey(a, b) {
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
+
+  /** True while the two nations are bound by a truce. */
+  hasTruce(a, b) {
+    const rel = this.state.relations?.[Game.pairKey(a, b)];
+    return Boolean(rel) && rel.truceUntil > this.state.time;
+  }
+
+  truceLeft(a, b) {
+    const rel = this.state.relations?.[Game.pairKey(a, b)];
+    return rel ? Math.max(0, rel.truceUntil - this.state.time) : 0;
+  }
+
+  /** How much morale shifts attack and defence (1 ± BAL.moraleRange). */
+  moraleModifier(nationId) {
+    const nation = this.state.nations[nationId];
+    if (!nation) return 1;
+    const offset = (nation.morale - 50) / 50;
+    return 1 + BAL.moraleRange * Math.max(-1, Math.min(1, offset));
+  }
+
+  /** War weariness: long wars cost income. */
+  exhaustionModifier(nationId) {
+    const nation = this.state.nations[nationId];
+    if (!nation) return 1;
+    return 1 - BAL.exhaustionIncome * (nation.exhaustion / 100);
+  }
+
+  #markClash(a, b) {
+    if (!a || !b || a === b) return;
+    const key = Game.pairKey(a, b);
+    this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
+    const nationA = this.state.nations[a];
+    const nationB = this.state.nations[b];
+    if (nationA) nationA.lastClash = this.state.time;
+    if (nationB) nationB.lastClash = this.state.time;
+  }
+
+  #adjustMorale(nationId, delta) {
+    const nation = this.state.nations[nationId];
+    if (!nation) return;
+    nation.morale = Math.max(0, Math.min(100, nation.morale + delta));
+  }
+
+  #adjustExhaustion(nationId, delta) {
+    const nation = this.state.nations[nationId];
+    if (!nation) return;
+    nation.exhaustion = Math.max(0, Math.min(100, nation.exhaustion + delta));
+  }
+
+  /** Peace offered by an AI to the player. */
+  offerPeace(fromId) {
+    const from = this.state.nations[fromId];
+    if (!from || from.isPlayer) return { ok: false, reason: 'Нельзя' };
+    if (this.state.status !== 'playing') return { ok: false, reason: 'Партия завершена' };
+    if (this.hasTruce(fromId, this.state.nationId)) return { ok: false, reason: 'Уже перемирие' };
+    if (this.state.offers.some((o) => o.from === fromId)) return { ok: false, reason: 'Предложение уже сделано' };
+    const offer = {
+      id: this.state.nextOfferId++,
+      from: fromId,
+      to: this.state.nationId,
+      expires: this.state.time + 45,
+    };
+    this.state.offers.push(offer);
+    this.#log(`${from.short} предлагает мир`, 'war');
+    this.#emit('offer', offer);
+    return { ok: true, offer };
+  }
+
+  /** Player answers a peace offer. Accepting starts a truce and calms both sides. */
+  answerPeace(offerId, accept) {
+    const index = this.state.offers.findIndex((o) => o.id === offerId);
+    if (index < 0) return { ok: false, reason: 'Предложение устарело' };
+    const offer = this.state.offers[index];
+    this.state.offers.splice(index, 1);
+    const from = this.state.nations[offer.from];
+    const player = this.player;
+    if (!accept) {
+      this.#log(`${from?.short ?? 'Противник'}: мир отклонён`, 'war');
+      this.#emit('offerClosed', { offer, accepted: false });
+      return { ok: true, accepted: false };
+    }
+    const key = Game.pairKey(offer.from, this.state.nationId);
+    this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
+    this.state.relations[key].truceUntil = this.state.time + BAL.peaceTruce;
+    this.#adjustExhaustion(offer.from, -BAL.peaceRelief);
+    this.#adjustExhaustion(this.state.nationId, -BAL.peaceRelief);
+    this.#log(`Мир с ${from?.short ?? 'противником'}: ${Math.round(BAL.peaceTruce)} с перемирия`, 'good');
+    this.#emit('peace', { with: offer.from, until: this.state.relations[key].truceUntil });
+    this.#emit('offerClosed', { offer, accepted: true });
+    return { ok: true, accepted: true, until: this.state.relations[key].truceUntil };
+  }
+
+  /** Expires unanswered offers. */
+  #tickOffers() {
+    const s = this.state;
+    if (!s.offers?.length) return;
+    const expired = s.offers.filter((o) => o.expires <= s.time);
+    if (!expired.length) return;
+    s.offers = s.offers.filter((o) => o.expires > s.time);
+    for (const offer of expired) this.#emit('offerClosed', { offer, accepted: false, expired: true });
+  }
+
+  /** The player breaking a truce: allowed, but it costs reputation and calm. */
+  breakTruce(withId) {
+    const key = Game.pairKey(withId, this.state.nationId);
+    const rel = this.state.relations[key];
+    if (!rel || rel.truceUntil <= this.state.time) return false;
+    rel.truceUntil = 0;
+    this.state.playerAggro = true;
+    this.#adjustExhaustion(this.state.nationId, 8);
+    this.#log(`Перемирие с ${this.state.nations[withId]?.short} нарушено`, 'bad');
+    this.#emit('truceBroken', { with: withId });
+    return true;
+  }
+
+  /** Truce partners of a nation (for the diplomacy list in the pause menu). */
+  trucesOf(nationId) {
+    const out = [];
+    for (const [key, rel] of Object.entries(this.state.relations ?? {})) {
+      if (rel.truceUntil <= this.state.time) continue;
+      const [a, b] = key.split('|');
+      if (a === nationId) out.push({ id: b, left: rel.truceUntil - this.state.time });
+      else if (b === nationId) out.push({ id: a, left: rel.truceUntil - this.state.time });
+    }
+    return out;
+  }
+
   provinceCount(nationId) {
     return this.#provinceCount(nationId);
   }
@@ -358,7 +497,17 @@ export class Game {
         text: `+${Math.round(after - before)} к гарнизону, быстрее пополнение`,
       };
     }
-    const defense = p.garrison * BAL.fortDefense;
+    // Morale and doctrine scale defence too, so measure the real difference.
+    const before = this.defenseValue(provinceId);
+    const afterProvince = { ...p, fort: p.fort + 1 };
+    const owner = p.owner ? this.state.nations[p.owner] : null;
+    const morale = owner ? this.moraleModifier(owner.id) : 1;
+    const after =
+      afterProvince.garrison *
+      (1 + afterProvince.fort * BAL.fortDefense) *
+      (1 + doctrineMod(owner?.doctrine, 'defense')) *
+      morale;
+    const defense = after - before;
     return { defense, text: `+${Math.round(defense)} к обороне сейчас` };
   }
 
@@ -423,6 +572,8 @@ export class Game {
     s.time += dt;
     s.months += dt * this.scenario.monthsPerSecond;
     this.#economy(dt);
+    this.#morale(dt);
+    this.#tickOffers();
     this.#reinforce(dt);
     this.#moveArmies(dt);
     this.#think(dt);
@@ -449,6 +600,7 @@ export class Game {
       }
       const ruleEco = nation.isPlayer ? 1 : AI_ECONOMY[this.rules.aiEconomy]?.eco ?? 1;
       income *= (1 + doctrineMod(nation.doctrine, 'income')) * nation.ai.eco * ruleEco;
+      income *= this.exhaustionModifier(nation.id);
       if (nation.isPlayer && s.time < s.orders.taxUntil) income *= 2;
       nation.income = income;
       nation.manpowerRate = manpower;
@@ -457,6 +609,19 @@ export class Game {
       const cap = BAL.manpowerCapBase + pop * BAL.manpowerCapPop;
       nation.manpower = Math.min(cap, nation.manpower + manpower * dt);
       nation.manpowerCap = cap;
+    }
+  }
+
+  /** Morale drifts back to neutral; war weariness cools down in quiet times. */
+  #morale(dt) {
+    const s = this.state;
+    for (const nation of Object.values(s.nations)) {
+      if (!nation.alive) continue;
+      const drift = (BAL.moraleNeutral - nation.morale) * Math.min(1, BAL.moraleDrift * dt);
+      nation.morale = Math.max(0, Math.min(100, nation.morale + drift));
+      if (s.time - (nation.lastClash ?? -999) > BAL.exhaustionCalmAfter) {
+        nation.exhaustion = Math.max(0, nation.exhaustion - BAL.exhaustionDecay * dt);
+      }
     }
   }
 
@@ -541,12 +706,28 @@ export class Game {
         to: army.owner,
         losers: Math.round(defPower),
       });
+      this.#markClash(previousOwner, army.owner);
+      this.#adjustMorale(army.owner, BAL.moraleWin);
+      this.#adjustExhaustion(army.owner, BAL.exhaustionWin);
+      if (previousOwner) {
+        this.#adjustMorale(previousOwner, -BAL.moraleLose);
+        this.#adjustExhaustion(previousOwner, BAL.exhaustionCapture);
+        this.#adjustExhaustion(previousOwner, BAL.exhaustionLose);
+        this.#markClash(previousOwner, army.owner);
+      }
       if (previousOwner) this.#refreshNation(previousOwner);
       this.#refreshNation(army.owner);
     } else {
       const ratio = (atkPower * roll) / Math.max(1, defPower);
       const survivors = Math.max(1, Math.round(target.garrison * (1 - BAL.loserSurvivorBase * Math.min(0.95, ratio))));
       target.garrison = survivors;
+      this.#markClash(target.owner, army.owner);
+      this.#adjustMorale(army.owner, -BAL.moraleLose);
+      this.#adjustExhaustion(army.owner, BAL.exhaustionLose);
+      if (target.owner) {
+        this.#adjustMorale(target.owner, BAL.moraleWin);
+        this.#adjustExhaustion(target.owner, BAL.exhaustionWin);
+      }
       if (defender?.isPlayer) s.stats.battlesWon += 1;
       this.#log(
         `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''}`,

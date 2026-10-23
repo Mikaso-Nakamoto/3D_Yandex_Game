@@ -15,6 +15,7 @@ export function aiThink(game, nation) {
   if (nation.gold > BAL.aiSpendReserve && game.rng.chance(0.75)) {
     build(game, nation, owned);
   }
+  maybeSueForPeace(game, nation);
   if (!attack(game, nation, owned)) {
     reinforceLine(game, nation, owned);
   }
@@ -69,11 +70,29 @@ function build(game, nation, owned) {
   game.state.stats.aiUpgrades = (game.state.stats.aiUpgrades ?? 0) + 1;
 }
 
+/** A tired and losing AI offers the player a truce instead of grinding on. */
+function maybeSueForPeace(game, nation) {
+  const state = game.state;
+  const playerId = state.nationId;
+  if (!state.nations[playerId]?.alive) return;
+  if (nation.exhaustion < BAL.peaceOfferAt) return;
+  if (game.hasTruce(nation.id, playerId)) return;
+  if (state.offers.some((offer) => offer.from === nation.id)) return;
+  const recentlyFought = state.time - (nation.lastClash ?? -999) < 120;
+  if (!recentlyFought) return;
+  const losing = game.provinceCount(playerId) >= game.provinceCount(nation.id);
+  if (!losing) return;
+  if (!game.rng.chance(0.4)) return;
+  game.offerPeace(nation.id);
+}
+
 function attack(game, nation, owned) {
   const state = game.state;
   const rules = state.rules ?? {};
   if (rules.aiPassive) return false;
-  if (!game.rng.chance(0.55)) return false;
+  // War weariness makes a nation hesitate; total exhaustion rules out new offensives.
+  if (nation.exhaustion > 85) return false;
+  if (!game.rng.chance(0.55 * (1 - nation.exhaustion / 160))) return false;
 
   let best = null;
   for (const p of owned) {
@@ -91,6 +110,8 @@ function attack(game, nation, owned) {
       if (target.owner) {
         const enemy = state.nations[target.owner];
         if (enemy?.isPlayer) {
+          // A truce is a real pause: the AI keeps its word.
+          if (game.hasTruce(nation.id, target.owner)) continue;
           // Peace guarantee: no AI declares war on the player until the player strikes first.
           if (rules.peaceUntilFirstWar && !state.playerAggro) continue;
           if (state.time < 120 && !state.playerAggro) continue;

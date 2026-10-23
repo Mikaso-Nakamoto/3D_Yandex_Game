@@ -534,3 +534,108 @@ test('a game refuses a map from the wrong theatre', () => {
     /театр/i,
   );
 });
+
+// ---------------------------------------------------------------- morale & war weariness
+
+test('victories lift morale, defeats lower it, both drift back to neutral', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 900;
+  game.province('IT').owner = 'NLD';
+  game.province('IT').garrison = 10;
+  const startMorale = game.player.morale;
+  game.sendTroops('FR', 'IT', 0.5);
+  for (let i = 0; i < 400; i += 1) game.update(0.05);
+  assert.ok(game.player.morale > startMorale, 'a capture should raise morale');
+  const peak = game.player.morale;
+  for (let i = 0; i < 600; i += 1) game.update(0.1);
+  assert.ok(game.player.morale < peak, 'morale should drift back');
+  assert.ok(Math.abs(game.player.morale - BAL.moraleNeutral) < 6);
+});
+
+test('morale changes the odds: high morale hits harder, low morale folds', () => {
+  const game = makeGame();
+  game.player.morale = 100;
+  const high = game.attackModifier('FRA');
+  game.player.morale = 0;
+  const low = game.attackModifier('FRA');
+  assert.ok(high > low + 0.2);
+  game.player.morale = 50;
+  assert.ok(Math.abs(game.attackModifier('FRA') - (1 + 0.0)) < 0.35);
+});
+
+test('war weariness hurts income and cools down in peacetime', () => {
+  const game = makeGame();
+  game.update(0.1);
+  const healthy = game.player.income;
+  assert.ok(Math.abs(game.exhaustionModifier('FRA') - 1) < 1e-9);
+  game.player.exhaustion = 100;
+  game.update(0.1);
+  assert.ok(game.player.income < healthy * 0.8, 'income should drop noticeably');
+  // Quiet time (no recent clash) burns weariness off.
+  game.player.lastClash = -999;
+  for (let i = 0; i < 200; i += 1) game.update(0.1);
+  assert.ok(game.player.exhaustion < 95);
+});
+
+test('a truce blocks AI attacks and ends with time', () => {
+  const game = makeGame();
+  const player = game.player;
+  game.state.relations['FRA|NLD'] = { truceUntil: game.state.time + 30 };
+  assert.equal(game.hasTruce('NLD', 'FRA'), true);
+  assert.equal(game.hasTruce('FRA', 'NLD'), true, 'truce is symmetric');
+  assert.equal(game.hasTruce('FRA', 'PRU'), false);
+  assert.ok(game.truceLeft('NLD', 'FRA') > 29);
+  game.update(31);
+  assert.equal(game.hasTruce('NLD', 'FRA'), false);
+});
+
+test('peace offers can be accepted for a truce or declined', () => {
+  const game = makeGame();
+  const offered = game.offerPeace('NLD');
+  assert.equal(offered.ok, true);
+  assert.equal(game.state.offers.length, 1);
+  const accepted = game.answerPeace(offered.offer.id, true);
+  assert.equal(accepted.accepted, true);
+  assert.equal(game.hasTruce('FRA', 'NLD'), true);
+  assert.equal(game.state.offers.length, 0);
+
+  const second = game.offerPeace('NLD');
+  assert.equal(second.ok, false, 'no duplicate offers while the truce holds');
+});
+
+test('declining a peace offer keeps the war going', () => {
+  const game = makeGame();
+  const offered = game.offerPeace('PRU');
+  const declined = game.answerPeace(offered.offer.id, false);
+  assert.equal(declined.accepted, false);
+  assert.equal(game.hasTruce('FRA', 'PRU'), false);
+});
+
+test('unanswered offers expire on their own', () => {
+  const game = makeGame();
+  const offered = game.offerPeace('NLD');
+  game.update(BAL.peaceTruce + 50);
+  assert.equal(game.state.offers.length, 0);
+  assert.equal(game.answerPeace(offered.offer.id, true).ok, false);
+});
+
+test('breaking a truce costs weariness and marks the player as the aggressor', () => {
+  const game = makeGame();
+  game.state.relations['FRA|NLD'] = { truceUntil: game.state.time + 100 };
+  game.player.exhaustion = 10;
+  assert.equal(game.breakTruce('NLD'), true);
+  assert.equal(game.hasTruce('FRA', 'NLD'), false);
+  assert.equal(game.state.playerAggro, true);
+  assert.ok(game.player.exhaustion > 10);
+});
+
+test('morale, weariness and truces survive a save round-trip', () => {
+  const game = makeGame();
+  game.player.morale = 72;
+  game.player.exhaustion = 33;
+  game.state.relations['FRA|NLD'] = { truceUntil: game.state.time + 60 };
+  const restored = Game.deserialize(JSON.parse(JSON.stringify(game.serialize())), map);
+  assert.ok(Math.abs(restored.player.morale - 72) < 1e-6);
+  assert.ok(Math.abs(restored.player.exhaustion - 33) < 1e-6);
+  assert.equal(restored.hasTruce('FRA', 'NLD'), true);
+});

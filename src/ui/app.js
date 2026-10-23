@@ -407,6 +407,18 @@ export class App {
           this.#toast(`Потеряна ${game.provinceName(payload.provinceId)}`, 'bad');
         }
       }
+      if (type === 'offer') {
+        sfx.click();
+        this.#renderOffers();
+      }
+      if (type === 'offerClosed') {
+        this.#renderOffers();
+        if (payload.accepted) this.#toast('Мир заключён: перемирие', 'good');
+        else if (payload.expired) this.#toast('Предложение мира истекло', 'info');
+      }
+      if (type === 'truceBroken') {
+        this.#toast('Перемирие нарушено — усталость выросла', 'bad');
+      }
       if (type === 'battle') {
         const now = performance.now();
         if (now - this.lastBattleSound > 700) {
@@ -649,6 +661,14 @@ export class App {
     $('#hud-income').textContent = `+${player.income.toFixed(1)}/с`;
     $('#hud-manpower').textContent = fmt(player.manpower);
     $('#hud-mp-rate').textContent = `+${((player.manpowerRate ?? 0) * 60).toFixed(0)}/мин`;
+    const morale = Math.round(player.morale ?? 55);
+    const exhaustion = Math.round(player.exhaustion ?? 0);
+    $('#hud-morale').textContent = morale;
+    $('#hud-morale-label').textContent = morale >= 65 ? 'дух высокий' : morale <= 40 ? 'дух низкий' : 'дух';
+    $('#hud-exhaustion').textContent = `усталость ${exhaustion}%`;
+    const spirit = $('#hud-spirit');
+    spirit.classList.toggle('is-low', morale <= 40);
+    spirit.classList.toggle('is-tired', exhaustion >= 45);
     $('#hud-progress-text').textContent = `${progress.owned}/${progress.total}`;
     $('#hud-progress-fill').style.width = `${(progress.share * 100).toFixed(1)}%`;
 
@@ -657,8 +677,40 @@ export class App {
       button.classList.toggle('active', speed === game.state.speed);
     }
     this.#updateOrders();
+    this.#renderOffers();
     if (this.selectedProvince) this.#renderProvincePanel();
     if (!$('#modal-rankings').classList.contains('hidden')) this.#renderRankings();
+  }
+
+  #renderOffers() {
+    const card = $('#offer-card');
+    if (!card) return;
+    const game = this.game;
+    const offers = game?.state?.offers ?? [];
+    if (!game || !offers.length || game.state.status !== 'playing') {
+      card.classList.add('hidden');
+      card.innerHTML = '';
+      return;
+    }
+    card.classList.remove('hidden');
+    card.innerHTML = offers
+      .map((offer) => {
+        const nation = game.state.nations[offer.from];
+        const left = Math.max(0, Math.ceil(offer.expires - game.state.time));
+        return `
+          <div class="offer-row" data-offer="${offer.id}">
+            <span class="offer-dot" style="--swatch:${nation?.color ?? '#888'}"></span>
+            <div class="offer-text">
+              <b>${nation?.short ?? 'Противник'} предлагает мир</b>
+              <span>Перемирие ${Math.round(BAL.peaceTruce)} с. Обе стороны теряют усталость. Решение за вами — ${left} с.</span>
+            </div>
+            <div class="offer-actions">
+              <button class="btn small primary" data-answer="1">Принять</button>
+              <button class="btn small ghost" data-answer="0">Воевать</button>
+            </div>
+          </div>`;
+      })
+      .join('');
   }
 
   #updateOrders() {
@@ -1012,13 +1064,15 @@ export class App {
         provinces: game.provinceCount(nation.id),
         income: nation.income ?? 0,
         recruits: (nation.manpowerRate ?? 0) * 60,
+        morale: Math.round(nation.morale ?? 55),
+        exhaustion: Math.round(nation.exhaustion ?? 0),
       }))
       .sort((a, b) => b.army - a.army || b.provinces - a.provinces);
 
     const totalProvinces = Object.keys(game.state.provinces).length;
     $('#rank-table').innerHTML = `
       <div class="rank-row rank-head">
-        <span>Держава</span><span>Земли</span><span>Армия</span><span>Доход</span><span>Рекруты</span>
+        <span>Держава</span><span>Земли</span><span>Армия</span><span>Дух</span><span>Усталость</span><span>Доход</span>
       </div>
       ${rows
         .map(
@@ -1033,12 +1087,45 @@ export class App {
             <span class="rank-bar"><i style="width:${((row.provinces / totalProvinces) * 100).toFixed(0)}%"></i></span>
           </span>
           <span class="rank-cell"><b>${fmt(row.army)}</b></span>
+          <span class="rank-cell ${row.morale <= 40 ? 'is-bad' : row.morale >= 65 ? 'is-good' : ''}">${row.nation.alive ? row.morale : '—'}</span>
+          <span class="rank-cell ${row.exhaustion >= 55 ? 'is-bad' : ''}">${row.nation.alive ? `${row.exhaustion}%` : '—'}</span>
           <span class="rank-cell">${row.nation.alive ? `+${row.income.toFixed(1)}/с` : '—'}</span>
-          <span class="rank-cell">${row.nation.alive ? `+${row.recruits.toFixed(0)}/мин` : '—'}</span>
         </div>`,
         )
         .join('')}
     `;
+    this.#renderDiplomacy();
+  }
+
+  #renderDiplomacy() {
+    const block = $('#diplo-block');
+    if (!block || !this.game) return;
+    const game = this.game;
+    const player = game.player;
+    const truces = game.trucesOf(player.id)
+      .sort((a, b) => a.left - b.left)
+      .map(
+        (truce) =>
+          `<span class="diplo-tag">${game.state.nations[truce.id]?.short ?? truce.id} · мир ${Math.ceil(truce.left)} с</span>`,
+      );
+    const morale = Math.round(player.morale ?? 55);
+    const exhaustion = Math.round(player.exhaustion ?? 0);
+    const incomePenalty = Math.round(exhaustion * BAL.exhaustionIncome);
+    block.innerHTML = `
+      <div class="diplo-row">
+        <span class="diplo-label">Ваш дух</span>
+        <span class="diplo-value ${morale <= 40 ? 'is-bad' : morale >= 65 ? 'is-good' : ''}">${morale} / 100</span>
+        <span class="diplo-hint">влияет на силу боя: ${morale >= 50 ? '+' : ''}${((game.moraleModifier(player.id) - 1) * 100).toFixed(0)}%</span>
+      </div>
+      <div class="diplo-row">
+        <span class="diplo-label">Военная усталость</span>
+        <span class="diplo-value ${exhaustion >= 55 ? 'is-bad' : ''}">${exhaustion}%</span>
+        <span class="diplo-hint">доход ${incomePenalty > 0 ? `−${incomePenalty}%` : 'без штрафа'}</span>
+      </div>
+      <div class="diplo-row">
+        <span class="diplo-label">Перемирия</span>
+        <span class="diplo-tags">${truces.length ? truces.join('') : '<span class="diplo-empty">нет</span>'}</span>
+      </div>`;
   }
 
   #syncArmies() {
@@ -1210,6 +1297,16 @@ export class App {
         this.setSpeed(speed);
       });
     }
+    $('#offer-card').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-answer]');
+      if (!button || !this.game) return;
+      const row = button.closest('[data-offer]');
+      if (!row) return;
+      const offerId = Number(row.dataset.offer);
+      const result = this.game.answerPeace(offerId, button.dataset.answer === '1');
+      if (!result.ok) this.#toast(result.reason ?? 'Не получилось', 'bad');
+      this.#renderOffers();
+    });
     $('#btn-pause-menu').addEventListener('click', () => this.openPause());
     $('#btn-rankings').addEventListener('click', () => this.#openRankings());
 

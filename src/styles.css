@@ -2559,3 +2559,163 @@ kbd {
     font-size: 10px;
   }
 }
+
+
+/* ---------------------------------------------------------------- morale & diplomacy */
+
+.chip.spirit .ico {
+  color: var(--gold);
+}
+
+.chip.spirit.is-low {
+  border-color: rgba(194, 85, 85, 0.55);
+}
+
+.chip.spirit.is-tired {
+  border-color: rgba(214, 148, 74, 0.6);
+}
+
+.offer-card {
+  position: absolute;
+  top: 104px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(520px, calc(100vw - 32px));
+  pointer-events: auto;
+}
+
+.offer-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(20, 28, 40, 0.96), rgba(12, 18, 27, 0.96));
+  border: 1px solid rgba(217, 180, 90, 0.45);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.offer-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--swatch, #888);
+}
+
+.offer-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.offer-text b {
+  font-size: 12.5px;
+  color: var(--cream);
+}
+
+.offer-text span {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.offer-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn.small {
+  padding: 6px 10px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
+.rank-row {
+  grid-template-columns: minmax(120px, 1.4fr) 80px 74px 52px 74px 84px;
+}
+
+.rank-cell.is-good {
+  color: #8fc98a;
+}
+
+.rank-cell.is-bad {
+  color: #d98a7f;
+}
+
+.diplo {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.diplo-row {
+  display: grid;
+  grid-template-columns: 160px 90px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.diplo-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 9px;
+}
+
+.diplo-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.diplo-value.is-good {
+  color: #8fc98a;
+}
+
+.diplo-value.is-bad {
+  color: #d98a7f;
+}
+
+.diplo-hint {
+  color: var(--muted);
+}
+
+.diplo-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.diplo-row:last-child {
+  grid-template-columns: 160px 1fr;
+}
+
+.diplo-tag {
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(217, 180, 90, 0.12);
+  border: 1px solid rgba(217, 180, 90, 0.35);
+  color: var(--gold);
+  font-size: 10.5px;
+}
+
+.diplo-empty {
+  color: var(--muted);
+}
+
+@media (max-height: 620px) {
+  .offer-card {
+    top: 74px;
+  }
+}
