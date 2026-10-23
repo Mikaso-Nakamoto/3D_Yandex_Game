@@ -83,6 +83,33 @@ test('sending troops shrinks the garrison and creates a marching army', () => {
   assert.equal(game.state.armies[0].to, 'BE');
 });
 
+test('1815: Russia starts with the largest army, the Ottomans are not a top-2 power', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', doctrineId: 'coin', map, seed: 1 });
+  const totals = Object.values(game.state.nations)
+    .map((nation) => {
+      let army = 0;
+      for (const province of Object.values(game.state.provinces)) {
+        if (province.owner === nation.id) army += province.garrison;
+      }
+      return { id: nation.id, army };
+    })
+    .sort((a, b) => b.army - a.army);
+  assert.equal(totals[0].id, 'RUS', `expected Russia first, got ${totals[0].id}`);
+  const ottomanRank = totals.findIndex((row) => row.id === 'OTT');
+  assert.ok(ottomanRank >= 2, `Ottomans should not be top-2, rank ${ottomanRank + 1}`);
+});
+
+test('military weight scales garrisons of the same province', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', doctrineId: 'coin', map, seed: 1 });
+  const base = game.state.nations.RUS.armyMul;
+  const before = game.maxGarrison('RU');
+  game.state.nations.RUS.armyMul = base * 2;
+  const doubled = game.maxGarrison('RU');
+  assert.ok(Math.abs(doubled / before - 2) < 0.02, `${before} -> ${doubled}`);
+  game.state.nations.RUS.armyMul = base * 0.5;
+  assert.ok(Math.abs(game.maxGarrison('RU') / before - 0.5) < 0.02);
+});
+
 test('a strong army captures a weak province after its march', () => {
   const game = makeGame();
   game.province('BE').garrison = 3;

@@ -16,8 +16,8 @@ export const BAL = {
   startGoldPerProvince: 12,
 
   // Garrisons
-  garrisonBase: 25,
-  garrisonPop: 1.4,
+  garrisonBase: 20,
+  garrisonPop: 1.9,
   barracksGarrison: 0.18,
   reinforceShare: 0.006, // share of max garrison per second
 

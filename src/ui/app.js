@@ -209,7 +209,7 @@ export class App {
       if (!province) continue;
       pop += province.pop;
       income += BAL.incomeBase + province.pop * BAL.incomePop;
-      army += BAL.garrisonBase + province.pop * BAL.garrisonPop;
+      army += (BAL.garrisonBase + province.pop * BAL.garrisonPop) * (nation.army ?? 1);
       recruits += BAL.manpowerBase + province.pop * BAL.manpowerPop;
     }
     return { pop, income, army: Math.round(army), recruits };

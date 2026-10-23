@@ -72,6 +72,7 @@ export class Game {
         color: n.color,
         capital: n.capital,
         doctrine: isPlayer ? doctrineId : assignDoctrine(n, this.rng),
+        armyMul: n.army ?? 1,
         gold: BAL.startGoldBase + n.provinces.length * BAL.startGoldPerProvince,
         manpower: BAL.startManpower,
         alive: true,
@@ -156,7 +157,15 @@ export class Game {
   #maxGarrison(p, state = this.state) {
     const owner = p.owner ? state.nations[p.owner] : null;
     const mod = 1 + doctrineMod(owner?.doctrine, 'garrison');
-    return Math.round((BAL.garrisonBase + p.pop * BAL.garrisonPop) * (1 + p.barracks * BAL.barracksGarrison) * mod);
+    const strength = owner?.armyMul ?? 1;
+    return Math.round(
+      (BAL.garrisonBase + p.pop * BAL.garrisonPop) * (1 + p.barracks * BAL.barracksGarrison) * mod * strength,
+    );
+  }
+
+  /** Military potential of a nation: what its garrisons are scaled by. */
+  armyMultiplier(nationId) {
+    return this.state.nations[nationId]?.armyMul ?? 1;
   }
 
   defenseValue(provinceId) {
