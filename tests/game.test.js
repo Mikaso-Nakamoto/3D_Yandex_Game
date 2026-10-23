@@ -705,3 +705,38 @@ test('the new world does not start a single province away from victory', () => {
     `USA starts with ${game.provinceCount('USA')}/${total}, victory needs ${needed}`,
   );
 });
+
+// ---------------------------------------------------------------- score
+
+test('score rewards land, conquests and speed, not losses', () => {
+  const game = makeGame();
+  game.state.stats.captured = 5;
+  game.state.stats.battlesWon = 4;
+  const score = game.score();
+  assert.equal(score.victory, false);
+  assert.ok(score.total > 0);
+  assert.ok(score.speedBonus > 0, 'quick games are worth more');
+
+  const fast = makeGame();
+  fast.state.months += 12 * 3; // three years later
+  assert.ok(fast.score().speedBonus < score.speedBonus, 'time erodes the speed bonus');
+
+  const loser = makeGame();
+  loser.state.stats.lostProvinces = 10;
+  assert.ok(loser.score().total < game.score().total, 'lost provinces cost points');
+});
+
+test('a victory is worth more than the same board without one', () => {
+  const game = makeGame();
+  game.state.stats.captured = 3;
+  const peace = game.score().total;
+  game.state.status = 'victory';
+  assert.ok(game.score().total > peace + 400);
+});
+
+test('score never goes negative', () => {
+  const game = makeGame();
+  game.state.stats.lostProvinces = 500;
+  game.state.months = game.scenario.startYear * 12 + 12 * 60;
+  assert.equal(game.score().total, 0);
+});

@@ -12,6 +12,12 @@ export const THEATRES = {
   },
 };
 
+/** "Победа: <genitive> под вашей короной" reads correctly for every theatre. */
+export const THEATRE_GENITIVE = {
+  europe: 'половина Европы',
+  america: 'половина Нового Света',
+};
+
 export const SCENARIOS = [
   {
     id: 'concert',
@@ -388,6 +394,55 @@ export const SCENARIOS = [
       { province: 'GL', garrison: 0.35, fort: 1 },
     ],
     balance: { aiAggression: 0.9, aiEco: 1.0, neutralStrength: 0.9 },
+  },
+  {
+    id: 'civil1861',
+    theatre: 'america',
+    title: 'Дом разделённый',
+    era: '1861',
+    startYear: 1861,
+    startMonth: 4,
+    monthsPerSecond: 0.5,
+    difficulty: 'Высоко',
+    blurb:
+      'Союз и Конфедерация делят один континент. Пока армии сходятся в поле, Британия держит север, а Мексика и Гаити ждут своего часа. Каждая неделя дороже предыдущей.',
+    nations: [
+      {
+        id: 'USA',
+        army: 1.15,
+        name: 'Соединённые Штаты', short: 'Союз', color: '#3f6fb5', capital: 'NE',
+        provinces: ['NE', 'MW', 'WE'], ai: { aggression: 1.0, eco: 1.1 },
+      },
+      {
+        id: 'CSA',
+        army: 1.05,
+        name: 'Конфедеративные Штаты', short: 'Конфедерация', color: '#8c8c94', capital: 'SO',
+        provinces: ['SO', 'FL', 'PL'], ai: { aggression: 1.05, eco: 0.95 },
+      },
+      {
+        id: 'BNA',
+        army: 1.0,
+        name: 'Британская Северная Америка', short: 'Британия', color: '#b04a4a', capital: 'CA',
+        provinces: ['CA', 'NW'], ai: { aggression: 0.75, eco: 1.05 },
+      },
+      {
+        id: 'MEX',
+        army: 0.85,
+        name: 'Мексиканская республика', short: 'Мексика', color: '#b5651d', capital: 'MX',
+        provinces: ['MX', 'CU'], ai: { aggression: 0.85, eco: 0.95 },
+      },
+      {
+        id: 'HAI',
+        army: 0.55,
+        name: 'Государство Гаити', short: 'Гаити', color: '#8a6aa8', capital: 'HI',
+        provinces: ['HI'], ai: { aggression: 0.7, eco: 0.9 },
+      },
+    ],
+    neutrals: [
+      { province: 'AK', garrison: 0.4, fort: 0 },
+      { province: 'GL', garrison: 0.35, fort: 1 },
+    ],
+    balance: { aiAggression: 1.0, aiEco: 1.0, neutralStrength: 0.85 },
   },
 ];
 

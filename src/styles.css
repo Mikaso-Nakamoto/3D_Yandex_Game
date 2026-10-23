@@ -2812,3 +2812,84 @@ kbd {
     transform: none;
   }
 }
+
+
+/* ---------------------------------------------------------------- end screen score */
+
+.end-score {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(217, 180, 90, 0.08);
+  border: 1px solid rgba(217, 180, 90, 0.25);
+}
+
+.score-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.score-label {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.score-value {
+  font-family: var(--serif, inherit);
+  font-size: 26px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.score-break {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.score-break .good {
+  color: #8fc98a;
+}
+
+.end-board {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.board-title {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 11.5px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.board-row.is-self {
+  background: rgba(217, 180, 90, 0.12);
+  border: 1px solid rgba(217, 180, 90, 0.3);
+}
+
+.board-rank {
+  color: var(--gold);
+  font-weight: 700;
+}

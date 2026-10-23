@@ -489,10 +489,12 @@ export class App {
 
     const victory = result === 'victory';
     $('#end-emblem').textContent = victory ? '♛' : '☠';
-    $('#end-eyebrow').textContent = victory ? 'Европа ваша' : 'Держава пала';
+    const theatre = THEATRES[this.scenario?.theatre ?? 'europe'];
+    const place = theatre?.id === 'america' ? 'Новый Свет' : 'Европа';
+    $('#end-eyebrow').textContent = victory ? `${place} ваш` : 'Держава пала';
     $('#end-title').textContent = victory ? 'Победа' : 'Поражение';
     $('#end-text').textContent = victory
-      ? 'Половина континента признала вашу корону. Историки будут спорить о методах, но не о результате.'
+      ? `Половина ${place === 'Европа' ? 'континента' : 'Нового Света'} признала вашу корону. Историки будут спорить о методах, но не о результате.`
       : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
     const stats = game.state.stats;
     $('#end-stats').innerHTML = `
@@ -503,6 +505,36 @@ export class App {
       <div class="end-stat"><div class="k">Потеряно</div><div class="v">${stats.lostProvinces}</div></div>
       <div class="end-stat"><div class="k">Лет правления</div><div class="v">${Math.max(1, Math.round((game.state.months - this.scenario.startYear * 12) / 12))}</div></div>
       <div class="end-stat"><div class="k">Отбито атак</div><div class="v">${stats.battlesWon ?? 0}</div></div>`;
+    const score = game.score();
+    $('#end-score').innerHTML = `
+      <div class="score-line">
+        <span class="score-label">Очки партии</span>
+        <b class="score-value">${fmt(score.total)}</b>
+      </div>
+      <div class="score-break">
+        <span>земли ${Math.round(score.share * 100)}%</span>
+        <span>захваты ${fmt((stats.captured ?? 0) * 60)}</span>
+        <span>оборона ${fmt((stats.battlesWon ?? 0) * 25)}</span>
+        <span>скорость +${fmt(score.speedBonus)}</span>
+        ${score.victory ? '<span class="good">победа +500</span>' : ''}
+      </div>`;
+    $('#end-board').classList.add('hidden');
+    $('#end-board').innerHTML = '';
+    platform.submitScore('crowns', score.total).then((submitted) => {
+      if (!submitted) return;
+      platform.topScores('crowns', 5).then((entries) => {
+        if (!entries.length) return;
+        $('#end-board').classList.remove('hidden');
+        $('#end-board').innerHTML = `
+          <div class="board-title">Лучшие правители</div>
+          ${entries
+            .map(
+              (entry) =>
+                `<div class="board-row ${entry.self ? 'is-self' : ''}"><span class="board-rank">${entry.rank}</span><span class="board-name">${entry.name}</span><b>${fmt(entry.score)}</b></div>`,
+            )
+            .join('')}`;
+      });
+    });
     $('#screen-end').classList.remove('hidden');
     if (victory) sfx.victory();
     else sfx.defeat();

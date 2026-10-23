@@ -1,4 +1,4 @@
-import { getScenario } from '../data/scenarios.js';
+import { getScenario, THEATRE_GENITIVE } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS, doctrineMod } from './balance.js';
 import { Rng } from './rng.js';
 import { aiThink, assignDoctrine } from './ai.js';
@@ -816,7 +816,7 @@ export class Game {
     s.stats.peak = Math.max(s.stats.peak, owned);
     if (owned / total >= this.state.rules.victoryShare) {
       s.status = 'victory';
-      this.#log('Победа: половина Европы под вашей короной', 'good');
+      this.#log(`Победа: ${THEATRE_GENITIVE[this.scenario.theatre] ?? 'Европы'} под вашей короной`, 'good');
       this.#emit('end', { result: 'victory', owned, total });
       return;
     }
@@ -851,6 +851,34 @@ export class Game {
       nationId: this.state.nationId,
       rng: this.rng.s,
       state: this.state,
+    };
+  }
+
+  /** Final score: land, conquests and speed, minus losses. Pure and testable. */
+  score() {
+    const s = this.state;
+    const stats = s.stats;
+    const total = Object.keys(s.provinces).length;
+    const owned = this.#provinceCount(s.nationId);
+    const years = Math.max(0, (s.months - this.scenario.startYear * 12) / 12);
+    const share = owned / total;
+    const speedBonus = Math.round(Math.max(0, 1 - years / 25) * 400);
+    const base = Math.round(
+      share * 1000 +
+        (stats.captured ?? 0) * 60 +
+        (stats.battlesWon ?? 0) * 25 -
+        (stats.lostProvinces ?? 0) * 40 +
+        speedBonus,
+    );
+    const victory = s.status === 'victory';
+    return {
+      total: Math.max(0, base + (victory ? 500 : 0)),
+      base,
+      share,
+      owned,
+      speedBonus,
+      victory,
+      years,
     };
   }
 

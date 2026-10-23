@@ -93,6 +93,39 @@ export const platform = {
     });
   },
 
+  /** Best-effort leaderboard submit; silently no-ops outside Yandex Games. */
+  async submitScore(leaderboard, score) {
+    if (!this.ysdk?.leaderboards?.setLeaderboardScore) return false;
+    try {
+      await this.ysdk.leaderboards.setLeaderboardScore(leaderboard, Math.round(score), '');
+      return true;
+    } catch (error) {
+      console.info('[yandex] leaderboard rejected:', error?.message);
+      return false;
+    }
+  },
+
+  /** Top entries of a leaderboard, or an empty list when unavailable. */
+  async topScores(leaderboard, quantity = 5) {
+    if (!this.ysdk?.leaderboards?.getLeaderboardEntries) return [];
+    try {
+      const result = await this.ysdk.leaderboards.getLeaderboardEntries(leaderboard, {
+        quantityTop: quantity,
+        includeUser: true,
+        quantityAround: 2,
+      });
+      return (result?.entries ?? []).map((entry) => ({
+        rank: entry.rank,
+        score: entry.score,
+        name: entry.player?.publicName || 'Игрок',
+        self: Boolean(entry.player?.scopePermission === undefined && false),
+      }));
+    } catch (error) {
+      console.info('[yandex] leaderboard read failed:', error?.message);
+      return [];
+    }
+  },
+
   async save(data) {
     try {
       await this.player?.setData(data, false);
