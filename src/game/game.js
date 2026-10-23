@@ -197,8 +197,21 @@ export class Game {
     return this.state.armies.some((a) => a.owner === nationId);
   }
 
-  #armyFrom(provinceId) {
-    return this.state.armies.find((a) => a.from === provinceId);
+  /** Armies currently marching out of a province (a province may send several). */
+  armiesFrom(provinceId) {
+    return this.state.armies.filter((a) => a.from === provinceId);
+  }
+
+  /** Troops already committed to the road from this province. */
+  troopsInTransit(provinceId) {
+    return this.armiesFrom(provinceId).reduce((sum, army) => sum + army.troops, 0);
+  }
+
+  /** How many troops a send with this ratio would actually take right now. */
+  sendableTroops(provinceId, ratio = this.state.sendRatio) {
+    const province = this.state.provinces[provinceId];
+    if (!province) return 0;
+    return Math.floor(province.garrison * Math.max(0.05, Math.min(1, ratio)));
   }
 
   // ---------------------------------------------------------------- events
@@ -254,8 +267,11 @@ export class Game {
     if (from.owner !== this.state.nationId) return { ok: false, reason: 'Это не ваша провинция' };
     if (fromId === toId) return { ok: false, reason: 'Выберите другую провинцию' };
     if (!this.neighbors(fromId).includes(toId)) return { ok: false, reason: 'Провинции не граничат' };
-    if (this.#armyFrom(fromId)) return { ok: false, reason: 'Гарнизон уже в походе' };
-    if (from.garrison * this.state.sendRatio < BAL.minSend) return { ok: false, reason: 'Слишком мало войск' };
+    // Several armies may leave the same province at once; only the troops that are
+    // still at home can march, so the garrison is the single source of truth.
+    if (this.sendableTroops(fromId, this.state.sendRatio) < BAL.minSend) {
+      return { ok: false, reason: 'В провинции осталось слишком мало войск' };
+    }
     return { ok: true };
   }
 
@@ -273,7 +289,6 @@ export class Game {
     const from = this.state.provinces[fromId];
     if (!from || from.owner !== nationId) return 0;
     if (!this.neighbors(fromId).includes(toId)) return 0;
-    if (this.#armyFrom(fromId)) return 0;
     const amount = Math.floor(from.garrison * Math.max(0.05, Math.min(1, ratio)));
     if (amount < BAL.minSend) return 0;
 

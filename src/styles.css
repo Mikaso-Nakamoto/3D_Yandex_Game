@@ -1244,6 +1244,17 @@ body {
   box-shadow: 0 0 10px rgba(242, 215, 136, 0.45);
 }
 
+.march-note {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+}
+
+.march-note b {
+  font-weight: 700;
+}
+
 .over-note {
   color: #f2d788;
   font-weight: 600;

@@ -78,7 +78,7 @@ function attack(game, nation, owned) {
 
   let best = null;
   for (const p of owned) {
-    if (state.armies.some((a) => a.from === p.id)) continue;
+    // It may already have armies on the road: only troops still at home matter.
     if (p.garrison < 28) continue;
     const atk = p.garrison * game.attackModifier(nation.id);
     for (const nid of game.neighbors(p.id)) {

@@ -512,9 +512,7 @@ export class App {
 
   #dragStart(provinceId) {
     if (!this.game) return;
-    const targets = this.game
-      .neighbors(provinceId)
-      .filter((id) => id !== provinceId && !this.game.state.armies.some((a) => a.from === provinceId));
+    const targets = this.game.neighbors(provinceId).filter((id) => id !== provinceId);
     this.world.setValidTargets(targets);
     this.world.setSelected(provinceId);
     sfx.click();
@@ -683,6 +681,8 @@ export class App {
     const defense = game.defenseValue(province.id);
     const share = clamp(province.garrison / Math.max(1, max), 0, 1);
     const over = Math.max(0, Math.round(province.garrison - max));
+    const marching = game.troopsInTransit(province.id);
+    const marchingCount = game.armiesFrom(province.id).length;
     const regen = max * BAL.reinforceShare * (1 + province.barracks * 0.12);
     const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
     const doctrineIncome = 1 + (game.player.doctrine === 'coin' ? 0.3 : 0);
@@ -742,6 +742,11 @@ export class App {
           }</span>
           <span>Оборона <b>${fmt(defense)}</b></span>
         </div>
+        ${
+          marching > 0
+            ? `<div class="march-note">В пути: <b>${fmt(marching)}</b> · ${marchingCount} ${marchingCount === 1 ? 'отряд' : marchingCount < 5 ? 'отряда' : 'отрядов'}</div>`
+            : ''
+        }
       </div>
 
       <div class="pp-rows">
@@ -758,7 +763,7 @@ export class App {
       <div class="pp-upgrades">${upgrades}</div>
       <p class="pp-hint">${
         isMine
-          ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать. Сейчас отправится ${Math.round(game.state.sendRatio * 100)}% гарнизона. Подкрепления складываются сверх нормы и не пропадают.`
+          ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать: уйдёт ${Math.round(game.state.sendRatio * 100)}% гарнизона (${fmt(game.sendableTroops(province.id))} чел.). Можно отправлять сразу в несколько сторон — из провинции уйдёт столько отрядов, сколько вы прикажете.`
           : `Чтобы атаковать, перетащите войска сюда из своей соседней провинции. Гарнизон здесь ${fmt(province.garrison)}, оборона ${fmt(defense)}.`
       }</p>
     `;
@@ -1022,6 +1027,14 @@ export class App {
       })),
       this.game.state.nations,
     );
+    // Several armies can leave the same province: fan them out near the origin.
+    const fanIndex = new Map();
+    for (const army of this.game.state.armies) {
+      const list = fanIndex.get(army.from) ?? [];
+      list.push(army.id);
+      fanIndex.set(army.from, list);
+    }
+
     const seen = new Set();
     for (const army of this.game.state.armies) {
       seen.add(army.id);
@@ -1040,8 +1053,17 @@ export class App {
       const z = from[1] + (to[1] - from[1]) * t;
       const pos = this.world.projectPoint(x, z, 0.35);
       const lift = 16;
+
+      // Perpendicular fan offset, fading out as the army leaves its home province.
+      const ids = fanIndex.get(army.from) ?? [];
+      const index = ids.indexOf(army.id);
+      const spread = ids.length > 1 ? (index - (ids.length - 1) / 2) * 16 : 0;
+      const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
+      const offX = Math.cos(angle + Math.PI / 2) * spread * (1 - t);
+      const offY = Math.sin(angle + Math.PI / 2) * spread * (1 - t) * 0.6;
+
       token.style.display = pos.visible ? 'flex' : 'none';
-      token.style.transform = `translate(-50%, -50%) translate(${pos.x}px, ${pos.y - lift}px)`;
+      token.style.transform = `translate(-50%, -50%) translate(${pos.x + offX}px, ${pos.y - lift + offY}px)`;
       token.textContent = fmt(army.troops);
     }
     for (const [id, token] of this.armyTokens) {

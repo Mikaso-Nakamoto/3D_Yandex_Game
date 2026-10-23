@@ -342,3 +342,70 @@ test('mobilization refuses politely when every garrison is already overfull', ()
   assert.match(result.reason, /полны/);
   assert.equal(game.player.gold, gold, 'gold must be refunded');
 });
+
+
+test('one province can send armies to several neighbours at once', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 300;
+  const before = game.province('FR').garrison;
+
+  const first = game.sendTroops('FR', 'BE', 0.25);
+  const second = game.sendTroops('FR', 'IT', 0.25);
+  const third = game.sendTroops('FR', 'ES', 0.25);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(third.ok, true);
+  assert.equal(game.state.armies.length, 3);
+  assert.deepEqual(
+    game.state.armies.map((army) => army.to).sort(),
+    ['BE', 'ES', 'IT'],
+  );
+  // Each order takes its share of what is left at home: 75 + 56 + 42.
+  const sent = first.amount + second.amount + third.amount;
+  assert.deepEqual([first.amount, second.amount, third.amount], [75, 56, 42]);
+  assert.equal(game.province('FR').garrison, before - sent);
+});
+
+test('parallel sends never take more troops than the province has', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 100;
+
+  const sent = [];
+  for (const target of ['BE', 'IT', 'ES', 'CH', 'DE', 'LU']) {
+    const result = game.sendTroops('FR', target, 0.5);
+    if (result.ok) sent.push(result.amount);
+  }
+  assert.ok(sent.length >= 2, 'should allow multiple departures');
+  assert.equal(game.province('FR').garrison, 100 - sent.reduce((a, b) => a + b, 0));
+
+  // Once the garrison is empty, further orders are refused.
+  const extra = game.sendTroops('FR', 'BE', 1);
+  assert.equal(extra.ok, false);
+  assert.match(extra.reason, /мало войск/);
+});
+
+test('troops in transit are reported per province', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 200;
+  game.sendTroops('FR', 'BE', 0.5);
+  game.sendTroops('FR', 'IT', 0.25);
+  assert.equal(game.armiesFrom('FR').length, 2);
+  // 50% of 200 = 100, then 25% of the remaining 100 = 25.
+  assert.equal(game.troopsInTransit('FR'), 125);
+  assert.equal(game.armiesFrom('IT').length, 0);
+});
+
+test('two armies from one province arrive independently', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 400;
+  game.province('BE').garrison = 1;
+  game.province('IT').garrison = 1;
+  game.province('BE').owner = 'NLD';
+  game.province('IT').owner = 'NLD';
+  game.sendTroops('FR', 'BE', 0.25);
+  game.sendTroops('FR', 'IT', 0.25);
+  for (let i = 0; i < 600; i += 1) game.update(0.05);
+  assert.equal(game.province('BE').owner, 'FRA');
+  assert.equal(game.province('IT').owner, 'FRA');
+});
