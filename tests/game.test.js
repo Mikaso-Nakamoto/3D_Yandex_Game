@@ -521,7 +521,7 @@ test('the new world scenario fills every province of its theatre', () => {
     assert.ok(owner, `${province.id} is unowned`);
   }
   assert.equal(game.state.nations.USA.isPlayer, true);
-  assert.equal(game.provinceCount('USA'), 6);
+  assert.equal(game.provinceCount('USA'), 5);
 });
 
 test('a game refuses a map from the wrong theatre', () => {
@@ -638,4 +638,70 @@ test('morale, weariness and truces survive a save round-trip', () => {
   assert.ok(Math.abs(restored.player.morale - 72) < 1e-6);
   assert.ok(Math.abs(restored.player.exhaustion - 33) < 1e-6);
   assert.equal(restored.hasTruce('FRA', 'NLD'), true);
+});
+
+// ---------------------------------------------------------------- desertion & counter-attacks
+
+test('a broken nation bleeds troops to desertion, a confident one does not', () => {
+  const low = makeGame();
+  low.player.morale = 5;
+  low.province('FR').garrison = 60; // below the cap, so growth is visible
+  const start = low.province('FR').garrison;
+  for (let i = 0; i < 100; i += 1) low.update(0.1);
+  const lowGrowth = low.province('FR').garrison - start;
+
+  const calm = makeGame();
+  calm.province('FR').garrison = 60;
+  const calmStart = calm.province('FR').garrison;
+  for (let i = 0; i < 100; i += 1) calm.update(0.1);
+  const calmGrowth = calm.province('FR').garrison - calmStart;
+
+  assert.ok(lowGrowth < calmGrowth, `desertion should slow growth: ${lowGrowth} vs ${calmGrowth}`);
+  assert.ok(low.state.stats.deserted > 0, 'desertion is reported in the stats');
+});
+
+test('desertion never drops a garrison below zero', () => {
+  const game = makeGame();
+  game.player.morale = 0;
+  for (const province of Object.values(game.state.provinces)) {
+    if (province.owner === 'FRA') province.garrison = 0.5;
+  }
+  for (let i = 0; i < 400; i += 1) game.update(0.1);
+  for (const province of Object.values(game.state.provinces)) {
+    assert.ok(province.garrison >= 0, 'garrison cannot go negative');
+  }
+});
+
+test('counter-attacks only target a neighbour owned by the attacker', () => {
+  // Statistical check: run many repelled assaults and make sure every sally
+  // that happens lands in the province the attack came from.
+  let counterSeen = false;
+  for (let seed = 1; seed < 60 && !counterSeen; seed += 1) {
+    const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed });
+    for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+    game.province('FR').garrison = 400;
+    const target = game.province('BE');
+    target.owner = 'NLD';
+    target.garrison = 900; // will repel the assault
+    game.sendTroops('FR', 'BE', 0.1);
+    for (let i = 0; i < 400 && !counterSeen; i += 1) {
+      game.update(0.1);
+      if (game.state.armies.some((a) => a.owner === 'NLD' && a.to === 'FR')) {
+        counterSeen = true;
+        assert.equal(game.state.armies.find((a) => a.owner === 'NLD').from, 'BE');
+      }
+    }
+  }
+  assert.ok(counterSeen, 'expected at least one counter-attack across seeds');
+});
+
+test('the new world does not start a single province away from victory', () => {
+  const scenario = SCENARIOS.find((s) => s.id === 'neworld');
+  const game = new Game({ scenarioId: 'neworld', nationId: 'USA', map: americaMap });
+  const total = Object.keys(game.state.provinces).length;
+  const needed = Math.ceil(total * game.rules.victoryShare);
+  assert.ok(
+    game.provinceCount('USA') < needed - 1,
+    `USA starts with ${game.provinceCount('USA')}/${total}, victory needs ${needed}`,
+  );
 });

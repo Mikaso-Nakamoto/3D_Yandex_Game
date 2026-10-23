@@ -575,6 +575,7 @@ export class Game {
     this.#morale(dt);
     this.#tickOffers();
     this.#reinforce(dt);
+    this.#desertion(dt);
     this.#moveArmies(dt);
     this.#think(dt);
     this.#checkEnd();
@@ -622,6 +623,22 @@ export class Game {
       if (s.time - (nation.lastClash ?? -999) > BAL.exhaustionCalmAfter) {
         nation.exhaustion = Math.max(0, nation.exhaustion - BAL.exhaustionDecay * dt);
       }
+    }
+  }
+
+  /** A beaten nation loses men to desertion until its morale recovers. */
+  #desertion(dt) {
+    const s = this.state;
+    for (const p of Object.values(s.provinces)) {
+      if (!p.owner) continue;
+      const nation = s.nations[p.owner];
+      if (!nation?.alive) continue;
+      if (nation.morale >= BAL.desertionBelow) continue;
+      const severity = (BAL.desertionBelow - nation.morale) / BAL.desertionBelow;
+      const loss = p.garrison * BAL.desertionRate * severity * dt;
+      if (loss <= 0) continue;
+      p.garrison = Math.max(0, p.garrison - loss);
+      if (nation.isPlayer) s.stats.deserted = (s.stats.deserted ?? 0) + loss;
     }
   }
 
@@ -729,6 +746,23 @@ export class Game {
         this.#adjustExhaustion(target.owner, BAL.exhaustionWin);
       }
       if (defender?.isPlayer) s.stats.battlesWon += 1;
+      // A beaten defender may sally out and hit the province the attack came from.
+      if (
+        target.owner &&
+        defender?.alive &&
+        !this.hasTruce(target.owner, army.owner) &&
+        target.garrison > BAL.minSend * 4 &&
+        this.rng.chance(BAL.counterAttack)
+      ) {
+        const home = s.provinces[army.from];
+        if (home && home.owner === army.owner && this.neighbors(army.from).includes(target.id)) {
+          const marched = Math.floor(target.garrison * BAL.counterAttackMargin);
+          if (marched >= BAL.minSend) {
+            this.#log(`Контрудар: ${defender.short} → ${this.provinceName(army.from)}`, 'war');
+            this.launchArmy(target.owner, target.id, army.from, BAL.counterAttackMargin);
+          }
+        }
+      }
       this.#log(
         `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''}`,
         defender?.isPlayer ? 'good' : 'war',

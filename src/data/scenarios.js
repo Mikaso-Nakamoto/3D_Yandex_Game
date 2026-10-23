@@ -357,7 +357,7 @@ export const SCENARIOS = [
         id: 'USA',
         army: 1.1,
         name: 'Соединённые Штаты', short: 'США', color: '#3f6fb5', capital: 'NE',
-        provinces: ['NE', 'MW', 'SO', 'PL', 'WE', 'FL'], ai: { aggression: 1.0, eco: 1.1 },
+        provinces: ['NE', 'MW', 'SO', 'PL', 'WE'], ai: { aggression: 1.0, eco: 1.1 },
       },
       {
         id: 'BNA',
@@ -369,7 +369,7 @@ export const SCENARIOS = [
         id: 'ESP',
         army: 0.9,
         name: 'Испанские колонии', short: 'Испания', color: '#b5651d', capital: 'MX',
-        provinces: ['MX', 'CU'], ai: { aggression: 0.85, eco: 1.0 },
+        provinces: ['MX', 'CU', 'FL'], ai: { aggression: 0.85, eco: 1.0 },
       },
       {
         id: 'RUS',
@@ -384,7 +384,9 @@ export const SCENARIOS = [
         provinces: ['HI'], ai: { aggression: 0.75, eco: 0.9 },
       },
     ],
-    neutrals: [],
+    neutrals: [
+      { province: 'GL', garrison: 0.35, fort: 1 },
+    ],
     balance: { aiAggression: 0.9, aiEco: 1.0, neutralStrength: 0.9 },
   },
 ];

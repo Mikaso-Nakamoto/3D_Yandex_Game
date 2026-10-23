@@ -32,6 +32,10 @@ export const BAL = {
   seaMinTravel: 1.6,
   combatSwing: 0.08,
   loserSurvivorBase: 0.6,
+  counterAttack: 0.05, // odds of the defender counter-attacking the attacker's home province
+  counterAttackMargin: 0.35, // share of the defender's surviving garrison that marches
+  desertionBelow: 25, // morale level at which soldiers start slipping away
+  desertionRate: 0.004, // share of the garrison lost per second at zero morale
 
   // Upgrades
   maxLevel: 3,

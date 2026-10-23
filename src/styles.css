@@ -2719,3 +2719,96 @@ kbd {
     top: 74px;
   }
 }
+
+
+/* ---------------------------------------------------------------- short landscape phones */
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .province-panel {
+    left: 8px;
+    bottom: 8px;
+    width: 288px;
+    max-height: calc(100% - 56px);
+    padding: 10px 11px;
+    border-radius: 12px;
+  }
+
+  .pp-name {
+    font-size: 15px;
+  }
+
+  .pp-owner {
+    font-size: 10.5px;
+  }
+
+  .pp-head {
+    margin-bottom: 8px;
+  }
+
+  .pp-rows {
+    gap: 2px;
+    margin: 8px 0;
+  }
+
+  .pp-row {
+    font-size: 10.5px;
+    padding: 1px 0;
+  }
+
+  .pp-row b {
+    font-size: 11px;
+  }
+
+  .pp-section {
+    margin: 6px 0 4px;
+    font-size: 9px;
+  }
+
+  .upg {
+    padding: 6px 8px;
+    gap: 8px;
+  }
+
+  .u-name {
+    font-size: 11px;
+  }
+
+  /* The per-level breakdown is useful on desktop, noise on a small screen. */
+  .u-sub {
+    display: none;
+  }
+
+  .u-cost {
+    font-size: 10px;
+  }
+
+  .pp-hint {
+    display: none;
+  }
+
+  .meter-head,
+  .meter-foot {
+    font-size: 10px;
+  }
+
+  /* Keep the send-ratio control clear of the open province panel. */
+  .send-ratio {
+    left: 312px;
+    right: auto;
+    transform: none;
+    bottom: 8px;
+    padding: 6px 9px;
+  }
+
+  .send-ratio .eyebrow {
+    display: none;
+  }
+
+  .offer-card {
+    top: 56px;
+    width: min(460px, calc(100vw - 340px));
+    left: auto;
+    right: 12px;
+    transform: none;
+  }
+}
