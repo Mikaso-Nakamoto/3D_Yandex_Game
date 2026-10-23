@@ -638,14 +638,22 @@ export class App {
       if (province) {
         const owner = province.owner ? this.game.state.nations[province.owner] : null;
         const defense = this.game.defenseValue(province.id);
+        const mine = owner?.id === this.game.state.nationId;
+        const lines = [
+          `Гарнизон ${Math.round(province.garrison)}`,
+          `Оборона ${Math.round(defense)}`,
+        ];
+        if (!mine) {
+          const odds = this.game.bestAttackOdds(province.id);
+          lines.push(odds ? `Шанс взять ${Math.round(odds.chance * 100)}%` : 'Нет соседней своей провинции');
+        } else {
+          const over = Math.round(province.garrison - this.game.maxGarrison(province.id));
+          lines.push(over > 0 ? `Сверх нормы +${over}` : 'Ваши земли');
+        }
         this.#tooltip(provinceId, {
           title: this.game.provinceName(provinceId),
           owner: owner ? owner.name : 'Нейтральная территория',
-          lines: [
-            `Гарнизон ${Math.round(province.garrison)}`,
-            `Оборона ${Math.round(defense)}`,
-            owner && owner.id !== this.game.state.nationId ? 'Можно атаковать' : 'Ваши земли',
-          ],
+          lines,
         });
       } else {
         this.#tooltip(null);
@@ -792,7 +800,10 @@ export class App {
     const over = Math.max(0, Math.round(province.garrison - max));
     const marching = game.troopsInTransit(province.id);
     const marchingCount = game.armiesFrom(province.id).length;
-    const regen = max * BAL.reinforceShare * (1 + province.barracks * BAL.barracksReinforce);
+    // Above the norm the flow continues automatically, just slower; at the
+    // ceiling it stops. The model owns this number so the panel cannot drift.
+    const regen = game.garrisonRate(province);
+    const breakdown = game.defenseBreakdown(province.id);
     const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
     const doctrineIncome = 1 + (game.player.doctrine === 'coin' ? 0.3 : 0);
     const recruits = (BAL.manpowerBase + province.pop * BAL.manpowerPop) * (1 + province.factory * BAL.factoryManpower);
@@ -857,24 +868,55 @@ export class App {
             ? `<div class="march-note">В пути: <b>${fmt(marching)}</b> · ${marchingCount} ${marchingCount === 1 ? 'отряд' : marchingCount < 5 ? 'отряда' : 'отрядов'}</div>`
             : ''
         }
+        ${
+          isMine && breakdown
+            ? `<div class="defense-note">${
+                over > 0
+                  ? `Из них ${fmt(breakdown.above)} сверх нормы бьются вполсилы (×${BAL.overstackDefense}), ${
+                      regen > 0 ? `набор идёт дальше: +${regen.toFixed(2)}/с` : 'набор остановлен на пределе'
+                    }. `
+                  : ''
+              }Крепость ×${breakdown.fortMul.toFixed(2)} · доктрина ×${breakdown.doctrineMul.toFixed(2)} · дух ×${breakdown.moraleMul.toFixed(2)}</div>`
+            : ''
+        }
       </div>
 
       <div class="pp-rows">
+        ${
+          !isMine
+            ? (() => {
+                const odds = game.bestAttackOdds(province.id);
+                if (!odds) {
+                  return '<div class="pp-row"><span>Штурм</span><b class="muted">нет соседней своей провинции</b></div>';
+                }
+                const chance = Math.round(odds.chance * 100);
+                const tone = odds.chance >= 0.85 ? 'good' : odds.chance >= 0.5 ? 'warn' : 'bad';
+                const grown = odds.defense > odds.defenseNow * 1.02;
+                return `<div class="pp-row"><span>Шанс взять</span><b class="odds ${tone}">${chance}%</b></div>
+                  <div class="pp-row"><span>Уйдёт в бой</span><b>${fmt(odds.troops)} чел. · ${game.provinceName(odds.from)}</b></div>
+                  <div class="pp-row"><span>Оборона к прибытию</span><b>${fmt(odds.defense)}${
+                    grown ? ` <span class="muted">(сейчас ${fmt(odds.defenseNow)})</span>` : ''
+                  }</b></div>
+                  <div class="pp-row"><span>Наверняка хватит</span><b>${fmt(odds.guarantee)} чел.</b></div>`;
+              })()
+            : ''
+        }
         <div class="pp-row"><span>Население</span><b>${province.pop.toFixed(1)} млн</b></div>
         <div class="pp-row"><span>Доход провинции</span><b class="gold">${isMine ? `+${(income * doctrineIncome).toFixed(2)} золота/с` : '—'}</b></div>
         <div class="pp-row"><span>Прирост рекрутов</span><b>${isMine ? `+${(recruits * 60).toFixed(0)}/мин` : '—'}</b></div>
         <div class="pp-row"><span>Крепость</span><b>${province.fort > 0 ? `уровень ${province.fort} из ${BAL.maxLevel}` : 'нет'}</b></div>
       </div>
 
-      <div class="pp-section">
-        <span>Развитие провинции</span>
-        ${isMine ? '' : '<span class="pp-section-note">только для своих земель</span>'}
-      </div>
-      <div class="pp-upgrades">${upgrades}</div>
+      ${
+        isMine
+          ? `<div class="pp-section"><span>Развитие провинции</span></div>
+      <div class="pp-upgrades">${upgrades}</div>`
+          : ''
+      }
       <p class="pp-hint">${
         isMine
           ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать: уйдёт ${Math.round(game.state.sendRatio * 100)}% гарнизона (${fmt(game.sendableTroops(province.id))} чел.). Можно отправлять сразу в несколько сторон — из провинции уйдёт столько отрядов, сколько вы прикажете.`
-          : `Чтобы атаковать, перетащите войска сюда из своей соседней провинции. Гарнизон здесь ${fmt(province.garrison)}, оборона ${fmt(defense)}.`
+          : `Оборона ${fmt(defense)}: ${fmt(breakdown.effective)} боевых войск × ${breakdown.fortMul.toFixed(2)} крепость × ${breakdown.doctrineMul.toFixed(2)} доктрина × ${breakdown.moraleMul.toFixed(2)} дух. Шанс — для доли ${Math.round(game.state.sendRatio * 100)}% и с учётом пополнения защитника в пути.`
       }</p>
     `;
   }

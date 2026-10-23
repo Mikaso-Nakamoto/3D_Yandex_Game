@@ -21,6 +21,9 @@ export const BAL = {
   barracksGarrison: 0.3,
   barracksReinforce: 0.15, // extra reinforce speed per level
   reinforceShare: 0.006, // share of max garrison per second
+  overfillShare: 0.25, // share of that rate that keeps flowing once the norm is full
+  overfillCeiling: 3, // surplus stops at this multiple of the norm (supply limit)
+  overstackDefense: 0.5, // troops above the norm defend at half strength (supply limits)
 
   // Combat
   fortDefense: 0.3,
@@ -30,7 +33,12 @@ export const BAL = {
   maxTravel: 16,
   minSend: 4,
   seaMinTravel: 1.6,
-  combatSwing: 0.08,
+  // Battle outcome follows a monotone curve of attack/defence power, so the
+  // chance shown in the UI is exactly the chance used by the resolver.
+  combatSteepness: 12,
+  combatCertain: 1.33, // this much stronger than the defence: always wins
+  combatHopeless: 0.75, // weaker than this: always loses
+  combatSwing: 0.08, // legacy noise for survivor counts
   loserSurvivorBase: 0.6,
   counterAttack: 0.05, // odds of the defender counter-attacking the attacker's home province
   counterAttackMargin: 0.35, // share of the defender's surviving garrison that marches

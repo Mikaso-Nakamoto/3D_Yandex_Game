@@ -51,7 +51,7 @@ export class Game {
       log: [],
       rules: this.rules,
       orders: { mobilizeReady: 0, taxReady: 0, marchReady: 0, taxUntil: 0, marchUntil: 0 },
-      stats: { battles: 0, captured: 0, lostProvinces: 0, battlesWon: 0, peak: 0 },
+      stats: { battles: 0, captured: 0, lostProvinces: 0, battlesWon: 0, peak: 0, recruited: 0, deserted: 0 },
       sendRatio: 0.5,
       relations: {},
       offers: [],
@@ -185,10 +185,102 @@ export class Game {
   }
 
   defenseValue(provinceId) {
-    const p = this.state.provinces[provinceId];
+    return this.#defensePower(this.state.provinces[provinceId]);
+  }
+
+  /**
+   * Defence power of a province. Troops above the garrison norm count at
+   * BAL.overstackDefense: they are real soldiers and never disappear, but a
+   * province cannot supply unlimited men.
+   */
+  #defensePower(p) {
     const owner = p.owner ? this.state.nations[p.owner] : null;
+    const max = this.#maxGarrison(p);
+    const above = Math.max(0, p.garrison - max);
+    const effective = Math.min(p.garrison, max) + above * BAL.overstackDefense;
     const morale = owner ? this.moraleModifier(owner.id) : 1;
-    return p.garrison * (1 + p.fort * BAL.fortDefense) * (1 + doctrineMod(owner?.doctrine, 'defense')) * morale;
+    return effective * (1 + p.fort * BAL.fortDefense) * (1 + doctrineMod(owner?.doctrine, 'defense')) * morale;
+  }
+
+  /** Human-readable breakdown of the defence number shown in the UI. */
+  defenseBreakdown(provinceId) {
+    const p = this.state.provinces[provinceId];
+    if (!p) return null;
+    const owner = p.owner ? this.state.nations[p.owner] : null;
+    const max = this.#maxGarrison(p);
+    const above = Math.max(0, p.garrison - max);
+    const fortMul = 1 + p.fort * BAL.fortDefense;
+    const doctrineMul = 1 + doctrineMod(owner?.doctrine, 'defense');
+    const moraleMul = owner ? this.moraleModifier(owner.id) : 1;
+    return {
+      garrison: p.garrison,
+      above,
+      effective: Math.min(p.garrison, max) + above * BAL.overstackDefense,
+      max,
+      fortMul,
+      doctrineMul,
+      moraleMul,
+      total: this.#defensePower(p),
+    };
+  }
+
+  /**
+   * Probability that `attack` power beats `defense` power. Monotone, with hard
+   * certainty at the edges — a 1.34x force never loses and never needs luck.
+   */
+  static winChance(attack, defense) {
+    if (!(defense > 0)) return 1;
+    const ratio = attack / defense;
+    if (ratio >= BAL.combatCertain) return 1;
+    if (ratio <= BAL.combatHopeless) return 0;
+    return 1 / (1 + Math.exp(-BAL.combatSteepness * (ratio - 1)));
+  }
+
+  /**
+   * What the player would get by dragging troops from `fromId` to `toId` now.
+   * `chance` is the exact probability used by the battle resolver; `guarantee`
+   * is the number of troops that wins without any luck at all.
+   */
+  attackOdds(fromId, toId, ratio = this.state.sendRatio) {
+    const from = this.state.provinces[fromId];
+    const to = this.state.provinces[toId];
+    if (!from || !to || from.owner !== this.state.nationId) return null;
+    const troops = this.sendableTroops(fromId, ratio);
+    if (troops < BAL.minSend) return null;
+    const modifier = this.attackModifier(this.state.nationId);
+    const attack = troops * modifier;
+    const seconds = this.travelTime(fromId, toId);
+    const defenseNow = this.defenseValue(toId);
+    // The defender reinforces while we march, so judge the battle by what the
+    // province will look like on arrival.
+    const defense = this.projectedDefense(toId, seconds);
+    const need = defense / Math.max(1e-6, attack); // strength ratio required to win
+    const chance = Game.winChance(attack, defense);
+    // Troops that win outright, without leaving anything to chance.
+    const guarantee = Math.ceil((defense * BAL.combatCertain) / modifier);
+    return {
+      troops,
+      attack,
+      defense,
+      defenseNow,
+      seconds,
+      chance,
+      need,
+      guarantee,
+      from: fromId,
+      to: toId,
+    };
+  }
+
+  /** Best odds the player has against a province from any adjacent own land. */
+  bestAttackOdds(toId, ratio = this.state.sendRatio) {
+    let best = null;
+    for (const neighbour of this.neighbors(toId)) {
+      const odds = this.attackOdds(neighbour, toId, ratio);
+      if (!odds) continue;
+      if (!best || odds.chance > best.chance || (odds.chance === best.chance && odds.troops > best.troops)) best = odds;
+    }
+    return best;
   }
 
   attackModifier(nationId) {
@@ -305,9 +397,7 @@ export class Game {
     if (amount < BAL.minSend) return 0;
 
     const sea = this.isSeaRoute(fromId, toId);
-    const marchBuff = nationId === this.state.nationId && this.state.orders.marchUntil > this.state.time ? 1.6 : 1;
-    const raw = (this.distance(fromId, toId) / (BAL.armySpeed * marchBuff)) * (sea ? BAL.seaTravelMul : 1);
-    const duration = Math.max(sea ? BAL.seaMinTravel : BAL.minTravel, Math.min(BAL.maxTravel, raw));
+    const duration = this.travelTime(fromId, toId, nationId);
 
     from.garrison -= amount;
     this.state.armies.push({
@@ -321,6 +411,73 @@ export class Game {
       sea,
     });
     return amount;
+  }
+
+  /** Seconds an army needs for the march. Includes the player's march bonus. */
+  travelTime(fromId, toId, nationId = this.state.nationId) {
+    const sea = this.isSeaRoute(fromId, toId);
+    const marchBuff = nationId === this.state.nationId && this.state.orders.marchUntil > this.state.time ? 1.6 : 1;
+    const raw = (this.distance(fromId, toId) / (BAL.armySpeed * marchBuff)) * (sea ? BAL.seaTravelMul : 1);
+    return Math.max(sea ? BAL.seaMinTravel : BAL.minTravel, Math.min(BAL.maxTravel, raw));
+  }
+
+  /** Where automatic recruitment stops for a province. */
+  garrisonCeiling(provinceId) {
+    return this.#maxGarrison(this.state.provinces[provinceId]) * BAL.overfillCeiling;
+  }
+
+  /** Garrison growth per second for a province (0 when the owner has no recruits). */
+  garrisonRate(p) {
+    const nation = p.owner ? this.state.nations[p.owner] : null;
+    if (!nation || !nation.alive || nation.manpower <= 0) return 0;
+    const max = this.#maxGarrison(p);
+    const rate = max * BAL.reinforceShare * (1 + p.barracks * BAL.barracksReinforce);
+    // Full provinces keep flowing above the norm, just slower, and stop at the ceiling.
+    if (p.garrison >= max * BAL.overfillCeiling) return 0;
+    return p.garrison >= max ? rate * BAL.overfillShare : rate;
+  }
+
+  /**
+   * Garrison after `seconds` of uninterrupted reinforcement. Below the norm it
+   * fills at full speed, then continues at the over-norm rate; both are capped
+   * by the owner's recruit pool.
+   */
+  projectedGarrison(p, seconds) {
+    const nation = p.owner ? this.state.nations[p.owner] : null;
+    if (!nation || !nation.alive || seconds <= 0) return p.garrison;
+    const max = this.#maxGarrison(p);
+    const full = max * BAL.reinforceShare * (1 + p.barracks * BAL.barracksReinforce);
+    let garrison = p.garrison;
+    let pool = nation.manpower;
+    let left = seconds;
+    if (garrison < max && full > 0) {
+      const fillTime = (max - garrison) / full;
+      const spendTime = Math.min(left, fillTime);
+      const spend = Math.min(full * spendTime, pool);
+      garrison += spend;
+      pool -= spend;
+      left -= spendTime;
+    }
+    if (left > 0) {
+      const ceiling = max * BAL.overfillCeiling;
+      const room = Math.max(0, ceiling - garrison);
+      const spend = Math.min(full * BAL.overfillShare * left, pool, room);
+      garrison += spend;
+    }
+    return garrison;
+  }
+
+  /**
+   * Defence a province will have when an army arrives. The defender keeps
+   * reinforcing during the march, so the odds must use this number — that is
+   * what the battle resolver sees.
+   */
+  projectedDefense(provinceId, seconds) {
+    const p = this.state.provinces[provinceId];
+    if (!p) return 0;
+    if (!p.owner) return this.defenseValue(provinceId);
+    const projected = { ...p, garrison: this.projectedGarrison(p, seconds) };
+    return this.#defensePower(projected);
   }
 
   // ---------------------------------------------------------------- morale & peace
@@ -497,16 +654,10 @@ export class Game {
         text: `+${Math.round(after - before)} к гарнизону, быстрее пополнение`,
       };
     }
-    // Morale and doctrine scale defence too, so measure the real difference.
-    const before = this.defenseValue(provinceId);
-    const afterProvince = { ...p, fort: p.fort + 1 };
-    const owner = p.owner ? this.state.nations[p.owner] : null;
-    const morale = owner ? this.moraleModifier(owner.id) : 1;
-    const after =
-      afterProvince.garrison *
-      (1 + afterProvince.fort * BAL.fortDefense) *
-      (1 + doctrineMod(owner?.doctrine, 'defense')) *
-      morale;
+    // Use the same defence function the battle uses, so the preview cannot drift
+    // from reality (it also covers the over-norm supply discount).
+    const before = this.#defensePower(p);
+    const after = this.#defensePower({ ...p, fort: p.fort + 1 });
     const defense = after - before;
     return { defense, text: `+${Math.round(defense)} к обороне сейчас` };
   }
@@ -644,16 +795,40 @@ export class Game {
 
   #reinforce(dt) {
     const s = this.state;
-    for (const p of Object.values(s.provinces)) {
-      if (!p.owner) continue;
+
+    // Two passes so a full province never starves a depleted one:
+    // 1) top every province up to its norm,
+    // 2) only then let full provinces keep producing above the norm.
+    const owned = Object.values(s.provinces).filter((p) => p.owner && s.nations[p.owner]?.alive);
+    const growth = (p) =>
+      this.#maxGarrison(p) * BAL.reinforceShare * (1 + p.barracks * BAL.barracksReinforce) * dt;
+    const spend = (nation, p, want) => {
+      if (want <= 0) return 0;
+      const gain = Math.min(want, nation.manpower);
+      if (gain <= 0) return 0;
+      p.garrison += gain;
+      nation.manpower -= gain;
+      if (nation.isPlayer) s.stats.recruited = (s.stats.recruited ?? 0) + gain;
+      return gain;
+    };
+
+    for (const p of owned) {
       const nation = s.nations[p.owner];
-      if (!nation?.alive) continue;
       const max = this.#maxGarrison(p);
-      if (p.garrison >= max || nation.manpower <= 0) continue;
-      const rate = max * BAL.reinforceShare * (1 + p.barracks * BAL.barracksReinforce) * dt;
-      const amount = Math.min(rate, max - p.garrison, nation.manpower);
-      p.garrison += amount;
-      nation.manpower -= amount;
+      if (p.garrison >= max) continue;
+      spend(nation, p, Math.min(growth(p), max - p.garrison));
+    }
+
+    for (const p of owned) {
+      const nation = s.nations[p.owner];
+      if (nation.manpower <= 0) continue;
+      const max = this.#maxGarrison(p);
+      if (p.garrison < max) continue;
+      // Beyond the norm the flow continues, just slower: the province is
+      // already supplied to capacity, so extra men are a permanent drain.
+      const ceiling = max * BAL.overfillCeiling;
+      if (p.garrison >= ceiling) continue;
+      spend(nation, p, Math.min(growth(p) * BAL.overfillShare, ceiling - p.garrison));
     }
   }
 
@@ -694,10 +869,12 @@ export class Game {
     const defender = target.owner ? s.nations[target.owner] : null;
     const defPower = this.defenseValue(target.id);
     const atkPower = army.troops * this.attackModifier(army.owner);
-    const roll = this.rng.range(1 - BAL.combatSwing, 1 + BAL.combatSwing);
+    const chance = Game.winChance(atkPower, defPower);
+    // rng.next() is always < 1, so chance 1 wins and chance 0 loses by construction.
+    const roll = this.rng.next();
     s.stats.battles += 1;
 
-    const attackerWins = atkPower * roll >= defPower;
+    const attackerWins = roll < chance;
     if (attackerWins) {
       const ratio = defPower / Math.max(1, atkPower);
       const survivors = Math.max(1, Math.round(army.troops * (1 - BAL.loserSurvivorBase * Math.min(0.95, ratio))));
@@ -713,8 +890,8 @@ export class Game {
 
       this.#log(
         previousOwner
-          ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short}`
-          : `${this.provinceName(target.id)}: нейтральная → ${attacker.short}`,
+          ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`
+          : `${this.provinceName(target.id)}: нейтральная → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`,
         previousOwner === s.nationId ? 'bad' : attacker.isPlayer ? 'good' : 'war',
       );
       this.#emit('capture', {
@@ -722,6 +899,11 @@ export class Game {
         from: previousOwner,
         to: army.owner,
         losers: Math.round(defPower),
+        defense: Math.round(defPower),
+        attack: Math.round(atkPower),
+        roll,
+        survivors,
+        sent: army.troops,
       });
       this.#markClash(previousOwner, army.owner);
       this.#adjustMorale(army.owner, BAL.moraleWin);
@@ -764,10 +946,19 @@ export class Game {
         }
       }
       this.#log(
-        `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''}`,
+        `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''} — ${Math.round(atkPower)} против ${Math.round(defPower)}`,
         defender?.isPlayer ? 'good' : 'war',
       );
-      this.#emit('battle', { provinceId: target.id, attacker: army.owner, defender: target.owner, success: false });
+      this.#emit('battle', {
+        provinceId: target.id,
+        attacker: army.owner,
+        defender: target.owner,
+        success: false,
+        attack: Math.round(atkPower),
+        defense: Math.round(defPower),
+        roll,
+        sent: army.troops,
+      });
       this.#refreshNation(army.owner);
     }
   }

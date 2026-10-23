@@ -102,7 +102,9 @@ function attack(game, nation, owned) {
     for (const nid of game.neighbors(p.id)) {
       const target = state.provinces[nid];
       if (!target || target.owner === nation.id) continue;
-      const def = game.defenseValue(nid);
+      // The defender keeps reinforcing during the march, so plan against the
+      // province as it will look on arrival — the same number the player sees.
+      const def = game.projectedDefense(nid, game.travelTime(p.id, nid, nation.id));
       if (atk < def * 1.5) continue;
 
       let score = def;

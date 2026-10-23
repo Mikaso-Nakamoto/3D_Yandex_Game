@@ -2908,3 +2908,44 @@ kbd {
     display: none;
   }
 }
+
+
+/* ---------------------------------------------------------------- defence breakdown & odds */
+
+.defense-note {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.defense-note .muted {
+  opacity: 0.85;
+}
+
+.pp-row b.odds {
+  font-size: 12.5px;
+}
+
+.pp-row b.odds.good {
+  color: #8fc98a;
+}
+
+.pp-row b.odds.warn {
+  color: var(--gold);
+}
+
+.pp-row b.odds.bad {
+  color: #d98a7f;
+}
+
+.pp-row b.muted {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .defense-note {
+    display: none;
+  }
+}

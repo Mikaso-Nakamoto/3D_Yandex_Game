@@ -167,10 +167,12 @@ test('tax order doubles income while active', () => {
 test('economy produces gold and manpower over time', () => {
   const game = makeGame();
   const gold = game.player.gold;
-  const manpower = game.player.manpower;
+  // Keep one province below its norm so we can watch recruits turn into troops.
+  game.province('FR').garrison = 40;
+  const troops = game.province('FR').garrison;
   for (let i = 0; i < 200; i += 1) game.update(0.05);
   assert.ok(game.player.gold > gold);
-  assert.ok(game.player.manpower >= manpower - 1);
+  assert.ok(game.province('FR').garrison > troops, 'recruits should become soldiers');
 });
 
 test('victory triggers at the configured share of the map', () => {
@@ -798,4 +800,191 @@ test('no province geometry is empty or degenerate', () => {
       assert.ok(province.centroid.every(Number.isFinite), `${name}/${province.id}: bad centroid`);
     }
   }
+});
+
+// ---------------------------------------------------------------- over-norm production
+
+test('a full province keeps producing troops above the norm automatically', () => {
+  const game = makeGame();
+  const province = game.province('FR');
+  const max = game.maxGarrison('FR');
+  province.garrison = max;
+  game.player.manpower = 5000;
+  for (let i = 0; i < 200; i += 1) game.update(0.1);
+  assert.ok(province.garrison > max, `garrison ${province.garrison} should exceed ${max}`);
+  // The excess is real troops, visible in the panel data, not a rounding ghost.
+  const over = province.garrison - max;
+  assert.ok(over > 1, `expected a visible surplus, got ${over}`);
+});
+
+test('over-norm production is limited by recruits, not by a hidden cap', () => {
+  const poor = makeGame();
+  poor.province('FR').garrison = poor.maxGarrison('FR');
+  poor.player.manpower = 0;
+  for (let i = 0; i < 800; i += 1) poor.update(0.1);
+  const poorGrowth = poor.province('FR').garrison - poor.maxGarrison('FR');
+
+  const rich = makeGame();
+  rich.province('FR').garrison = rich.maxGarrison('FR');
+  rich.player.manpower = 5000;
+  for (let i = 0; i < 800; i += 1) rich.update(0.1);
+  const richGrowth = rich.province('FR').garrison - rich.maxGarrison('FR');
+
+  assert.ok(
+    richGrowth > poorGrowth * 1.6,
+    `recruits are the real limit: rich ${richGrowth.toFixed(1)} vs poor ${poorGrowth.toFixed(1)}`,
+  );
+  assert.ok(richGrowth > 10, 'a full province keeps growing above the norm');
+  assert.ok(rich.state.stats.recruited > 0, 'recruitment is tracked');
+  assert.ok(rich.player.manpower < 5000, 'the pool is actually drained');
+});
+
+test('depleted provinces are refilled before full ones grow above the norm', () => {
+  const game = makeGame();
+  game.player.manpower = 20;
+  const full = game.province('FR');
+  full.garrison = game.maxGarrison('FR');
+  const empty = game.province('BE');
+  empty.owner = 'FRA';
+  empty.garrison = 1;
+  const emptyMax = game.maxGarrison('BE');
+  for (let i = 0; i < 120; i += 1) game.update(0.1);
+  assert.ok(empty.garrison > 1, 'the depleted province gets the recruits first');
+  assert.ok(empty.garrison <= emptyMax + 0.001, 'and does not jump past its norm while others wait');
+  assert.ok(full.garrison >= game.maxGarrison('FR'));
+});
+
+test('troops above the norm defend, but at reduced strength', () => {
+  const game = makeGame();
+  const province = game.province('FR');
+  const max = game.maxGarrison('FR');
+  province.garrison = max;
+  const base = game.defenseValue('FR');
+  province.garrison = max * 3;
+  const stacked = game.defenseValue('FR');
+  assert.ok(stacked > base, 'surplus troops still defend the province');
+  assert.ok(
+    stacked < base * 3,
+    `supply limits should discount the surplus (${stacked.toFixed(0)} vs ${(base * 3).toFixed(0)})`,
+  );
+  const breakdown = game.defenseBreakdown('FR');
+  assert.ok(breakdown.above > 0);
+  assert.ok(Math.abs(breakdown.total - stacked) < 1e-6);
+});
+
+test('attack odds match what the battle resolver actually does', () => {
+  // Empirical check across many seeds: the predicted chance must be close.
+  const targetChance = 0.5;
+  let wins = 0;
+  const runs = 400;
+  for (let seed = 1; seed <= runs; seed += 1) {
+    const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed });
+    for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+    const target = game.province('BE');
+    target.owner = 'NLD';
+    target.garrison = 100;
+    target.fort = 0;
+    game.player.morale = 50;
+    game.province('FR').garrison = 400;
+    const odds = game.attackOdds('FR', 'BE', 1);
+    // Aim at the 50% point of the prediction, then verify the outcome distribution.
+    const troops = Math.ceil(odds.defense / game.attackModifier('FRA'));
+    game.province('FR').garrison = troops;
+    game.sendTroops('FR', 'BE', 1);
+    const army = game.state.armies.at(-1);
+    if (!army) continue;
+    army.t = army.duration - 0.001;
+    game.update(0.01);
+    if (game.province('BE').owner === 'FRA') wins += 1;
+  }
+  const rate = wins / runs;
+  assert.ok(Math.abs(rate - targetChance) < 0.12, `win rate ${rate.toFixed(2)} should be near 0.5`);
+});
+
+test('the guaranteed force always takes the province', () => {
+  for (let seed = 1; seed <= 40; seed += 1) {
+    const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed });
+    for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+    const target = game.province('BE');
+    target.owner = 'NLD';
+    target.garrison = 120;
+    target.fort = 1;
+    game.player.morale = 40;
+    const odds = game.attackOdds('FR', 'BE', 1);
+    game.province('FR').garrison = odds.guarantee;
+    game.sendTroops('FR', 'BE', 1);
+    const army = game.state.armies.at(-1);
+    army.t = army.duration - 0.001;
+    game.update(0.01);
+    assert.equal(game.province('BE').owner, 'FRA', `seed ${seed}: guaranteed force lost`);
+  }
+});
+
+test('attack odds never report a chance outside 0..1 and know a hopeless attack', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 2; // below minSend
+  assert.equal(game.attackOdds('FR', 'BE', 1), null);
+  game.province('FR').garrison = 12;
+  const weak = game.attackOdds('FR', 'BE', 1);
+  assert.ok(weak.chance >= 0 && weak.chance <= 1);
+  game.province('FR').garrison = 100_000;
+  const strong = game.attackOdds('FR', 'BE', 1);
+  assert.equal(strong.chance, 1);
+  assert.ok(strong.guarantee > 0);
+});
+
+test('automatic growth stops at the over-norm ceiling', () => {
+  const game = makeGame();
+  const province = game.province('FR');
+  const ceiling = game.garrisonCeiling('FR');
+  province.garrison = ceiling;
+  game.player.manpower = 1e6;
+  for (let i = 0; i < 200; i += 1) game.update(0.1);
+  assert.ok(Math.abs(province.garrison - ceiling) < 0.01, `${province.garrison} should stay at ${ceiling}`);
+  // Manual armies may still stack above the ceiling: the player's order wins.
+  province.garrison = ceiling * 2;
+  assert.ok(game.defenseValue('FR') > 0);
+});
+
+// ---------------------------------------------------------------- battle odds model
+
+test('win chance is monotone, fair at parity and certain at the edges', () => {
+  const { winChance } = Game;
+  assert.ok(Math.abs(winChance(100, 100) - 0.5) < 1e-9, 'equal armies are a coin flip');
+  assert.equal(winChance(150, 100), 1, '1.5x force never loses');
+  assert.equal(winChance(70, 100), 0, 'a hopeless attack never wins by luck');
+  let previous = -1;
+  for (let attack = 40; attack <= 200; attack += 4) {
+    const chance = winChance(attack, 100);
+    assert.ok(chance >= previous - 1e-12, `chance must not fall between ${attack - 4} and ${attack}`);
+    previous = chance;
+  }
+  assert.ok(winChance(120, 100) > 0.9, '20% advantage should be reliable');
+  assert.ok(winChance(80, 100) < 0.1, '20% deficit should be desperate');
+});
+
+test('projected odds grow with troops and with the length of the march', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 60;
+  const weak = game.attackOdds('FR', 'BE', 1);
+  game.province('FR').garrison = 120;
+  const strong = game.attackOdds('FR', 'BE', 1);
+  assert.ok(strong.chance > weak.chance, `${weak.chance} -> ${strong.chance}`);
+
+  const target = game.province('BE');
+  const short = game.projectedDefense('BE', 1);
+  const long = game.projectedDefense('BE', 30);
+  assert.ok(long >= short, `${long} should be at least ${short}`);
+  assert.ok(short >= game.defenseValue('BE') - 1e-9);
+  void target;
+});
+
+test('a bigger defender is harder to take than a smaller one', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 150;
+  game.province('BE').garrison = 40;
+  const easy = game.attackOdds('FR', 'BE', 1).chance;
+  game.province('BE').garrison = 300;
+  const hard = game.attackOdds('FR', 'BE', 1).chance;
+  assert.ok(easy > hard, `${easy} should beat ${hard}`);
 });
