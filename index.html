@@ -189,14 +189,31 @@
       </div>
     </div>
 
+    <!-- Правила партии -->
+    <div id="modal-rules" class="modal hidden">
+      <div class="modal-card wide">
+        <button class="modal-close" data-close="modal-rules">✕</button>
+        <div class="eyebrow">Настройки</div>
+        <h2>Правила партии</h2>
+        <p class="modal-sub" id="rules-sub">Эти правила определяют, насколько агрессивно ведёт себя ИИ и как считается победа.</p>
+        <div class="rules-list" id="rules-list"></div>
+        <div class="rules-foot">
+          <button class="btn ghost" id="btn-rules-reset">Сбросить</button>
+          <button class="btn primary" data-close="modal-rules">Готово</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Пауза -->
     <div id="modal-pause" class="modal hidden">
       <div class="modal-card narrow">
         <div class="eyebrow">Партия</div>
         <h2>Пауза</h2>
         <button class="btn primary" id="btn-resume">Вернуться в игру</button>
+        <button class="btn ghost" id="btn-pause-rules">Правила партии</button>
         <button class="btn ghost" id="btn-restart">Начать заново</button>
         <button class="btn ghost" id="btn-menu">Выйти в меню</button>
+        <p class="rules-summary" id="pause-rules-summary"></p>
         <div class="settings-row">
           <label class="switch">
             <input type="checkbox" id="toggle-sound" checked />

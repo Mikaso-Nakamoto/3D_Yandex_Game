@@ -72,6 +72,8 @@ function build(game, nation, owned) {
 
 function attack(game, nation, owned) {
   const state = game.state;
+  const rules = state.rules ?? {};
+  if (rules.aiPassive) return false;
   if (!game.rng.chance(0.55)) return false;
 
   let best = null;
@@ -90,6 +92,8 @@ function attack(game, nation, owned) {
       if (target.owner) {
         const enemy = state.nations[target.owner];
         if (enemy?.isPlayer) {
+          // Peace guarantee: no AI declares war on the player until the player strikes first.
+          if (rules.peaceUntilFirstWar && !state.playerAggro) continue;
           if (state.time < 120 && !state.playerAggro) continue;
           score *= state.time < 240 ? 1.45 : 1.12;
         }

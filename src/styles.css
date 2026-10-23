@@ -2361,3 +2361,149 @@ kbd {
   height: 100%;
   background: linear-gradient(90deg, #8f6f2c, #e6c579);
 }
+
+
+/* ---------------------------------------------------------------- rules */
+
+.detail-rules {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11.5px;
+}
+
+.rules-label {
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: none;
+}
+
+.rules-value {
+  color: var(--ink-dim);
+  line-height: 1.35;
+  flex: 1;
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--gold);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.link-btn:hover {
+  color: #f0d38a;
+}
+
+.rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rules-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rules-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rules-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rules-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.rules-seg {
+  flex: none;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.rules-seg button {
+  padding: 6px 11px;
+  font-size: 11px;
+}
+
+.rules-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rules-summary {
+  margin: 2px 0 0;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+@media (max-width: 700px) {
+  .rules-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .rules-seg {
+    align-self: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-height: 520px) {
+  .rules-list {
+    gap: 6px;
+  }
+
+  .rules-row {
+    padding: 7px 9px;
+  }
+
+  .rules-hint {
+    display: none;
+  }
+
+  .rules-title {
+    font-size: 11.5px;
+  }
+
+  .rules-seg button {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+}

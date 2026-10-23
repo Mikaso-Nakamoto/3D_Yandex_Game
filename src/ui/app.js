@@ -4,6 +4,15 @@ import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
 import { SCENARIOS, DOCTRINES, getScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
+import {
+  DEFAULT_RULES,
+  AI_STYLE,
+  AI_ECONOMY,
+  NEUTRAL_STRENGTH,
+  VICTORY_SHARES,
+  normalizeRules,
+  describeRules,
+} from '../game/rules.js';
 import { platform } from '../platform/yandex.js';
 import { sfx } from '../audio.js';
 import { icon } from './icons.js';
@@ -21,6 +30,7 @@ export class App {
     this.map = map;
     this.mapById = Object.fromEntries(map.provinces.map((p) => [p.id, p]));
     this.settings = this.#loadSettings();
+    this.pendingRules = normalizeRules(this.settings.rules ?? {});
 
     this.world = new World($('#view'), map, {
       canDrag: (id) => this.#canStartDrag(id),
@@ -73,9 +83,9 @@ export class App {
   #loadSettings() {
     try {
       const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-      return { sound: raw.sound !== false, labels: raw.labels !== false };
+      return { sound: raw.sound !== false, labels: raw.labels !== false, rules: raw.rules ?? null };
     } catch {
-      return { sound: true, labels: true };
+      return { sound: true, labels: true, rules: null };
     }
   }
 
@@ -278,6 +288,11 @@ export class App {
         <div id="doctrine-list" class="doctrine-list"></div>
         <p class="doctrine-note">${doctrine.description}</p>
       </div>
+      <div class="detail-rules">
+        <span class="rules-label">Правила</span>
+        <span class="rules-value">${describeRules(this.pendingRules)}</span>
+        <button class="link-btn" data-open-rules>Изменить</button>
+      </div>
       <button id="btn-start" class="btn primary">Начать правление</button>
     `;
     this.#renderDoctrinePicker();
@@ -328,15 +343,23 @@ export class App {
 
   startGame() {
     if (!this.selectedNation) return;
+    const rules = normalizeRules(this.pendingRules);
     const game = new Game({
       scenarioId: this.scenario.id,
       nationId: this.selectedNation,
       doctrineId: this.doctrine,
       map: this.map,
       seed: (Math.random() * 2 ** 31) | 0,
+      rules,
     });
     this.#attachGame(game);
+    this.pendingRules = normalizeRules(rules);
     this.#enterGameScreen();
+    if (rules.startPaused) {
+      this.lastSpeed = 1;
+      this.setSpeed(0);
+      this.#toast('Партия ждёт вашего приказа. Снимите паузу, когда будете готовы', 'info');
+    }
   }
 
   #attachGame(game) {
@@ -805,6 +828,137 @@ export class App {
     return total;
   }
 
+  // ---------------------------------------------------------------- rules
+
+  #rulesTarget() {
+    return this.screen === 'game' && this.game ? this.game.state.rules : this.pendingRules;
+  }
+
+  #rulesGroups() {
+    const onOff = (key, onLabel, offLabel) => [
+      { value: true, label: onLabel },
+      { value: false, label: offLabel },
+    ];
+    return [
+      {
+        key: 'aiStyle',
+        title: 'Агрессивность ИИ',
+        hint: 'Как часто державы решаются нападать друг на друга.',
+        options: Object.entries(AI_STYLE).map(([value, cfg]) => ({ value, label: cfg.label })),
+      },
+      {
+        key: 'peaceUntilFirstWar',
+        title: 'Мир до вашей войны',
+        hint: 'ИИ не нападёт на вас, пока вы первым не атакуете соседа. Войны между ИИ продолжаются.',
+        options: onOff('peaceUntilFirstWar', 'Включён', 'Выключен'),
+      },
+      {
+        key: 'aiPassive',
+        title: 'ИИ совсем не воюет',
+        hint: 'Песочница: державы только развиваются и обороняются. Никто ни на кого не нападает.',
+        options: onOff('aiPassive', 'Да', 'Нет'),
+      },
+      {
+        key: 'aiEconomy',
+        title: 'Экономика ИИ',
+        hint: 'Скорость накопления золота и рекрутов у компьютерных держав.',
+        options: Object.entries(AI_ECONOMY).map(([value, cfg]) => ({ value, label: cfg.label })),
+      },
+      {
+        key: 'neutrals',
+        title: 'Нейтральные провинции',
+        hint: 'Размер гарнизонов у ничейных земель. Применяется при старте партии.',
+        options: Object.entries(NEUTRAL_STRENGTH).map(([value, cfg]) => ({ value, label: cfg.label })),
+      },
+      {
+        key: 'victoryShare',
+        title: 'Условие победы',
+        hint: 'Доля провинций Европы, которую нужно контролировать.',
+        options: VICTORY_SHARES.map((option) => ({ value: option.value, label: option.label })),
+      },
+      {
+        key: 'startPaused',
+        title: 'Старт на паузе',
+        hint: 'Партия начнётся остановленной: сначала осмотритесь, потом включайте время. Только для новой партии.',
+        options: onOff('startPaused', 'Да', 'Нет'),
+      },
+    ];
+  }
+
+  #openRules() {
+    sfx.click();
+    this.#renderRules();
+    $('#modal-rules').classList.remove('hidden');
+  }
+
+  #renderRules() {
+    const rules = this.#rulesTarget();
+    const live = this.screen === 'game' && Boolean(this.game);
+    $('#rules-sub').textContent = live
+      ? 'Изменения применяются сразу и сохраняются вместе с партией.'
+      : 'Эти правила определяют, насколько агрессивно ведёт себя ИИ и как считается победа.';
+    $('#rules-list').innerHTML = this.#rulesGroups()
+      .map(
+        (group) => `
+        <div class="rules-row">
+          <div class="rules-text">
+            <span class="rules-title">${group.title}</span>
+            <span class="rules-hint">${group.hint}</span>
+          </div>
+          <div class="segmented rules-seg" data-key="${group.key}">
+            ${group.options
+              .map(
+                (option) => `
+                <button type="button" data-value="${String(option.value)}"
+                  class="${rules[group.key] === option.value ? 'active' : ''}">${option.label}</button>`,
+              )
+              .join('')}
+          </div>
+        </div>`,
+      )
+      .join('');
+  }
+
+  #setRule(key, rawValue) {
+    let value = rawValue;
+    if (rawValue === 'true' || rawValue === 'false') value = rawValue === 'true';
+    else if (!Number.isNaN(Number(rawValue)) && rawValue !== '') value = Number(rawValue);
+
+    if (this.screen === 'game' && this.game) {
+      this.game.setRules({ [key]: value });
+      this.pendingRules = normalizeRules(this.game.state.rules);
+      this.save();
+      if (key === 'victoryShare') this.#updateHud();
+      this.#updatePauseSummary();
+    } else {
+      this.pendingRules = normalizeRules({ ...this.pendingRules, [key]: value });
+      this.#renderNationDetail();
+    }
+    this.settings.rules = this.pendingRules;
+    this.#saveSettings();
+    this.#markRuleActive(key);
+    sfx.click();
+  }
+
+  /** Updates selection in place: no re-render, so scroll and focus survive. */
+  #markRuleActive(key) {
+    const rules = this.#rulesTarget();
+    const group = document.querySelector(`.rules-seg[data-key="${key}"]`);
+    if (!group) return;
+    for (const button of group.querySelectorAll('button[data-value]')) {
+      const raw = button.dataset.value;
+      const value = raw === 'true' ? true : raw === 'false' ? false : Number(raw);
+      button.classList.toggle('active', rules[key] === value);
+    }
+  }
+
+  #updatePauseSummary() {
+    const summary = $('#pause-rules-summary');
+    if (!summary) return;
+    const rules = this.game ? this.game.state.rules : this.pendingRules;
+    summary.textContent = describeRules(rules);
+  }
+
   #openRankings() {
     if (!this.game) return;
     sfx.click();
@@ -927,7 +1081,13 @@ export class App {
     for (const button of document.querySelectorAll('[data-close]')) {
       button.addEventListener('click', () => {
         sfx.click();
-        $(`#${button.dataset.close}`).classList.add('hidden');
+        const id = button.dataset.close;
+        $(`#${id}`).classList.add('hidden');
+        if (id === 'modal-rules' && this.rulesReturnToPause) {
+          this.rulesReturnToPause = false;
+          $('#modal-pause').classList.remove('hidden');
+          this.#updatePauseSummary();
+        }
       });
     }
     $('#btn-back').addEventListener('click', () => {
@@ -935,10 +1095,45 @@ export class App {
       this.showMenu();
     });
     $('#nation-detail').addEventListener('click', (event) => {
+      if (event.target.closest('[data-open-rules]')) {
+        this.#openRules();
+        return;
+      }
       const button = event.target.closest('#btn-start');
       if (!button || button.disabled) return;
       sfx.select();
       this.startGame();
+    });
+
+    $('#rules-list').addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-value]');
+      if (!button) return;
+      const group = button.closest('.rules-seg');
+      if (!group) return;
+      this.#setRule(group.dataset.key, button.dataset.value);
+    });
+
+    $('#btn-rules-reset').addEventListener('click', () => {
+      if (this.screen === 'game' && this.game) {
+        this.game.setRules(DEFAULT_RULES);
+        this.pendingRules = normalizeRules(DEFAULT_RULES);
+        this.save();
+        this.#updateHud();
+        this.#updatePauseSummary();
+      } else {
+        this.pendingRules = normalizeRules(DEFAULT_RULES);
+        this.#renderNationDetail();
+      }
+      this.settings.rules = this.pendingRules;
+      this.#saveSettings();
+      for (const group of this.#rulesGroups()) this.#markRuleActive(group.key);
+      sfx.click();
+    });
+
+    $('#btn-pause-rules').addEventListener('click', () => {
+      this.rulesReturnToPause = true;
+      $('#modal-pause').classList.add('hidden');
+      this.#openRules();
     });
     $('#btn-continue').addEventListener('click', async () => {
       sfx.select();
@@ -1066,6 +1261,7 @@ export class App {
     this.game.setSpeed(0);
     this.save();
     $('#modal-pause').classList.remove('hidden');
+    this.#updatePauseSummary();
     platform.gameplayStop();
     this.#updateHud();
   }

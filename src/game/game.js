@@ -2,6 +2,7 @@ import { getScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS, doctrineMod } from './balance.js';
 import { Rng } from './rng.js';
 import { aiThink, assignDoctrine } from './ai.js';
+import { normalizeRules, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH } from './rules.js';
 
 export const SAVE_VERSION = 1;
 
@@ -10,8 +11,9 @@ export const SAVE_VERSION = 1;
  * so the whole game can be stepped and tested headlessly.
  */
 export class Game {
-  constructor({ scenarioId, nationId, doctrineId = 'coin', map, seed = 20261023 }) {
+  constructor({ scenarioId, nationId, doctrineId = 'coin', map, seed = 20261023, rules = {} }) {
     this.scenario = getScenario(scenarioId);
+    this.rules = normalizeRules(rules);
     this.map = map;
     this.byId = Object.fromEntries(map.provinces.map((p) => [p.id, p]));
     this.seaSet = new Set();
@@ -42,6 +44,7 @@ export class Game {
       nations: {},
       armies: [],
       log: [],
+      rules: this.rules,
       orders: { mobilizeReady: 0, taxReady: 0, marchReady: 0, taxUntil: 0, marchUntil: 0 },
       stats: { battles: 0, captured: 0, lostProvinces: 0, battlesWon: 0, peak: 0 },
       sendRatio: 0.5,
@@ -103,7 +106,9 @@ export class Game {
       if (!p.owner) {
         const cfg = neutralCfg[p.id];
         p.fort = cfg?.fort ?? 0;
-        p.garrison = this.#maxGarrison(p, state) * (cfg?.garrison ?? 0.8) * (sc.balance.neutralStrength ?? 1);
+        const neutralMul = NEUTRAL_STRENGTH[this.rules.neutrals]?.strength ?? 1;
+        p.garrison =
+          this.#maxGarrison(p, state) * (cfg?.garrison ?? 0.8) * (sc.balance.neutralStrength ?? 1) * neutralMul;
       } else {
         p.garrison = this.#maxGarrison(p, state);
       }
@@ -226,6 +231,14 @@ export class Game {
   setSendRatio(ratio) {
     this.state.sendRatio = Math.max(0.05, Math.min(1, ratio));
     return this.state.sendRatio;
+  }
+
+  /** Applies partial rule changes mid-game (AI temperament, victory threshold, etc.). */
+  setRules(patch) {
+    this.state.rules = normalizeRules({ ...this.state.rules, ...patch });
+    this.#checkEnd();
+    this.#emit('rules', this.state.rules);
+    return this.state.rules;
   }
 
   setSpeed(speed) {
@@ -383,7 +396,8 @@ export class Game {
         manpower +=
           (BAL.manpowerBase + p.pop * BAL.manpowerPop) * (1 + p.factory * BAL.factoryManpower);
       }
-      income *= (1 + doctrineMod(nation.doctrine, 'income')) * nation.ai.eco;
+      const ruleEco = nation.isPlayer ? 1 : AI_ECONOMY[this.rules.aiEconomy]?.eco ?? 1;
+      income *= (1 + doctrineMod(nation.doctrine, 'income')) * nation.ai.eco * ruleEco;
       if (nation.isPlayer && s.time < s.orders.taxUntil) income *= 2;
       nation.income = income;
       nation.manpowerRate = manpower;
@@ -510,7 +524,10 @@ export class Game {
       if (!nation.alive || nation.isPlayer) continue;
       nation.ai.nextThink -= dt;
       if (nation.ai.nextThink > 0) continue;
-      const aggression = nation.ai.aggression * (this.scenario.balance.aiAggression ?? 1);
+      const aggression =
+        nation.ai.aggression *
+        (this.scenario.balance.aiAggression ?? 1) *
+        (AI_STYLE[this.rules.aiStyle]?.aggression ?? 1);
       nation.ai.nextThink = BAL.aiThinkBase / Math.max(0.35, aggression) + this.rng.range(0, 1.4);
       aiThink(this, nation);
     }
@@ -523,7 +540,7 @@ export class Game {
     const total = Object.keys(s.provinces).length;
     const owned = this.#provinceCount(player.id);
     s.stats.peak = Math.max(s.stats.peak, owned);
-    if (owned / total >= BAL.victoryShare) {
+    if (owned / total >= this.state.rules.victoryShare) {
       s.status = 'victory';
       this.#log('Победа: половина Европы под вашей короной', 'good');
       this.#emit('end', { result: 'victory', owned, total });
@@ -575,6 +592,8 @@ export class Game {
       seed: save.rng ?? 1,
     });
     game.state = save.state;
+    game.state.rules = normalizeRules(save.state.rules ?? {});
+    game.rules = game.state.rules;
     game.rng.s = save.rng >>> 0;
     return game;
   }

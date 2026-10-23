@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/game/game.js';
 import { SCENARIOS } from '../src/data/scenarios.js';
+import { normalizeRules, DEFAULT_RULES } from '../src/game/rules.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const makeGame = (opts = {}) => {
@@ -223,4 +224,71 @@ test('an idle player survives the first minutes (AI does not rush new players)',
   for (let i = 0; i < 60 * 60; i += 1) game.update(0.05);
   assert.equal(game.state.status, 'playing');
   assert.ok(game.provinceCount('FRA') >= 1);
+});
+
+
+test('rules: default match leaves the player alone until they attack', () => {
+  const game = makeGame({ ai: true, rules: { peaceUntilFirstWar: true, aiStyle: 'normal' } });
+  for (let i = 0; i < 60 * 150; i += 1) game.update(0.05);
+  assert.equal(game.provinceCount('FRA'), 1, 'AI attacked a passive player');
+  assert.equal(game.state.playerAggro, false);
+});
+
+test('rules: aggressive AI eventually attacks once the player draws blood', () => {
+  const game = makeGame({ ai: true, rules: { peaceUntilFirstWar: true, aiStyle: 'hard' } });
+  game.province('BE').garrison = 1;
+  game.sendTroops('FR', 'BE', 1);
+  assert.equal(game.state.playerAggro, true);
+  for (let i = 0; i < 60 * 240; i += 1) game.update(0.05);
+  assert.ok(game.state.stats.battles > 0, 'no battles at all after the player attacked');
+});
+
+test('rules: passive AI never launches attacks', () => {
+  const game = makeGame({ ai: true, rules: { aiPassive: true } });
+  for (let i = 0; i < 60 * 120; i += 1) game.update(0.05);
+  assert.equal(game.state.armies.filter((army) => army.owner !== 'FRA').length, 0);
+  assert.equal(game.provinceCount('FRA'), 1);
+});
+
+test('rules: neutral strength changes starting garrisons', () => {
+  const weak = makeGame({ rules: { neutrals: 'weak' } });
+  const strong = makeGame({ rules: { neutrals: 'strong' } });
+  assert.ok(strong.province('IT').garrison > weak.province('IT').garrison * 1.6);
+});
+
+test('rules: AI economy setting scales income', () => {
+  const weak = makeGame({ rules: { aiEconomy: 'weak' } });
+  const strong = makeGame({ rules: { aiEconomy: 'strong' } });
+  weak.update(0.05);
+  strong.update(0.05);
+  assert.ok(strong.state.nations.PRU.income > weak.state.nations.PRU.income * 1.4);
+});
+
+test('rules: victory threshold is configurable at runtime', () => {
+  const game = makeGame();
+  game.setRules({ victoryShare: 0.3 });
+  // Own 30% of the map, which is below the default 50% but above the configured 30%.
+  const need = Math.ceil(game.provinces.length * 0.3);
+  let owned = game.provinceCount('FRA');
+  for (const province of game.provinces) {
+    if (owned >= need) break;
+    if (province.owner === 'FRA') continue;
+    province.owner = 'FRA';
+    owned += 1;
+  }
+  game.setRules({ victoryShare: 0.3 });
+  game.update(0.05);
+  assert.equal(game.state.status, 'victory');
+});
+
+test('rules: unknown values fall back to defaults and survive a save', () => {
+  const rules = normalizeRules({ aiStyle: 'nonsense', victoryShare: 7, neutrals: 'strong' });
+  assert.equal(rules.aiStyle, DEFAULT_RULES.aiStyle);
+  assert.equal(rules.victoryShare, DEFAULT_RULES.victoryShare);
+  assert.equal(rules.neutrals, 'strong');
+
+  const game = makeGame({ rules: { aiStyle: 'calm', startPaused: true } });
+  const restored = Game.deserialize(JSON.parse(JSON.stringify(game.serialize())), map);
+  assert.equal(restored.state.rules.aiStyle, 'calm');
+  assert.equal(restored.state.rules.startPaused, true);
 });
