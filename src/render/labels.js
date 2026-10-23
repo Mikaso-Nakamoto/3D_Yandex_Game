@@ -11,15 +11,20 @@ export class LabelLayer {
     for (const province of map.provinces) {
       const el = document.createElement('div');
       el.className = 'province-label';
-      el.innerHTML = '<span class="pl-name"></span><span class="pl-troops"></span>';
+      el.innerHTML =
+        '<span class="pl-name"></span>' +
+        '<span class="pl-troops"><span class="pl-troops-value"></span><span class="pl-over"></span></span>';
       el.style.display = 'none';
       container.appendChild(el);
       this.items.set(province.id, {
         el,
         name: el.querySelector('.pl-name'),
         troops: el.querySelector('.pl-troops'),
+        troopsValue: el.querySelector('.pl-troops-value'),
+        over: el.querySelector('.pl-over'),
         area: province.area ?? 0,
         lastTroops: null,
+        lastOver: null,
         lastOwner: null,
         lastText: null,
         visible: false,
@@ -71,7 +76,7 @@ export class LabelLayer {
       const province = game.state.provinces[id];
       const scale = Math.min(1.15, Math.max(0.82, world.zoom * 0.92));
       const nameWidth = item.name.textContent.length * 5.9 * scale + 24;
-      const width = Math.max(nameWidth, 34);
+      const width = Math.max(nameWidth, 34) + (item.lastOver ? 14 : 0);
       const rect = {
         x1: pos.x - width / 2,
         x2: pos.x + width / 2,
@@ -101,7 +106,19 @@ export class LabelLayer {
       const troops = Math.round(province.garrison);
       if (item.lastTroops !== troops) {
         item.lastTroops = troops;
-        item.troops.textContent = troops;
+        item.troopsValue.textContent = troops;
+      }
+
+      // Troops above the province norm: a small golden "+N" in the top-right
+      // corner of the number badge.
+      const over = Math.max(0, troops - game.maxGarrison(id));
+      const overLabel = over >= 1 ? `+${over}` : '';
+      if (item.lastOver !== overLabel) {
+        item.lastOver = overLabel;
+        item.over.textContent = overLabel;
+        item.over.style.display = overLabel ? 'block' : 'none';
+        item.over.title = overLabel ? `${over} чел. сверх нормы гарнизона` : '';
+        item.el.classList.toggle('is-over', Boolean(overLabel));
       }
       const name = game.provinceName(id);
       if (item.lastText !== name) {

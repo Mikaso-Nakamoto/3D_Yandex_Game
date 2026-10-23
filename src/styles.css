@@ -118,6 +118,10 @@ body {
 }
 
 .province-label .pl-troops {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -128,6 +132,33 @@ body {
   padding: 0 6px;
   line-height: 15px;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+}
+
+.province-label .pl-over {
+  display: none;
+  position: absolute;
+  top: -9px;
+  right: -11px;
+  font-size: 8.5px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f2cd76;
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 1),
+    0 1px 3px rgba(0, 0, 0, 0.95),
+    0 0 2px rgba(0, 0, 0, 1);
+  pointer-events: none;
+}
+
+/* Lift the province name so the golden surplus never sits on top of it. */
+.province-label.is-over .pl-name {
+  margin-bottom: 9px;
+}
+
+.province-label.is-over .pl-troops {
+  border-color: rgba(240, 201, 106, 0.55);
 }
 
 .province-label.is-selected .pl-name {
