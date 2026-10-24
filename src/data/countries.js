@@ -115,7 +115,6 @@ export const SEA_LINKS = [
   ['DK', 'SE'],
   ['DK', 'NO'],
   ['DE', 'SE'],
-  ['SE', 'FI'],
   ['FI', 'EE'],
   ['SE', 'LV'],
   ['LV', 'SE'],
@@ -130,6 +129,4 @@ export const SEA_LINKS = [
   ['RU', 'TR'],
   ['RO', 'TR'],
   ['BG', 'TR'],
-  ['ES', 'FR'],
-  ['FR', 'IT'],
 ];

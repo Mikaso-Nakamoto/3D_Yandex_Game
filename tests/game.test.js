@@ -511,11 +511,11 @@ test('one province can send armies to several neighbours at once', () => {
     game.state.armies.map((army) => army.to).sort(),
     ['BE', 'ES', 'IT'],
   );
-  // Each order takes its share of what is left at home: 75 + 56 + 42. The
-  // province always loses the men it has to send; over sea a few are lost in
-  // transit (4 %), so the column that arrives is smaller than the order.
-  assert.deepEqual([first.amount, second.amount, third.amount], [75, 54, 40]);
+  // Each order takes its share of what is left at home: 75 + 56 + 42. All
+  // three neighbours share a land border with France, so nobody is lost at sea.
+  assert.deepEqual([first.amount, second.amount, third.amount], [75, 56, 42]);
   assert.equal(game.province('FR').garrison, before - 173);
+  assert.equal(second.sea, false, 'Italy is across the Alps, not across the sea');
 });
 
 test('parallel sends never take more troops than the province has', () => {
@@ -1493,6 +1493,38 @@ test('the player-visible focus text names the province and the reward', () => {
   assert.ok(name.length > 1, 'the target has a name');
 });
 
+// ---------------------------------------------------------------- sea and land
+
+test('a land border is never crossed by sea', () => {
+  // The Europe map once listed Spain—France, France—Italy and Sweden—Finland as
+  // sea routes: the column sailed across a mountain range and lost men to a
+  // storm. Touching rings mean a land border; those pairs must not be sea links.
+  for (const [name, mapData] of Object.entries(MAPS)) {
+    const byId = Object.fromEntries(mapData.provinces.map((p) => [p.id, p]));
+    const points = new Map();
+    for (const p of mapData.provinces) {
+      const list = [];
+      for (const ring of p.rings ?? []) for (const [x, y] of ring) list.push([x, y]);
+      points.set(p.id, list);
+    }
+    const gap = (a, b) => {
+      let best = Infinity;
+      for (const [x1, y1] of points.get(a)) {
+        for (const [x2, y2] of points.get(b)) {
+          const d = Math.hypot(x1 - x2, y1 - y2);
+          if (d < best) best = d;
+        }
+      }
+      return best;
+    };
+    for (const [a, b] of mapData.seaLinks ?? []) {
+      assert.ok(points.has(a) && points.has(b), `${name}: sea link to a missing province ${a}-${b}`);
+      assert.ok(byId[a].neighbors.includes(b), `${name}: sea link ${a}-${b} is not even a neighbour`);
+      assert.ok(gap(a, b) > 0.02, `${name}: ${a}-${b} touch, so this is a land border, not a sea route`);
+    }
+  }
+});
+
 // ---------------------------------------------------------------- population
 
 test('displayed population follows the era, not modern country sizes', async () => {
@@ -2161,7 +2193,7 @@ test('a sea crossing costs a few men, a land march costs none', () => {
   const game = makeGame();
   game.province('FR').garrison = 200;
   const land = game.sendTroops('FR', 'BE', 0.5);
-  const sea = game.sendTroops('FR', 'IT', 0.5);
+  const sea = game.sendTroops('FR', 'GB', 0.5);
   assert.equal(land.amount, 100, 'no losses on land');
   assert.ok(sea.amount <= 49 && sea.amount >= 48, `sea column: ${sea.amount}`);
   assert.equal(sea.sea, true);
