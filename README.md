@@ -39,6 +39,7 @@ node tools/build-world.mjs      # три источника -> map-world.json
 | `src/platform/` | Yandex Games SDK: ready, сохранения, реклама |
 | `tools/` | пайплайн геоданных |
 | `docs/clean-room/` | спецификация, отличия от референса, журнал происхождения |
+| `docs/PLAN-mechanics.md` | план развития механик: замеры, диагноз, порядок работ |
 | `tests/` | node:test — карта, правила, бой, сохранения, детерминизм |
 
 ## Игровой цикл
