@@ -49,7 +49,8 @@ export const SCENARIOS = [
         id: 'PRU',
         army: 1.2,
         name: 'Королевство Пруссия', short: 'Пруссия', color: '#59616e', capital: 'DE',
-        provinces: ['DE', 'PL'], ai: { aggression: 1.0, eco: 1.0 },
+        // KGD — Восточная Пруссия: отдельная провинция-эксклав, её можно гарнизонить.
+        provinces: ['DE', 'PL', 'KGD'], ai: { aggression: 1.0, eco: 1.0 },
       },
       {
         id: 'FRA',
@@ -122,7 +123,8 @@ export const SCENARIOS = [
         id: 'GER',
         army: 1.35,
         name: 'Германский рейх', short: 'Германия', color: '#59616e', capital: 'DE',
-        provinces: ['DE', 'AT', 'CZ'], ai: { aggression: 1.15, eco: 1.1 },
+        // Кёнигсберг — германский анклав на Балтике, как и был в 1939-м.
+        provinces: ['DE', 'AT', 'CZ', 'KGD'], ai: { aggression: 1.15, eco: 1.1 },
       },
       {
         id: 'SOV',
@@ -346,6 +348,9 @@ export const SCENARIOS = [
       { province: 'IE', garrison: 0.6, fort: 0 },
       { province: 'CY', garrison: 0.6, fort: 1 },
       { province: 'RO', garrison: 0.65, fort: 1 },
+      // Кёнигсберг в 1444-м держит Тевтонский орден, которого нет среди держав:
+      // нейтральная крепость на Балтике, за которую стоит побороться.
+      { province: 'KGD', garrison: 0.9, fort: 2 },
     ],
     balance: { aiAggression: 1.0, aiEco: 1.0, neutralStrength: 0.9 },
   },

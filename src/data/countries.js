@@ -49,6 +49,25 @@ export const MERGE_INTO = {
   'N. Cyprus': 'CY',
 };
 
+/**
+ * Pieces of a country that the dataset draws as its own island (an exclave).
+ * They are promoted to provinces so the player can click them and garrison
+ * them: the Kaliningrad oblast was painted as Russia but had no interaction
+ * surface, so nobody could put troops there.
+ * `box` is the projected bounding box [xMin, xMax, zMin, zMax] of the ring.
+ */
+export const EXCLAVES = [
+  {
+    id: 'KGD',
+    from: 'RU',
+    name: 'Kaliningrad',
+    nameRu: 'Калининград',
+    pop: 1.4,
+    box: [4.2, 6.7, -2.5, -1.0],
+    borders: ['LT', 'PL'],
+  },
+];
+
 // Strait crossings / sea routes. Land borders are derived from TopoJSON topology.
 export const SEA_LINKS = [
   ['GB', 'FR'],

@@ -20,7 +20,7 @@ const makeGame = (opts = {}) => {
 };
 
 test('map has every province wired to at least one neighbour', () => {
-  assert.equal(map.provinces.length, 41);
+  assert.equal(map.provinces.length, 42);
   for (const province of map.provinces) {
     assert.ok(province.neighbors.length > 0, `${province.id} is isolated`);
     for (const neighbour of province.neighbors) {
@@ -1130,4 +1130,85 @@ test('Russian plural forms for counts', () => {
   assert.equal(nationsCount(5), '5 держав');
   assert.equal(nationsCount(2), '2 державы');
   assert.equal(nationsCount(0), '0 держав');
+});
+
+// ---------------------------------------------------------------- Kaliningrad & pacts
+
+test('Kaliningrad is its own province, reachable from land and worth garrisoning', () => {
+  const kgd = map.provinces.find((p) => p.id === 'KGD');
+  assert.ok(kgd, 'KGD must exist on the Europe map');
+  assert.equal(kgd.nameRu, 'Калининград');
+  assert.deepEqual([...kgd.neighbors].sort(), ['LT', 'PL']);
+  // It is not painted into Russia any more, and Russia no longer borders
+  // Poland or Lithuania through it.
+  const ru = map.provinces.find((p) => p.id === 'RU');
+  assert.ok(!ru.islands.some((ring) => ring.some(([x, z]) => x > 4.2 && x < 6.7 && z > -2.5 && z < -1)), 'exclave ring left in RU');
+  assert.ok(!ru.neighbors.includes('PL') && !ru.neighbors.includes('LT'), `RU still borders ${ru.neighbors}`);
+  for (const scenario of SCENARIOS.filter((s) => s.theatre !== 'america')) {
+    const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map, seed: 3 });
+    const province = game.state.provinces.KGD;
+    assert.ok(province, `${scenario.id} has no KGD`);
+    assert.ok(province.owner || province.garrison > 0, `${scenario.id} leaves KGD empty`);
+    assert.ok(game.maxGarrison('KGD') >= 10, `${scenario.id}: KGD cannot hold troops`);
+  }
+  // 1815: East Prussia is Prussian. 1939: East Prussia is German.
+  const concert = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed: 3 });
+  assert.equal(concert.state.provinces.KGD.owner, 'PRU');
+  const eve = new Game({ scenarioId: 'eve1939', nationId: 'SOV', map, seed: 3 });
+  assert.equal(eve.state.provinces.KGD.owner, 'GER');
+});
+
+test('the player can offer a pact, and strength decides the answer', () => {
+  const strong = makeGame();
+  // The Netherlands are a weak neighbour: a mighty France gets its treaty.
+  for (const p of Object.values(strong.state.provinces)) if (p.owner === 'FRA') p.garrison = 900;
+  const outlookStrong = strong.pactOutlook('NLD');
+  const offer = strong.proposePact('NLD');
+  assert.equal(offer.ok, true);
+  assert.equal(offer.accepted, true, `strong player should be accepted, outlook ${outlookStrong.toFixed(2)}`);
+  assert.equal(strong.hasTruce('FRA', 'NLD'), true);
+  assert.ok(strong.state.log.some((line) => /Пакт о ненападении: Нидерланды/.test(line.text)));
+
+  const weak = makeGame();
+  for (const p of Object.values(weak.state.provinces)) if (p.owner === 'FRA') p.garrison = 5;
+  for (const p of Object.values(weak.state.provinces)) if (p.owner === 'PRU') p.garrison = 1200;
+  assert.ok(weak.pactOutlook('PRU') < 0.2, `a weakling gets no treaty: ${weak.pactOutlook('PRU')}`);
+  const refused = weak.proposePact('PRU');
+  assert.equal(refused.accepted, false);
+  assert.equal(weak.hasTruce('FRA', 'PRU'), false);
+  assert.ok(weak.state.log.some((line) => line.text.startsWith('Отказ:')));
+});
+
+test('a pact is a promise the player can break, at a price', () => {
+  const game = makeGame();
+  // Belgium belongs to the Netherlands and borders France (France owns only FR).
+  game.state.relations['FRA|NLD'] = { truceUntil: game.state.time + 400 };
+  const blocked = game.canSend('FR', 'BE');
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.needsBreak, true, 'the UI needs a warning, not a silent no');
+  assert.equal(blocked.with, 'NLD');
+
+  const before = game.pactOutlook('PRU');
+  assert.equal(game.breakTruce('NLD'), true);
+  assert.equal(game.canSend('FR', 'BE').ok, true, 'after breaking, the attack is allowed');
+  assert.equal(game.player.oathbreaks, 1);
+  assert.ok(game.state.log.some((line) => /нарушает (пакт|перемирие)/.test(line.text)));
+  assert.ok(game.pactOutlook('PRU') < before, 'a broken word makes the others warier');
+});
+
+test('the AI can break a pact too, and the player is told', () => {
+  const game = makeGame();
+  game.state.relations['FRA|PRU'] = { truceUntil: game.state.time + 400 };
+  const logsBefore = game.state.log.length;
+  assert.equal(game.breakTruce('FRA', 'PRU'), true);
+  const fresh = game.state.log.slice(logsBefore).map((line) => line.text);
+  assert.ok(fresh.some((line) => line.includes('Пруссия') && /нарушает (пакт|перемирие)/.test(line)), fresh.join(' | '));
+  assert.equal(game.hasTruce('FRA', 'PRU'), false);
+});
+
+test('a broken pact is remembered against a new proposal', () => {
+  const game = makeGame();
+  const clean = game.pactOutlook('NLD');
+  game.player.oathbreaks = 2;
+  assert.ok(game.pactOutlook('NLD') < clean, 'reputation must matter');
 });

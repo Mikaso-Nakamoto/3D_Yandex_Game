@@ -257,8 +257,11 @@ export class Game {
     const defense = this.projectedDefense(toId, seconds);
     const need = defense / Math.max(1e-6, attack); // strength ratio required to win
     const chance = Game.winChance(attack, defense);
-    // Troops that win outright, without leaving anything to chance.
+    // Troops that win outright, without leaving anything to chance...
     const guarantee = Math.ceil((defense * BAL.combatCertain) / modifier);
+    // ...and the smallest force that still has a chance at all (below this the
+    // resolver returns 0 % by rule, which used to look like a bug in the UI).
+    const minToWin = Math.ceil((defense * BAL.combatHopeless) / modifier) + 1;
     return {
       troops,
       attack,
@@ -268,6 +271,7 @@ export class Game {
       chance,
       need,
       guarantee,
+      minToWin,
       from: fromId,
       to: toId,
     };
@@ -377,6 +381,15 @@ export class Game {
     if (this.sendableTroops(fromId, this.state.sendRatio) < BAL.minSend) {
       return { ok: false, reason: 'В провинции осталось слишком мало войск' };
     }
+    // A pact is a promise, not a wall: the player may break it, but deliberately.
+    if (to.owner && to.owner !== this.state.nationId && this.hasTruce(to.owner, this.state.nationId)) {
+      return {
+        ok: false,
+        needsBreak: true,
+        with: to.owner,
+        reason: `Пакт о ненападении с ${this.state.nations[to.owner]?.short ?? 'противником'}`,
+      };
+    }
     return { ok: true };
   }
 
@@ -421,6 +434,8 @@ export class Game {
       // captures reads the same for «Латвия», «Кипр» and «США».
       const who = attacker?.short ?? 'Противник';
       this.#log(`${who} ${marchesVerb(who)} войска: ${amount} → ${this.provinceName(toId)}`, 'bad');
+      // The folded log must not hide the one message that needs an answer now.
+      this.#emit('incoming', { to: toId, from: fromId, amount, attacker: nationId });
     }
     return amount;
   }
@@ -652,6 +667,7 @@ export class Game {
     const relief = pact ? BAL.pactRelief : BAL.peaceRelief;
     this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
     this.state.relations[key].truceUntil = this.state.time + duration;
+    this.state.relations[key].kind = pact ? 'pact' : 'peace';
     this.#adjustExhaustion(offer.from, -relief);
     this.#adjustExhaustion(this.state.nationId, -relief);
     this.#log(
@@ -682,17 +698,122 @@ export class Game {
     }
   }
 
-  /** The player breaking a truce: allowed, but it costs reputation and calm. */
-  breakTruce(withId) {
-    const key = Game.pairKey(withId, this.state.nationId);
+  /**
+   * Breaking a truce is allowed for anyone — the player and the AI alike — but
+   * it leaves a mark: the breaker's word is worth less, so every other nation
+   * is warier about signing with them later. The victim also remembers.
+   */
+  breakTruce(withId, byId = this.state.nationId) {
+    const key = Game.pairKey(withId, byId);
     const rel = this.state.relations[key];
     if (!rel || rel.truceUntil <= this.state.time) return false;
+    const kind = rel.kind ?? 'peace';
     rel.truceUntil = 0;
-    this.state.playerAggro = true;
-    this.#adjustExhaustion(this.state.nationId, 8);
-    this.#log(`Перемирие нарушено: ${this.state.nations[withId]?.short ?? 'противник'}`, 'bad');
-    this.#emit('truceBroken', { with: withId });
+    rel.kind = null;
+    rel.grudge = byId;
+    const breaker = this.state.nations[byId];
+    const victim = this.state.nations[withId];
+    if (breaker) breaker.oathbreaks = (breaker.oathbreaks ?? 0) + 1;
+    this.#adjustExhaustion(byId, 8);
+    if (byId === this.state.nationId) this.state.playerAggro = true;
+    this.#log(
+      `${breaker?.short ?? 'Противник'} нарушает ${kind === 'pact' ? 'пакт' : 'перемирие'}: ${victim?.short ?? 'противник'}`,
+      breaker?.isPlayer ? 'bad' : 'war',
+    );
+    this.#emit('truceBroken', { with: withId, by: byId, kind });
     return true;
+  }
+
+  /** How many nations this country is currently fighting (used by the AI and the pacts). */
+  warCount(nationId) {
+    return this.activeAttackers(nationId);
+  }
+
+  /**
+   * 0..1 estimate of how willing a nation is to sign with the player. The
+   * player never sees this number directly: the panel turns it into words.
+   * Fear of a strong neighbour, war weariness and other wars all help; a
+   * broken word makes everyone warier.
+   */
+  pactOutlook(nationId) {
+    const s = this.state;
+    const me = s.nations[s.nationId];
+    const them = s.nations[nationId];
+    if (!me || !them || !them.alive || !me.alive) return 0;
+    if (this.hasTruce(nationId, me.id)) return 1;
+    let score = 0.3;
+    const power = this.armyTotal(me.id) / Math.max(1, this.armyTotal(nationId));
+    // A neighbour that could crush them is a neighbour worth placating.
+    score += Math.max(-0.2, Math.min(0.32, Math.log(Math.max(0.2, power)) * 0.2));
+    // A hopeless weakling gets no treaty.
+    if (power < 0.4) score -= 0.16;
+    // Tired armies sign more readily.
+    score += (them.exhaustion / 100) * 0.34;
+    score += Math.max(0, (55 - them.morale) / 100) * 0.3;
+    // Everyone knows a nation already fighting on three fronts wants quiet.
+    score += Math.min(0.24, this.warCount(them.id) * 0.08);
+    if (this.hasFoughtRecently(nationId, me.id)) {
+      // Peace with someone who is losing is easy; with a winner, hard.
+      score += this.#provinceCount(them.id) < this.#provinceCount(me.id) ? 0.22 : -0.1;
+      score += 0.08;
+    }
+    // Reputation: every broken pact is remembered by everyone.
+    score -= Math.min(0.5, (me.oathbreaks ?? 0) * 0.17);
+    const aggression = them.ai?.aggression ?? 0.9;
+    if (aggression > 1.05) score -= 0.08;
+    else if (aggression < 0.85) score += 0.06;
+    return Math.max(0.02, Math.min(0.97, score));
+  }
+
+  /** The player offers a pact (or peace, if the two have actually fought). */
+  proposePact(nationId) {
+    const s = this.state;
+    if (s.status !== 'playing') return { ok: false, reason: 'Партия завершена' };
+    const them = s.nations[nationId];
+    if (!them || !them.alive) return { ok: false, reason: 'Державы больше нет' };
+    if (nationId === s.nationId) return { ok: false, reason: 'Это ваша держава' };
+    if (this.hasTruce(nationId, s.nationId)) return { ok: false, reason: 'Пакт уже действует' };
+    if (s.time < (them.pactAskedUntil ?? 0)) {
+      return { ok: false, reason: 'Они уже ответили — попробуйте позже' };
+    }
+    const chance = this.pactOutlook(nationId);
+    const accepted = this.rng.chance(chance);
+    them.pactAskedUntil = s.time + (accepted ? BAL.offerCooldown : BAL.offerCooldownAfterRefusal);
+    const pact = !this.hasFoughtRecently(nationId, s.nationId);
+    if (!accepted) {
+      this.#log(`Отказ: ${them.short} не подписывает ${pact ? 'пакт' : 'мир'}`, 'war');
+      this.#emit('pact', { with: nationId, accepted: false, chance, kind: pact ? 'pact' : 'peace' });
+      return { ok: true, accepted: false, chance };
+    }
+    const key = Game.pairKey(nationId, s.nationId);
+    const duration = pact ? BAL.pactTruce : BAL.peaceTruce;
+    s.relations[key] = s.relations[key] ?? { truceUntil: 0 };
+    s.relations[key].truceUntil = s.time + duration;
+    s.relations[key].kind = pact ? 'pact' : 'peace';
+    s.relations[key].grudge = null;
+    this.#adjustExhaustion(nationId, -(pact ? BAL.pactRelief : BAL.peaceRelief) * 0.5);
+    this.#log(
+      pact
+        ? `Пакт о ненападении: ${them.short} — ${Math.round(duration)} с без нападений`
+        : `Мир: ${them.short} — перемирие ${Math.round(duration)} с`,
+      'good',
+    );
+    this.#emit('peace', { with: nationId, until: s.relations[key].truceUntil, kind: pact ? 'pact' : 'peace' });
+    this.#emit('pact', { with: nationId, accepted: true, chance, kind: pact ? 'pact' : 'peace' });
+    return { ok: true, accepted: true, chance, until: s.relations[key].truceUntil, kind: pact ? 'pact' : 'peace' };
+  }
+
+  /** Seconds left on a truce with `withId` (0 when there is none). */
+  truceLeft(withId, nationId = this.state.nationId) {
+    const rel = this.state.relations?.[Game.pairKey(withId, nationId)];
+    if (!rel) return 0;
+    return Math.max(0, rel.truceUntil - this.state.time);
+  }
+
+  /** True when the player broke a pact with this nation and it remembers. */
+  holdsGrudge(nationId) {
+    const rel = this.state.relations?.[Game.pairKey(nationId, this.state.nationId)];
+    return rel?.grudge === this.state.nationId;
   }
 
   /** Truce partners of a nation (for the diplomacy list in the pause menu). */
@@ -723,7 +844,6 @@ export class Game {
     if (nation.gold < cost) return { ok: false, reason: 'Не хватает золота' };
     nation.gold -= cost;
     p[kind] = level + 1;
-    this.#log(`${this.provinceName(provinceId)}: ${UPGRADES[kind].name} → ур. ${level + 1}`, 'build');
     this.#emit('upgrade', { provinceId, kind, level: level + 1 });
     return { ok: true, level: level + 1, cost };
   }

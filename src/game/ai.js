@@ -16,6 +16,7 @@ export function aiThink(game, nation) {
     build(game, nation, owned);
   }
   maybeSueForPeace(game, nation, owned);
+  maybeBreakPact(game, nation, owned);
   if (!attack(game, nation, owned)) {
     reinforceLine(game, nation, owned);
   }
@@ -101,6 +102,34 @@ function maybeSueForPeace(game, nation, owned) {
   game.offerPeace(nation.id);
 }
 
+/**
+ * A pact is not eternal for the AI either. When a nation has grown far stronger
+ * than the player and the player's land lies right across the border, it may
+ * tear the treaty up — rarely, and never before it is genuinely stronger.
+ */
+function maybeBreakPact(game, nation, owned) {
+  const state = game.state;
+  const playerId = state.nationId;
+  if (!nation.alive || !state.nations[playerId]?.alive) return;
+  if (!game.hasTruce(nation.id, playerId)) return;
+  // Do not re-roll every thought: check once every ~45 game seconds.
+  if (state.time < (nation.pactBreakAt ?? 0)) return;
+  nation.pactBreakAt = state.time + 45;
+  const rel = state.relations?.[`${nation.id < playerId ? nation.id : playerId}|${nation.id < playerId ? playerId : nation.id}`];
+  const grudge = rel?.grudge === nation.id;
+  const myPower = game.armyTotal(nation.id);
+  const playerPower = game.armyTotal(playerId);
+  const needs = grudge ? 1.15 : 1.7;
+  if (myPower < playerPower * needs) return;
+  const touches = owned.some((p) =>
+    game.neighbors(p.id).some((nid) => state.provinces[nid].owner === playerId),
+  );
+  if (!touches) return;
+  const odds = grudge ? 0.18 : 0.05;
+  if (!game.rng.chance(odds)) return;
+  game.breakTruce(playerId, nation.id);
+}
+
 /** How many nations may be at war with one country at the same time. */
 function coalitionLimit(state) {
   const style = state.rules?.aiStyle ?? 'normal';
@@ -153,6 +182,9 @@ function attack(game, nation, owned) {
           // The stronger the player looks, the less tempting the target.
           const playerPower = game.armyTotal ? game.armyTotal(target.owner) : 0;
           if (playerPower > atk * 2.5) score *= 1.5;
+          // A king who broke his word is a king worth punishing.
+          const rel = state.relations?.[game.constructor.pairKey(nation.id, target.owner)];
+          if (rel?.grudge === target.owner) score *= 0.75;
         }
         if (enemy && game.provinceCount(enemy.id) > owned.length * 2) score *= 1.35;
       }

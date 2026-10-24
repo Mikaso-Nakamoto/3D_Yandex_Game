@@ -434,6 +434,17 @@ export class App {
           this.#toast(`Потеряна ${game.provinceName(payload.provinceId)}`, 'bad');
         }
       }
+      if (type === 'incoming') {
+        // A marching enemy is the one event that must not be missed because
+        // the log is folded: a short toast, throttled so a big war does not
+        // bury the screen.
+        const now = performance.now();
+        if (now - (this.lastIncomingToast ?? 0) > 1200) {
+          this.lastIncomingToast = now;
+          const who = game.state.nations[payload.attacker]?.short ?? 'Противник';
+          this.#toast(`${who}: ${fmt(payload.amount)} → ${game.provinceName(payload.to)}`, 'bad');
+        }
+      }
       if (type === 'offer') {
         sfx.click();
         this.#renderOffers();
@@ -444,7 +455,13 @@ export class App {
         else if (payload.expired) this.#toast('Предложение мира истекло', 'info');
       }
       if (type === 'truceBroken') {
-        this.#toast('Перемирие нарушено — усталость выросла', 'bad');
+        const victim = this.game.state.nations[payload?.with];
+        const who = payload?.by && payload.by !== this.game.state.nationId ? victim?.short : null;
+        if (payload?.kind === 'pact') {
+          this.#toast(who ? `${who} разрывает пакт` : 'Пакт разорван — вам больше не верят', 'bad');
+        } else {
+          this.#toast(who ? `${who} нарушает перемирие` : 'Перемирие нарушено — усталость выросла', 'bad');
+        }
       }
       if (type === 'battle') {
         const now = performance.now();
@@ -620,7 +637,28 @@ export class App {
 
   #dragDrop(from, to) {
     if (!this.game) return;
-    const result = this.game.sendTroops(from, to);
+    let result = this.game.sendTroops(from, to);
+    if (!result.ok && result.needsBreak) {
+      const owner = result.with;
+      const name = this.game.state.nations[owner]?.short ?? 'противник';
+      const now = performance.now();
+      // The warning lives long enough for a deliberate second drag, but not so
+      // long that some later stray drag tears up a treaty.
+      if (this.pendingBreak?.owner === owner && now - this.pendingBreak.at < 12000) {
+        // Second deliberate drag: the pact is torn up and the army marches.
+        this.pendingBreak = null;
+        this.game.breakTruce(owner);
+        result = this.game.sendTroops(from, to);
+      } else {
+        this.pendingBreak = { owner, at: now };
+        this.#toast(`Пакт: ${name}. Перетащите ещё раз, чтобы напасть`, 'bad');
+        this.selectedProvince = from;
+        this.world.setSelected(from);
+        this.#renderProvincePanel();
+        this.#updateHud();
+        return;
+      }
+    }
     if (!result.ok) {
       this.#toast(result.reason, 'bad');
       return;
@@ -655,36 +693,59 @@ export class App {
   }
 
   #hover(provinceId) {
+    this.hoveredProvince = provinceId || null;
     if (this.world.dragFrom) {
       this.#tooltip(null);
       return;
     }
-    if (this.screen === 'game' && this.game) {
-      const province = this.game.state.provinces[provinceId];
-      if (province) {
-        const owner = province.owner ? this.game.state.nations[province.owner] : null;
-        const defense = this.game.defenseValue(province.id);
-        const mine = owner?.id === this.game.state.nationId;
-        const lines = [
-          `Гарнизон ${Math.round(province.garrison)}`,
-          `Оборона ${Math.round(defense)}`,
-        ];
-        if (!mine) {
-          const odds = this.game.bestAttackOdds(province.id);
-          lines.push(odds ? `Шанс взять ${Math.round(odds.chance * 100)}%` : 'Нет соседней своей провинции');
-        } else {
-          const over = Math.round(province.garrison - this.game.maxGarrison(province.id));
-          lines.push(over > 0 ? `Сверх нормы +${over}` : 'Ваши земли');
-        }
-        this.#tooltip(provinceId, {
-          title: this.game.provinceName(provinceId),
-          owner: owner ? owner.name : 'Нейтральная территория',
-          lines,
-        });
-      } else {
-        this.#tooltip(null);
-      }
+    if (this.screen !== 'game' || !this.game) return;
+    const game = this.game;
+    const province = game.state.provinces[provinceId];
+    if (!province) {
+      this.#tooltip(null);
+      return;
     }
+    const owner = province.owner ? game.state.nations[province.owner] : null;
+    const defense = game.defenseValue(province.id);
+    const mine = owner?.id === game.state.nationId;
+    const lines = [
+      `Гарнизон ${Math.round(province.garrison)}`,
+      `Оборона ${Math.round(defense)}`,
+    ];
+    let warn = null;
+    if (!mine) {
+      // «Шанс взять 0%» on its own read like a bug: a nation with far more men
+      // in the neighbouring province still saw zero. Show what will actually
+      // march and how many men the battle needs.
+      if (owner && game.hasTruce(owner.id, game.state.nationId)) {
+        warn = `Пакт: ещё ${Math.ceil(game.truceLeft(owner.id))} с. Нападение его нарушит`;
+      }
+      const odds = game.bestAttackOdds(province.id);
+      if (!odds) {
+        lines.push('Нет соседней своей провинции');
+      } else {
+        const share = Math.round(game.state.sendRatio * 100);
+        // The denominator is the troops at home in `odds.from`, not the garrison
+        // of the province under the pointer: «138 из 84» made no sense.
+        const source = game.state.provinces[odds.from];
+        lines.push(`Шанс взять ${Math.round(odds.chance * 100)}%`);
+        lines.push(`В бой: ${fmt(odds.troops)} из ${fmt(source?.garrison ?? 0)} (${share}%)`);
+        lines.push(
+          odds.chance === 0
+            ? `Мало: нужно хотя бы ${fmt(odds.minToWin)}`
+            : `Наверняка хватит ${fmt(odds.guarantee)}`,
+        );
+      }
+    } else {
+      const over = Math.round(province.garrison - game.maxGarrison(province.id));
+      lines.push(over > 0 ? `Сверх нормы +${over}` : 'Ваши земли');
+    }
+    this.#tooltip(provinceId, {
+      title: game.provinceName(provinceId),
+      owner: owner ? owner.name : 'Нейтральная территория',
+      lines,
+      warn,
+    });
   }
 
   #tooltip(provinceId, content) {
@@ -707,7 +768,8 @@ export class App {
     el.innerHTML = `
       <span class="tt-title">${content.title}</span>
       <span class="tt-owner">${content.owner}</span>
-      <span class="tt-lines">${content.lines.map((line) => `<b>${line}</b>`).join('')}</span>`;
+      <span class="tt-lines">${content.lines.map((line) => `<b>${line}</b>`).join('')}</span>
+      ${content.warn ? `<span class="tt-warn">${content.warn}</span>` : ''}`;
     el.classList.add('tt');
     el.style.display = 'block';
     el.style.left = `${pos.x}px`;
@@ -748,6 +810,9 @@ export class App {
     this.#updateOrders();
     this.#renderOffers();
     if (this.selectedProvince) this.#renderProvincePanel();
+    // The hover card must agree with the current men, ratio and truces, not
+    // with the moment the pointer happened to stop.
+    if (this.hoveredProvince) this.#hover(this.hoveredProvince);
     if (!$('#modal-rankings').classList.contains('hidden')) this.#renderRankings();
   }
 
@@ -965,7 +1030,16 @@ export class App {
                   <div class="pp-row"><span>Оборона к прибытию</span><b>${fmt(odds.defense)}${
                     grown ? ` <span class="muted">(сейчас ${fmt(odds.defenseNow)})</span>` : ''
                   }</b></div>
-                  <div class="pp-row"><span>Наверняка хватит</span><b>${fmt(odds.guarantee)} чел.</b></div>`;
+                  <div class="pp-row"><span>${chance === 0 ? 'Хотя бы нужно' : 'Наверняка хватит'}</span><b>${fmt(
+                    chance === 0 ? odds.minToWin : odds.guarantee,
+                  )} чел.</b></div>
+                  ${
+                    chance === 0
+                      ? `<div class="pp-row"><span>Доля войск</span><b class="muted">${Math.round(
+                          game.state.sendRatio * 100,
+                        )}% — перетащите больше или поднимите долю</b></div>`
+                      : ''
+                  }`;
               })()
             : ''
         }
@@ -975,6 +1049,7 @@ export class App {
         <div class="pp-row"><span>Крепость</span><b>${province.fort > 0 ? `уровень ${province.fort} из ${BAL.maxLevel}` : 'нет'}</b></div>
       </div>
 
+      ${!isMine && owner ? this.#diploBlock(owner) : ''}
       ${
         isMine
           ? `<div class="pp-section"><span>Развитие провинции</span></div>
@@ -987,6 +1062,45 @@ export class App {
           : `Оборона ${fmt(defense)}: ${fmt(breakdown.effective)} боевых войск × ${breakdown.fortMul.toFixed(2)} крепость × ${breakdown.doctrineMul.toFixed(2)} доктрина × ${breakdown.moraleMul.toFixed(2)} дух. Шанс — для доли ${Math.round(game.state.sendRatio * 100)}% и с учётом пополнения защитника в пути.`
       }</p>
     `;
+  }
+
+  /**
+   * Diplomacy for a foreign province: a pact you can offer, or the pact you
+   * already have and the price of breaking it. Kept to one line of text and one
+   * small button — no half-screen dialog.
+   */
+  #diploBlock(owner) {
+    const game = this.game;
+    const me = game.state.nationId;
+    if (owner.id === me) return '';
+    const left = Math.ceil(game.truceLeft(owner.id));
+    const fought = game.hasFoughtRecently(owner.id, me);
+    if (left > 0) {
+      return `
+        <div class="pp-diplo has-pact">
+          <div class="pp-pact"><i></i>Пакт о ненападении · ещё ${left} с</div>
+          <p class="pp-warn">Нападение нарушит договор. Другие державы это запомнят.</p>
+          <button class="pp-action danger" data-break="${owner.id}">Нарушить пакт</button>
+        </div>`;
+    }
+    const wait = Math.ceil((owner.pactAskedUntil ?? 0) - game.state.time);
+    const outlook = game.pactOutlook(owner.id);
+    const hint = outlook >= 0.6
+      ? 'Скорее согласятся'
+      : outlook >= 0.38
+        ? 'Могут согласиться'
+        : outlook >= 0.22
+          ? 'Вряд ли согласятся'
+          : 'Почти наверняка откажут';
+    const oath = game.player.oathbreaks ?? 0;
+    return `
+      <div class="pp-diplo">
+        <button class="pp-action" data-pact="${owner.id}" ${wait > 0 ? 'disabled' : ''}>
+          ${fought ? 'Предложить мир' : 'Предложить пакт'}
+        </button>
+        <span class="pp-diplo-hint">${wait > 0 ? `Ответят через ${wait} с` : hint}</span>
+        ${oath > 0 ? `<p class="pp-warn soft">Нарушено пактов: ${oath} — вам верят меньше.</p>` : ''}
+      </div>`;
   }
 
   #buildOrders() {
@@ -1017,6 +1131,41 @@ export class App {
     }
     sfx.coin();
     this.#updateHud();
+  }
+
+  /**
+   * The log can be tucked away. The choice is remembered, because a player who
+   * folded it once does not want it unfolding on the next match.
+   */
+  #wireLogDock() {
+    const dock = $('#log-dock');
+    const toggle = $('#log-toggle');
+    if (!dock || !toggle) return;
+    // Folded by default: the log used to open by itself and sit over the map
+    // corner for the whole match. One tap brings it back, and the choice sticks.
+    let collapsed = true;
+    try {
+      const saved = localStorage.getItem('crowns.logCollapsed');
+      if (saved !== null) collapsed = saved === '1';
+    } catch {
+      collapsed = true;
+    }
+    const apply = (value) => {
+      dock.classList.toggle('is-collapsed', value);
+      toggle.setAttribute('aria-expanded', String(!value));
+      toggle.title = value ? 'Показать журнал событий' : 'Свернуть журнал событий';
+    };
+    apply(collapsed);
+    toggle.addEventListener('click', () => {
+      const next = !dock.classList.contains('is-collapsed');
+      apply(next);
+      try {
+        localStorage.setItem('crowns.logCollapsed', next ? '1' : '0');
+      } catch {
+        /* storage may be unavailable in private mode */
+      }
+      sfx.click();
+    });
   }
 
   // ---------------------------------------------------------------- log & toasts
@@ -1470,6 +1619,7 @@ export class App {
       if (!result.ok) this.#toast(result.reason ?? 'Не получилось', 'bad');
       this.#renderOffers();
     });
+    this.#wireLogDock();
     $('#btn-pause-menu').addEventListener('click', () => this.openPause());
     $('#btn-rankings').addEventListener('click', () => this.#openRankings());
 
@@ -1479,6 +1629,8 @@ export class App {
         this.preferredRatio = ratio;
         if (this.game) this.game.setSendRatio(ratio);
         this.#syncRatioButtons();
+        if (this.selectedProvince) this.#renderProvincePanel();
+        if (this.hoveredProvince) this.#hover(this.hoveredProvince);
         sfx.click();
       });
     }
@@ -1489,6 +1641,44 @@ export class App {
         this.selectedProvince = null;
         this.world.setSelected(null);
         $('#province-panel').classList.add('hidden');
+        return;
+      }
+      const pactButton = event.target.closest('[data-pact]');
+      if (pactButton && this.game) {
+        if (pactButton.disabled) return;
+        const result = this.game.proposePact(pactButton.dataset.pact);
+        if (!result.ok) this.#toast(result.reason, 'bad');
+        else if (result.accepted) {
+          this.#toast(result.kind === 'peace' ? 'Мир заключён' : 'Пакт подписан', 'good');
+          sfx.select();
+        } else this.#toast('Отказались. Сила и усталость решают — попробуйте позже', 'bad');
+        this.#renderProvincePanel();
+        this.#updateHud();
+        return;
+      }
+      const breakButton = event.target.closest('[data-break]');
+      if (breakButton && this.game) {
+        const id = breakButton.dataset.break;
+        const now = performance.now();
+        // Two taps, one small button: nobody should tear up a treaty by accident.
+        if (this.pendingBreak?.owner === id && now - this.pendingBreak.at < 12000) {
+          this.pendingBreak = null;
+          this.game.breakTruce(id);
+          this.#toast('Пакт разорван — вам больше не верят', 'bad');
+          this.#updateHud();
+        } else {
+          this.pendingBreak = { owner: id, at: now };
+          breakButton.textContent = 'Точно нарушить?';
+          breakButton.classList.add('is-armed');
+          setTimeout(() => {
+            const again = document.querySelector(`#province-panel [data-break="${id}"]`);
+            if (again && again.classList.contains('is-armed') && this.pendingBreak?.owner === id) {
+              again.textContent = 'Нарушить пакт';
+              again.classList.remove('is-armed');
+              this.pendingBreak = null;
+            }
+          }, 12000);
+        }
         return;
       }
       const upgrade = event.target.closest('.upg');

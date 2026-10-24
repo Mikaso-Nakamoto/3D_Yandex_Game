@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { feature, neighbors } from 'topojson-client';
-import { COUNTRIES, MERGE_INTO, SEA_LINKS } from '../src/data/countries.js';
+import { COUNTRIES, MERGE_INTO, SEA_LINKS, EXCLAVES } from '../src/data/countries.js';
 import { AMERICA } from '../src/data/provinces-america.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -147,6 +147,49 @@ function projectProvince(p, projector) {
   p.rings = [main];
 }
 
+/**
+ * Some countries are drawn by the dataset as a mainland plus islands, and one of
+ * those "islands" is really an exclave (Kaliningrad). Islands are painted but
+ * cannot be clicked, so they are promoted here to full provinces: own ring,
+ * own centroid, land borders to the neighbours that actually touch them.
+ */
+function promoteExclaves(provinces) {
+  for (const def of EXCLAVES) {
+    const host = provinces.get(def.from);
+    if (!host) continue;
+    const [xMin, xMax, zMin, zMax] = def.box;
+    const index = host.islands.findIndex((ring) => {
+      const [cx, cz] = ringCentroid(ring);
+      return cx > xMin && cx < xMax && cz > zMin && cz < zMax;
+    });
+    if (index < 0) continue;
+    const ring = host.islands.splice(index, 1)[0];
+    const [cx, cz] = ringCentroid(ring);
+    const province = {
+      id: def.id,
+      name: def.name,
+      nameRu: def.nameRu,
+      pop: def.pop,
+      rings: [ring],
+      islands: [],
+      centroid: [round(cx, 3), round(cz, 3)],
+      area: round(ringArea(ring), 2),
+      neighbors: [...def.borders],
+      featureIndex: -1,
+    };
+    provinces.set(def.id, province);
+    // The host used to "border" these lands through the exclave; now the
+    // exclave itself touches them, and the mainland does not.
+    host.neighbors = host.neighbors.filter((id) => !def.borders.includes(id));
+    for (const id of def.borders) {
+      const other = provinces.get(id);
+      if (!other) continue;
+      other.neighbors = other.neighbors.filter((n) => n !== def.from);
+      if (!other.neighbors.includes(def.id)) other.neighbors.push(def.id);
+    }
+  }
+}
+
 function buildEurope(topo) {
   const { geo, adj } = topo;
   const projector = makeProjector(BOUNDS);
@@ -225,6 +268,10 @@ function buildEurope(topo) {
       if (!province.neighbors.includes(other)) province.neighbors.push(other);
     }
   }
+
+  // Exclaves after the topology pass: the dataset says Russia borders Poland
+  // and Lithuania, but that contact is Kaliningrad, which is now its own land.
+  promoteExclaves(provinces);
 
   // Sea routes.
   for (const [a, b] of SEA_LINKS) {
