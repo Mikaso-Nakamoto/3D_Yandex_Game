@@ -474,7 +474,10 @@ const civil1861 = {
     },
     {
       id: 'CSA',
-      army: 1.05,
+      // The South was outnumbered but fought on interior lines: a higher
+      // multiplier keeps a single Southern province a match for a Union one,
+      // so the front is not frozen at 0 % odds on turn one.
+      army: 1.25,
       name: 'Конфедеративные Штаты',
       short: 'Конфедерация',
       color: '#8c8c94',

@@ -30,6 +30,8 @@ export class App {
     this.maps = maps;
     this.theatre = 'europe';
     this.mapMode = 'europe';
+    this.panelFolded = false;
+    this.panelFoldTimer = null;
     this.map = maps[this.theatre];
     this.mapById = Object.fromEntries(this.map.provinces.map((p) => [p.id, p]));
     this.settings = this.#loadSettings();
@@ -206,6 +208,8 @@ export class App {
 
   showMenu() {
     this.game = null;
+    this.panelFolded = false;
+    clearTimeout(this.panelFoldTimer);
     $('#focus-card').classList.add('hidden');
     $('#btn-focus').classList.add('hidden');
     this.selectedProvince = null;
@@ -664,6 +668,12 @@ export class App {
 
   #dragStart(provinceId) {
     if (!this.game) return;
+    if (!$('#province-panel').classList.contains('hidden')) {
+      this.panelFolded = true;
+      clearTimeout(this.panelFoldTimer);
+      this.panelFoldTimer = null;
+      this.#applyPanelFold();
+    }
     // Not just the neighbours: any province the column can reach through the
     // player's own land (plus the foreign provinces on its borders).
     const targets = [...this.game.routeTargets(provinceId)].filter((id) => id !== provinceId);
@@ -796,9 +806,19 @@ export class App {
       $('#province-panel').classList.add('hidden');
       return;
     }
+    if (this.selectedProvince === provinceId) {
+      // A second tap on the same province is «убери это с карты».
+      this.selectedProvince = null;
+      this.world.setSelected(null);
+      $('#province-panel').classList.add('hidden');
+      sfx.click();
+      return;
+    }
     this.selectedProvince = provinceId;
+    this.panelFolded = false;
     this.world.setSelected(provinceId);
     this.#renderProvincePanel();
+    this.#armPanelFold();
     sfx.click();
   }
 
@@ -1084,6 +1104,7 @@ export class App {
             ${isMine ? '<span class="pp-badge">ваша</span>' : ''}
           </div>
         </div>
+        <button class="pp-fold" data-fold title="Свернуть карточку" aria-label="Свернуть карточку"></button>
         <button class="pp-close" data-close title="Закрыть">✕</button>
       </div>
 
@@ -1181,6 +1202,50 @@ export class App {
       }</p>
     `;
     this.#markPanelOverflow(panel);
+    this.#applyPanelFold(panel);
+  }
+
+  /**
+   * The province card is useful for a few seconds and then only covers the map.
+   * It folds down to its header when the player moves on (starts a drag, taps
+   * the map, or simply stops using it), and unfolds again on any interaction.
+   * That is the difference between a tool and a «шторка», which used to hang
+   * over the left corner for the whole match.
+   */
+  #applyPanelFold(panel = $('#province-panel')) {
+    if (!panel) return;
+    panel.classList.toggle('is-folded', this.panelFolded);
+  }
+
+  // Only interaction restarts the countdown: the game tick re-renders the card
+  // every second, and re-arming there would keep it open for the whole match.
+  #armPanelFold() {
+    clearTimeout(this.panelFoldTimer);
+    this.panelFoldTimer = null;
+    if (this.panelFolded || !this.game) return;
+    // A card that fills half a phone screen gets far less patience than a
+    // sidebar on a monitor.
+    const touch = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+    this.panelFoldTimer = setTimeout(() => {
+      if (!this.game || this.pressing) return;
+      // On a phone the last tapped element keeps a sticky :hover, so the check
+      // only makes sense for real pointer devices.
+      const panel = $('#province-panel');
+      if (!touch && panel.matches(':hover')) {
+        // Still being read: give it another chance instead of yanking it away.
+        this.#armPanelFold();
+        return;
+      }
+      this.panelFolded = true;
+      this.#applyPanelFold(panel);
+    }, touch ? 9000 : 18000);
+  }
+
+  #unfoldPanel() {
+    if (!this.panelFolded) return;
+    this.panelFolded = false;
+    this.#applyPanelFold();
+    this.#armPanelFold();
   }
 
   /** A scrolled card gets a soft bottom edge instead of a row cut in half. */
@@ -1334,14 +1399,14 @@ export class App {
     const dock = $('#log-dock');
     const toggle = $('#log-toggle');
     if (!dock || !toggle) return;
-    // Folded by default: the log used to open by itself and sit over the map
-    // corner for the whole match. One tap brings it back, and the choice sticks.
-    let collapsed = true;
+    // The log is part of the game the player likes, so it starts open. The pill
+    // stays for anyone who wants the corner back, and the choice sticks.
+    let collapsed = false;
     try {
       const saved = localStorage.getItem('crowns.logCollapsed');
       if (saved !== null) collapsed = saved === '1';
     } catch {
-      collapsed = true;
+      collapsed = false;
     }
     const apply = (value) => {
       dock.classList.toggle('is-collapsed', value);
@@ -1908,6 +1973,19 @@ export class App {
     });
 
     $('#province-panel').addEventListener('click', (event) => {
+      if (event.target.closest('[data-fold]')) {
+        this.panelFolded = !this.panelFolded;
+        this.#applyPanelFold();
+        this.#armPanelFold();
+        sfx.click();
+        return;
+      }
+      if (this.panelFolded) {
+        // A folded header works as a tab: tap it to open the card again.
+        this.#unfoldPanel();
+        return;
+      }
+      this.#armPanelFold();
       const close = event.target.closest('[data-close]');
       if (close) {
         this.selectedProvince = null;

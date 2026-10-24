@@ -1242,6 +1242,57 @@ body {
   align-self: flex-start;
 }
 
+.pp-fold {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.pp-fold::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--muted);
+  box-shadow: 0 4px 0 var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.pp-fold:hover {
+  border-color: var(--accent);
+}
+
+/* Folded: only the name and the fold control stay, map is visible again. */
+#province-panel.is-folded {
+  max-height: 62px;
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+
+#province-panel.is-folded .pp-meter,
+#province-panel.is-folded .pp-body,
+#province-panel.is-folded .pp-orders,
+#province-panel.is-folded .pp-upgrades,
+#province-panel.is-folded .pp-diplo,
+#province-panel.is-folded .pp-foot {
+  display: none;
+}
+
+#province-panel.is-folded .pp-fold::before {
+  transform: rotate(180deg);
+  box-shadow: 0 4px 0 var(--muted);
+}
+
 .pp-meter {
   margin: 13px 0 11px;
 }

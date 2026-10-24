@@ -6,6 +6,11 @@
 // un-projected back to lon/lat and re-projected into one Atlantic-centred frame.
 // No geometry is copied from anywhere else: the source is the same public
 // domain dataset the other two maps are built from.
+//
+// NB: src/data/map-america.json and src/data/provinces-america.js are *inputs*
+// for this script only. The app no longer loads them — the game offers two map
+// modes, both of them the single Atlantic map with a different set of nations —
+// so do not wire them back into src/ui or src/game.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
