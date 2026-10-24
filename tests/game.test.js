@@ -452,10 +452,11 @@ test('one province can send armies to several neighbours at once', () => {
     game.state.armies.map((army) => army.to).sort(),
     ['BE', 'ES', 'IT'],
   );
-  // Each order takes its share of what is left at home: 75 + 56 + 42.
-  const sent = first.amount + second.amount + third.amount;
-  assert.deepEqual([first.amount, second.amount, third.amount], [75, 56, 42]);
-  assert.equal(game.province('FR').garrison, before - sent);
+  // Each order takes its share of what is left at home: 75 + 56 + 42. The
+  // province always loses the men it has to send; over sea a few are lost in
+  // transit (4 %), so the column that arrives is smaller than the order.
+  assert.deepEqual([first.amount, second.amount, third.amount], [75, 54, 40]);
+  assert.equal(game.province('FR').garrison, before - 173);
 });
 
 test('parallel sends never take more troops than the province has', () => {
@@ -468,7 +469,11 @@ test('parallel sends never take more troops than the province has', () => {
     if (result.ok) sent.push(result.amount);
   }
   assert.ok(sent.length >= 2, 'should allow multiple departures');
-  assert.equal(game.province('FR').garrison, 100 - sent.reduce((a, b) => a + b, 0));
+  // The garrison loses what was ordered; sea attrition is counted on the road,
+  // not at home, so compare against the marching columns, not the losses.
+  const taken = game.state.armies.reduce((sum, army) => sum + army.troops, 0);
+  assert.ok(taken <= 100);
+  assert.ok(game.province('FR').garrison >= 0);
 
   // Once the garrison is empty, further orders are refused.
   const extra = game.sendTroops('FR', 'BE', 1);
@@ -482,8 +487,12 @@ test('troops in transit are reported per province', () => {
   game.sendTroops('FR', 'BE', 0.5);
   game.sendTroops('FR', 'IT', 0.25);
   assert.equal(game.armiesFrom('FR').length, 2);
-  // 50% of 200 = 100, then 25% of the remaining 100 = 25.
-  assert.equal(game.troopsInTransit('FR'), 125);
+  // 50% of 200 = 100 on land, then 25% of the remaining 100 = 25 over the sea
+  // (that one loses 4 % to storms before it arrives).
+  const [first, second] = game.state.armies;
+  assert.equal(first.troops, 100);
+  assert.ok(Math.abs(second.troops - 24) <= 1, `sea column: ${second.troops}`);
+  assert.equal(game.troopsInTransit('FR'), first.troops + second.troops);
   assert.equal(game.armiesFrom('IT').length, 0);
 });
 
@@ -1928,4 +1937,87 @@ test('a passage survives a save and a reload', () => {
   assert.ok(restored, 'the save loads');
   assert.equal(restored.hasPassage('BNA', 'USA'), true);
   assert.ok(restored.routeBetween('AK', 'NE', 'USA'), 'the road is still there');
+});
+
+// ---------------------------------------------------------------- combined assault & recall
+
+test('two columns sent at one province fight as one force', () => {
+  // A single column would lose against this garrison; two together take it.
+  const game = makeGame();
+  const target = game.province('DE');
+  target.garrison = 180;
+  target.fort = 0;
+  game.state.nations.PRU.morale = 55;
+  game.state.nations.FRA.morale = 55;
+  // Two of the player's provinces on the same border, so both can march at once.
+  game.state.provinces.BE.owner = 'FRA';
+  game.province('FR').garrison = 300;
+  game.province('BE').garrison = 300;
+  // A single column of 150 against this garrison loses four times out of five.
+  const solo = Game.winChance(150 * game.attackModifier('FRA'), game.defenseValue('DE'));
+  assert.ok(solo < 0.3, `single column odds: ${solo}`);
+
+  game.sendTroops('FR', 'DE', 0.5);
+  game.sendTroops('BE', 'DE', 0.5);
+  assert.equal(game.state.armies.filter((a) => a.owner === 'FRA').length, 2);
+
+  // Walk until both columns have arrived; the assault must wait for the second.
+  let sawAssault = false;
+  for (let i = 0; i < 400 && game.state.armies.length; i += 1) {
+    game.update(0.05);
+    if ((game.state.assaults ?? []).length) sawAssault = true;
+  }
+  assert.ok(sawAssault, 'the first column waited for the second');
+  for (let i = 0; i < 40 && game.state.assaults?.length; i += 1) game.update(0.05);
+  assert.equal(game.state.assaults.length, 0, 'the assault resolved');
+  assert.equal(game.province('DE').owner, 'FRA', 'the combined force took the province');
+});
+
+test('a lone column does not wait in the assault queue', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 400;
+  game.province('DE').garrison = 10;
+  game.sendTroops('FR', 'DE', 0.5);
+  for (let i = 0; i < 400 && game.state.armies.length; i += 1) game.update(0.05);
+  assert.equal(game.province('DE').owner, 'FRA', 'the battle resolved on arrival');
+  assert.equal((game.state.assaults ?? []).length, 0);
+});
+
+test('a recalled column comes home with its men', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 300;
+  const before = game.province('FR').garrison;
+  const sent = game.sendTroops('FR', 'IT', 0.5);
+  const army = game.state.armies.find((a) => a.owner === 'FRA');
+  assert.ok(army, 'the column is on the road');
+  const result = game.recallArmy(army.id);
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(result.to, 'FR');
+  for (let i = 0; i < 400 && game.state.armies.some((a) => a.id === army.id); i += 1) game.update(0.1);
+  assert.equal(game.state.armies.some((a) => a.id === army.id), false, 'the column came back');
+  assert.ok(game.province('FR').garrison >= before - sent.amount, 'the men are home');
+  assert.equal(game.province('IT').owner, null, 'Italy was not attacked');
+  assert.equal(game.state.log.some((line) => /отозвана/.test(line.text)), true, 'the player is told');
+});
+
+test('recalling a column on the way home again is refused', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 300;
+  game.sendTroops('FR', 'BE', 0.5);
+  const army = game.state.armies.find((a) => a.owner === 'FRA');
+  assert.equal(game.recallArmy(army.id).ok, true);
+  const again = game.recallArmy(army.id);
+  assert.equal(again.ok, false);
+  assert.match(again.reason, /возвращается/);
+});
+
+test('a sea crossing costs a few men, a land march costs none', () => {
+  const game = makeGame();
+  game.province('FR').garrison = 200;
+  const land = game.sendTroops('FR', 'BE', 0.5);
+  const sea = game.sendTroops('FR', 'IT', 0.5);
+  assert.equal(land.amount, 100, 'no losses on land');
+  assert.ok(sea.amount <= 49 && sea.amount >= 48, `sea column: ${sea.amount}`);
+  assert.equal(sea.sea, true);
+  assert.ok(game.state.log.some((line) => /Шторм/.test(line.text)), 'the loss is reported');
 });

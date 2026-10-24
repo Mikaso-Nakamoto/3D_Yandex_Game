@@ -3,7 +3,7 @@ import { BAL, UPGRADES, ORDERS, doctrineMod } from './balance.js';
 import { Rng } from './rng.js';
 import { aiThink, assignDoctrine } from './ai.js';
 import { normalizeRules, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH } from './rules.js';
-import { offerSentence, marchesVerb } from './text.js';
+import { offerSentence, marchesVerb, plural } from './text.js';
 import { buildFocusChain } from '../data/focuses.js';
 
 export const SAVE_VERSION = 1;
@@ -62,6 +62,9 @@ export class Game {
       // Standing orders: «when this province holds N men, send the rest to X».
       autos: [],
       nextAutoId: 1,
+      // Columns that have arrived and are waiting for the rest of the force.
+      assaults: [],
+      nextAssaultId: 1,
       nextLogId: 1,
       playerAggro: false,
       rng: this.rng.s,
@@ -586,6 +589,53 @@ export class Game {
   }
 
   /**
+   * Columns of a nation that started in this province and are still on the
+   * road. Used by the province card: a march that turns out to be a bad idea
+   * must be cancellable, not a decision made once and forever.
+   */
+  armiesFrom(provinceId, nationId = this.state.nationId) {
+    return this.state.armies
+      .filter((army) => army.owner === nationId && (army.path ? army.path[0] : army.from) === provinceId)
+      .map((army) => ({
+        id: army.id,
+        to: army.path ? army.path[army.path.length - 1] : army.to,
+        troops: army.troops,
+        left: Math.max(0, army.duration - army.t),
+        returning: Boolean(army.recalled),
+        sea: Boolean(army.sea),
+      }));
+  }
+
+  /**
+   * Turns a column back before it reaches its target. The men walk home
+   * instead of disappearing: a recalled march costs the time already spent and
+   * nothing else. Shared by the player and the AI.
+   */
+  recallArmy(armyId, nationId = this.state.nationId) {
+    const army = this.state.armies.find((a) => a.id === armyId && a.owner === nationId);
+    if (!army) return { ok: false, reason: 'Колонны уже нет' };
+    if (army.recalled) return { ok: false, reason: 'Уже возвращается' };
+    const s = this.state;
+    // Everything behind the leg in progress, the province it left first.
+    const behind = army.path ? army.path.slice(0, Math.max(1, army.leg)) : [army.from];
+    const back = [...behind].reverse();
+    const remaining = Math.max(BAL.minTravel, Math.min(army.t || BAL.minTravel, army.duration));
+    army.recalled = true;
+    army.path = back;
+    army.leg = 0;
+    army.from = back[0];
+    army.to = back[0];
+    army.t = 0;
+    army.duration = remaining;
+    army.sea = false;
+    if (nationId === s.nationId) {
+      this.#log(`Колонна отозвана: ${this.provinceName(back[0])} — ${Math.round(army.troops)} чел. возвращаются`, 'order');
+    }
+    this.#emit('recall', { armyId, provinceId: back[0], troops: army.troops, by: nationId });
+    return { ok: true, troops: army.troops, to: back[0] };
+  }
+
+  /**
    * Sends a column along a land/sea route for any nation. The AI uses it to
    * march through a right of passage as well; the player reaches it through
    * sendTroops, which also handles the «через Канаду» feedback.
@@ -731,6 +781,7 @@ export class Game {
           .filter(([, n]) => n > 0),
       ),
     };
+    this.#seaToll(army);
     this.state.armies.push(army);
     this.#announceIncoming(army, nationId);
     return amount;
@@ -748,7 +799,7 @@ export class Game {
     const duration = this.travelTime(fromId, toId, nationId);
 
     from.garrison -= amount;
-    this.state.armies.push({
+    const army = {
       id: this.state.nextArmyId++,
       owner: nationId,
       from: fromId,
@@ -757,11 +808,13 @@ export class Game {
       t: 0,
       duration,
       sea,
-    });
+    };
+    this.#seaToll(army);
+    this.state.armies.push(army);
 
     this.#onAttack(nationId, toId);
-    this.#announceIncoming({ to: toId, from: fromId, troops: amount }, nationId);
-    return amount;
+    this.#announceIncoming({ to: toId, from: fromId, troops: army.troops }, nationId);
+    return army.troops;
   }
 
   /**
@@ -1630,6 +1683,7 @@ export class Game {
     this.#desertion(dt);
     this.#runAutos();
     this.#moveArmies(dt);
+    this.#tickAssaults();
     this.#think(dt);
     this.#checkEnd();
     s.rng = this.rng.s;
@@ -1809,6 +1863,7 @@ export class Game {
       army.duration = this.travelTime(army.from, army.to, army.owner);
       army.sea = this.isSeaRoute(army.from, army.to);
       army.t = 0;
+      this.#seaToll(army);
       return true;
     }
 
@@ -1839,6 +1894,21 @@ export class Game {
     army.duration = this.travelTime(army.from, army.to, army.owner);
     army.sea = this.isSeaRoute(army.from, army.to);
     return true;
+  }
+
+  /**
+   * Storms and transport losses on a sea leg. Small, but it makes a sea route
+   * a decision: islands are still reachable, they are just not free.
+   */
+  #seaToll(army) {
+    if (!army.sea || army.troops <= 0) return 0;
+    const lost = Math.round(army.troops * BAL.seaAttrition);
+    if (lost <= 0) return 0;
+    army.troops -= lost;
+    if (army.owner === this.state.nationId) {
+      this.#log(`Шторм: ${lost} чел. потеряно в море (${Math.round(BAL.seaAttrition * 100)}%)`, 'war');
+    }
+    return lost;
   }
 
   /**
@@ -1875,7 +1945,7 @@ export class Game {
     // partner's land (its home province may have been lost meanwhile). It must
     // not capture anything: send the men to the nearest friendly province.
     if (target.owner && target.owner !== army.owner && this.hasTruce(army.owner, target.owner)) {
-      const home = s.provinces[army.from]?.owner === army.owner ? s.provinces[army.from] : this.#nearestOwnProvince(army.owner, army.from);
+      const home = this.#homeFor(army);
       if (home) home.garrison += army.troops;
       if (army.owner === s.nationId) {
         this.#log(`Перемирие: колонна остановлена на границе, ${Math.round(army.troops)} возвращены`, 'good');
@@ -1898,21 +1968,121 @@ export class Game {
       return;
     }
 
+    // Hostile land: the column joins the assault on this province. Several
+    // columns sent at one target fight as one force instead of being defeated
+    // one after another by the same garrison.
+    this.#joinAssault(army);
+  }
+
+  /** Where a column that cannot fight should be placed: its own province. */
+  #homeFor(army) {
+    const s = this.state;
+    const own = s.provinces[army.from]?.owner === army.owner ? s.provinces[army.from] : null;
+    return own ?? this.#nearestOwnProvince(army.owner, army.from);
+  }
+
+  /**
+   * Adds an arrived column to the assault on its target. The battle itself is
+   * resolved by #tickAssaults once the other columns that are already on the
+   * road have arrived (or the wait runs out).
+   */
+  #joinAssault(army) {
+    const s = this.state;
+    s.assaults = s.assaults ?? [];
+    const existing = s.assaults.find((a) => a.owner === army.owner && a.to === army.to);
+    if (existing) {
+      existing.troops += army.troops;
+      existing.columns += 1;
+      existing.lastAt = s.time;
+      if (army.owner === s.nationId) {
+        this.#log(
+          `Сборный удар: ${this.provinceName(army.to)} — ${plural(existing.columns, 'колонна', 'колонны', 'колонн')}, ${Math.round(existing.troops)} чел.`,
+          'good',
+        );
+      }
+      return;
+    }
+    s.assaults.push({
+      id: s.nextAssaultId++,
+      owner: army.owner,
+      to: army.to,
+      from: army.from,
+      troops: army.troops,
+      columns: 1,
+      lastAt: s.time,
+    });
+  }
+
+  /**
+   * Resolves the waiting assaults. A single column fights the moment it
+   * arrives (nothing to wait for); the first of several columns waits for the
+   * rest, but not longer than `assaultWait` in case one of them is stopped.
+   */
+  #tickAssaults() {
+    const s = this.state;
+    if (!s.assaults?.length) return;
+    const drop = (assault) => {
+      s.assaults = s.assaults.filter((a) => a.id !== assault.id);
+    };
+    for (const assault of [...s.assaults]) {
+      const target = s.provinces[assault.to];
+      if (!target) {
+        drop(assault);
+        continue;
+      }
+      // The target became ours while the columns were gathering.
+      if (target.owner === assault.owner) {
+        target.garrison += assault.troops;
+        drop(assault);
+        continue;
+      }
+      // Peace signed while the assault was gathering: the men go home.
+      if (target.owner && this.hasTruce(assault.owner, target.owner)) {
+        const home = this.#homeFor(assault);
+        if (home) home.garrison += assault.troops;
+        drop(assault);
+        continue;
+      }
+      const inbound = s.armies.some((a) => {
+        if (a.owner !== assault.owner) return false;
+        const finalTarget = a.path ? a.path[a.path.length - 1] : a.to;
+        return finalTarget === assault.to;
+      });
+      if (inbound && s.time - assault.lastAt < BAL.assaultWait) continue;
+      drop(assault);
+      this.#fight(assault.owner, assault.to, assault.troops, {
+        from: assault.from,
+        columns: assault.columns,
+      });
+    }
+  }
+
+  /**
+   * One battle for a province. Used by the assault queue, so all the columns
+   * that arrived together are counted as a single force.
+   */
+  #fight(owner, toId, troops, meta = {}) {
+    const s = this.state;
+    const target = s.provinces[toId];
+    const attacker = s.nations[owner];
+    if (!target || !attacker || troops <= 0) return;
+
     const defender = target.owner ? s.nations[target.owner] : null;
-    this.#onAttack(army.owner, army.to);
-    const defPower = this.defenseValue(target.id);
-    const atkPower = army.troops * this.attackModifier(army.owner);
+    this.#onAttack(owner, toId);
+    const defPower = this.defenseValue(toId);
+    const atkPower = troops * this.attackModifier(owner);
     const chance = Game.winChance(atkPower, defPower);
     // rng.next() is always < 1, so chance 1 wins and chance 0 loses by construction.
     const roll = this.rng.next();
     s.stats.battles += 1;
+    const columns = meta.columns ?? 1;
 
     const attackerWins = roll < chance;
     if (attackerWins) {
       const ratio = defPower / Math.max(1, atkPower);
-      const survivors = Math.max(1, Math.round(army.troops * (1 - BAL.loserSurvivorBase * Math.min(0.95, ratio))));
+      const survivors = Math.max(1, Math.round(troops * (1 - BAL.loserSurvivorBase * Math.min(0.95, ratio))));
       const previousOwner = target.owner;
-      target.owner = army.owner;
+      target.owner = owner;
       target.garrison = survivors;
       if (target.fort > 0) target.fort -= 1;
       attacker.alive = true;
@@ -1921,44 +2091,46 @@ export class Game {
       if (attacker.isPlayer) s.stats.captured += 1;
       if (previousOwner === s.nationId) s.stats.lostProvinces += 1;
 
-      if (this.#logWorthTelling(target.id, army.owner, previousOwner)) {
+      if (this.#logWorthTelling(target.id, owner, previousOwner)) {
+        const force = columns > 1 ? ` (${plural(columns, 'колонна', 'колонны', 'колонн')})` : '';
         this.#log(
           previousOwner
-            ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`
-            : `${this.provinceName(target.id)}: независимая → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`,
+            ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})${force}`
+            : `${this.provinceName(target.id)}: независимая → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})${force}`,
           previousOwner === s.nationId ? 'bad' : attacker.isPlayer ? 'good' : 'war',
         );
       }
       this.#emit('capture', {
         provinceId: target.id,
         from: previousOwner,
-        to: army.owner,
+        to: owner,
         losers: Math.round(defPower),
         defense: Math.round(defPower),
         attack: Math.round(atkPower),
         roll,
         survivors,
-        sent: army.troops,
+        sent: troops,
+        columns,
       });
-      this.#markClash(previousOwner, army.owner);
-      this.#adjustMorale(army.owner, BAL.moraleWin);
-      this.#adjustExhaustion(army.owner, BAL.exhaustionWin);
+      this.#markClash(previousOwner, owner);
+      this.#adjustMorale(owner, BAL.moraleWin);
+      this.#adjustExhaustion(owner, BAL.exhaustionWin);
       if (previousOwner) {
         this.#adjustMorale(previousOwner, -BAL.moraleLose);
         this.#adjustExhaustion(previousOwner, BAL.exhaustionCapture);
         this.#adjustExhaustion(previousOwner, BAL.exhaustionLose);
-        this.#markClash(previousOwner, army.owner);
+        this.#markClash(previousOwner, owner);
       }
       if (previousOwner) this.#refreshNation(previousOwner);
-      this.#refreshNation(army.owner);
-      this.#checkFocus(army.owner);
+      this.#refreshNation(owner);
+      this.#checkFocus(owner);
     } else {
       const ratio = (atkPower * roll) / Math.max(1, defPower);
       const survivors = Math.max(1, Math.round(target.garrison * (1 - BAL.loserSurvivorBase * Math.min(0.95, ratio))));
       target.garrison = survivors;
-      this.#markClash(target.owner, army.owner);
-      this.#adjustMorale(army.owner, -BAL.moraleLose);
-      this.#adjustExhaustion(army.owner, BAL.exhaustionLose);
+      this.#markClash(target.owner, owner);
+      this.#adjustMorale(owner, -BAL.moraleLose);
+      this.#adjustExhaustion(owner, BAL.exhaustionLose);
       if (target.owner) {
         this.#adjustMorale(target.owner, BAL.moraleWin);
         this.#adjustExhaustion(target.owner, BAL.exhaustionWin);
@@ -1968,38 +2140,29 @@ export class Game {
       if (
         target.owner &&
         defender?.alive &&
-        !this.hasTruce(target.owner, army.owner) &&
+        !this.hasTruce(target.owner, owner) &&
         target.garrison > BAL.minSend * 4 &&
         this.rng.chance(BAL.counterAttack)
       ) {
-        const home = s.provinces[army.from];
-        if (home && home.owner === army.owner && this.neighbors(army.from).includes(target.id)) {
+        const home = s.provinces[meta.from];
+        if (home && home.owner === owner && this.neighbors(meta.from).includes(target.id)) {
           const marched = Math.floor(target.garrison * BAL.counterAttackMargin);
           if (marched >= BAL.minSend) {
-            this.#log(`Контрудар: ${defender.short} → ${this.provinceName(army.from)}`, 'war');
-            this.launchArmy(target.owner, target.id, army.from, BAL.counterAttackMargin);
+            this.#log(`Контрудар: ${defender.short} → ${this.provinceName(meta.from)}`, 'war');
+            this.launchArmy(target.owner, target.id, meta.from, BAL.counterAttackMargin);
           }
         }
       }
       // A failed AI attack on another AI is background noise; the player's own
       // battles always show.
-      if (this.#logWorthTelling(target.id, army.owner, target.owner)) {
+      if (this.#logWorthTelling(target.id, owner, target.owner)) {
         this.#log(
           `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''} — ${Math.round(atkPower)} против ${Math.round(defPower)}`,
           defender?.isPlayer ? 'good' : 'war',
         );
       }
-      this.#emit('battle', {
-        provinceId: target.id,
-        attacker: army.owner,
-        defender: target.owner,
-        success: false,
-        attack: Math.round(atkPower),
-        defense: Math.round(defPower),
-        roll,
-        sent: army.troops,
-      });
-      this.#refreshNation(army.owner);
+      this.#emit('battle', { provinceId: target.id, attacker: owner, defender: target.owner, success: false, attack: Math.round(atkPower), defense: Math.round(defPower), roll, sent: troops, columns });
+      this.#refreshNation(owner);
     }
   }
 

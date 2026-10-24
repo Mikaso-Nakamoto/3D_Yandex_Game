@@ -32,6 +32,14 @@ export const BAL = {
   // Combat
   fortDefense: 0.3,
   seaTravelMul: 1.7,
+  // A sea crossing is not free: storms and transport losses eat a few men on
+  // every leg over water. Small enough not to punish an invasion, big enough
+  // that a sea route is a decision and not a shortcut.
+  seaAttrition: 0.04,
+  // Several columns sent at one province fight as one force. The first column
+  // to arrive waits for the others that are already on the road, but not
+  // forever: a stalled march must not freeze the battle.
+  assaultWait: 10,
   armySpeed: 1.35, // map units per second
   minTravel: 2.2,
   maxTravel: 16,

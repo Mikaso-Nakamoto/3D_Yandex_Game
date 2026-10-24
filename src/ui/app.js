@@ -555,6 +555,10 @@ export class App {
           this.#toast(`${who}: ${fmt(payload.amount)} → ${game.provinceName(payload.to)}`, 'bad');
         }
       }
+      if (type === 'passage' && payload.by === game.state.nationId && payload.broken) {
+        const who = game.state.nations[payload.with]?.short ?? 'Противник';
+        this.#toast(`${who}: договор о проходе расторгнут`, 'bad');
+      }
       if (type === 'offer') {
         sfx.click();
         this.#renderOffers();
@@ -1361,6 +1365,7 @@ export class App {
       </div>
 
       ${isMine ? this.#autoInline(province.id) : ''}
+      ${isMine ? this.#armiesBlock(province.id) : ''}
       ${isMine ? this.#passageInline() : ''}
       ${!isMine && owner ? this.#diploBlock(owner) : ''}
       ${
@@ -1559,6 +1564,30 @@ export class App {
         ${passRow}
         ${oath > 0 ? `<p class="pp-warn soft">Нарушено договоров: ${oath} — вам верят меньше.</p>` : ''}
       </div>`;
+  }
+
+  /**
+   * Columns that left this province and are still on the road. A march that
+   * turns out to be a mistake can be called back from here instead of being a
+   * decision made once and paid for in full.
+   */
+  #armiesBlock(provinceId) {
+    const game = this.game;
+    if (!game) return '';
+    const columns = game.armiesFrom(provinceId).filter((army) => !army.returning);
+    if (!columns.length) return '';
+    const rows = columns
+      .map(
+        (army) => `<div class="pp-army-row">
+          <span class="pp-army-to">→ ${game.provinceName(army.to)}</span>
+          <span class="pp-army-meta">${fmt(army.troops)} чел. · ${Math.ceil(army.left)} с${army.sea ? ' · морем' : ''}</span>
+          <button class="pp-mini danger" data-recall="${army.id}">Отозвать</button>
+        </div>`,
+      )
+      .join('');
+    return `
+      <div class="pp-section"><span>В пути</span></div>
+      <div class="pp-armies">${rows}</div>`;
   }
 
   /** Rights of passage that involve the player, shown on their own province. */
@@ -2438,6 +2467,18 @@ export class App {
       if (pactButton && this.game) {
         if (pactButton.disabled) return;
         this.#askPact(pactButton.dataset.pact);
+        return;
+      }
+      const recallButton = event.target.closest('[data-recall]');
+      if (recallButton && this.game) {
+        const result = this.game.recallArmy(Number(recallButton.dataset.recall));
+        if (!result.ok) this.#toast(result.reason, 'bad');
+        else {
+          this.#toast(`Колонна возвращается: ${fmt(result.troops)} чел.`, 'info');
+          sfx.click();
+        }
+        this.#renderProvincePanel();
+        this.#updateHud();
         return;
       }
       const passageButton = event.target.closest('[data-passage]');
