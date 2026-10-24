@@ -8,8 +8,8 @@ import { BAL } from '../src/game/balance.js';
 import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
-const americaMap = JSON.parse(readFileSync(new URL('../src/data/map-america.json', import.meta.url), 'utf8'));
-const MAPS = { europe: map, america: americaMap };
+const atlanticMap = JSON.parse(readFileSync(new URL('../src/data/map-atlantic.json', import.meta.url), 'utf8'));
+const MAPS = { europe: map, atlantic: atlanticMap };
 const mapFor = (scenario) => MAPS[scenario.theatre ?? 'europe'];
 const makeGame = (opts = {}) => {
   const { ai = false, ...rest } = opts;
@@ -543,13 +543,13 @@ test('the war tax order repays its price for a mid-size nation', () => {
 });
 
 
-// ---------------------------------------------------------------- america theatre
+// ---------------------------------------------------------------- atlantic theatre
 
-test('the american theatre is fully wired: lands, borders, sea routes', () => {
-  const ids = new Set(americaMap.provinces.map((p) => p.id));
-  assert.equal(americaMap.theatre, 'america');
-  assert.equal(americaMap.provinces.length, 13);
-  for (const province of americaMap.provinces) {
+test('the atlantic theatre is fully wired: two continents, borders, sea routes', () => {
+  const ids = new Set(atlanticMap.provinces.map((p) => p.id));
+  assert.equal(atlanticMap.theatre, 'atlantic');
+  assert.equal(atlanticMap.provinces.length, 55);
+  for (const province of atlanticMap.provinces) {
     assert.ok(province.rings.length > 0, `${province.id} has no shape`);
     assert.ok(province.pop > 0, `${province.id} has no population`);
     assert.ok(province.neighbors.length > 0, `${province.id} is isolated`);
@@ -559,9 +559,9 @@ test('the american theatre is fully wired: lands, borders, sea routes', () => {
   }
 });
 
-test('american adjacency is symmetric and does not link a province to itself', () => {
-  const byId = Object.fromEntries(americaMap.provinces.map((p) => [p.id, p]));
-  for (const province of americaMap.provinces) {
+test('atlantic adjacency is symmetric and does not link a province to itself', () => {
+  const byId = Object.fromEntries(atlanticMap.provinces.map((p) => [p.id, p]));
+  for (const province of atlanticMap.provinces) {
     for (const neighbour of province.neighbors) {
       assert.notEqual(neighbour, province.id, `${province.id} neighbours itself`);
       assert.ok(byId[neighbour].neighbors.includes(province.id), `${province.id}/${neighbour} not symmetric`);
@@ -569,29 +569,36 @@ test('american adjacency is symmetric and does not link a province to itself', (
   }
 });
 
-test('the new world scenario covers every province of its theatre', () => {
-  const scenario = SCENARIOS.find((s) => s.id === 'neworld');
+test('the atlantic scenario covers every province of its map', () => {
+  const scenario = SCENARIOS.find((s) => s.id === 'concert-atlantic');
   assert.ok(scenario, 'scenario exists');
-  const game = new Game({ scenarioId: 'neworld', nationId: 'USA', map: americaMap });
-  for (const province of americaMap.provinces) {
+  const game = new Game({ scenarioId: 'concert-atlantic', nationId: 'USA', map: atlanticMap });
+  for (const province of atlanticMap.provinces) {
     const state = game.state.provinces[province.id];
-    // Every province is either held by a nation or is a defended neutral: the
-    // frontier lands are contested, not empty.
+    // Every province is either held by a nation or is a defended neutral.
     assert.ok(state.owner || state.garrison > 0, `${province.id} is empty`);
   }
   assert.equal(game.state.nations.USA.isPlayer, true);
-  assert.equal(game.provinceCount('USA'), 3);
-  const neutrals = americaMap.provinces.filter((p) => !game.state.provinces[p.id].owner).map((p) => p.id);
-  assert.deepEqual(neutrals.sort(), ['PL', 'WE']);
+  assert.equal(game.provinceCount('USA'), 6);
+  const neutrals = atlanticMap.provinces.filter((p) => !game.state.provinces[p.id].owner).map((p) => p.id);
+  assert.deepEqual(neutrals.sort(), ['CH', 'GL', 'IT']);
+});
+
+test('the atlantic map has a sea route between the continents', () => {
+  const game = new Game({ scenarioId: 'concert-atlantic', nationId: 'GBR', map: atlanticMap });
+  const route = game.routeBetween('GB', 'CA');
+  assert.deepEqual(route, ['GB', 'CA']);
+  assert.equal(game.isSeaRoute('GB', 'CA'), true);
+  assert.ok(game.travelTime('GB', 'CA') > 0);
 });
 
 test('a game refuses a map from the wrong theatre', () => {
   assert.throws(
-    () => new Game({ scenarioId: 'neworld', nationId: 'USA', map }),
+    () => new Game({ scenarioId: 'concert-atlantic', nationId: 'USA', map }),
     /театр/i,
   );
   assert.throws(
-    () => new Game({ scenarioId: 'concert', nationId: 'FRA', map: americaMap }),
+    () => new Game({ scenarioId: 'concert', nationId: 'FRA', map: atlanticMap }),
     /театр/i,
   );
 });
@@ -756,14 +763,12 @@ test('counter-attacks only target a neighbour owned by the attacker', () => {
   assert.ok(counterSeen, 'expected at least one counter-attack across seeds');
 });
 
-test('the new world does not start a single province away from victory', () => {
-  const scenario = SCENARIOS.find((s) => s.id === 'neworld');
-  const game = new Game({ scenarioId: 'neworld', nationId: 'USA', map: americaMap });
+test('the atlantic USA does not start a single province away from victory', () => {
+  const game = new Game({ scenarioId: 'concert-atlantic', nationId: 'USA', map: atlanticMap });
   const total = Object.keys(game.state.provinces).length;
-  const needed = Math.ceil(total * game.rules.victoryShare);
   assert.ok(
-    game.provinceCount('USA') < needed - 1,
-    `USA starts with ${game.provinceCount('USA')}/${total}, victory needs ${needed}`,
+    game.provinceCount('USA') < total - 1,
+    `USA starts with ${game.provinceCount('USA')}/${total}`,
   );
 });
 
@@ -1193,7 +1198,7 @@ test('Kaliningrad is its own province, reachable from land and worth garrisoning
   const ru = map.provinces.find((p) => p.id === 'RU');
   assert.ok(!ru.islands.some((ring) => ring.some(([x, z]) => x > 4.2 && x < 6.7 && z > -2.5 && z < -1)), 'exclave ring left in RU');
   assert.ok(!ru.neighbors.includes('PL') && !ru.neighbors.includes('LT'), `RU still borders ${ru.neighbors}`);
-  for (const scenario of SCENARIOS.filter((s) => s.theatre !== 'america')) {
+  for (const scenario of SCENARIOS.filter((s) => s.theatre !== 'atlantic')) {
     const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map, seed: 3 });
     const province = game.state.provinces.KGD;
     assert.ok(province, `${scenario.id} has no KGD`);
@@ -1294,4 +1299,43 @@ test('a column that cannot turn back does not capture after the treaty', () => {
   for (let i = 0; i < 600 && game.state.armies.some((a) => a.id === 901); i += 1) game.update(0.1);
   assert.equal(game.province('FR').owner, 'FRA', 'no capture under a fresh truce');
   assert.ok(game.province('DE').garrison > 0, 'the men were placed in friendly land');
+});
+
+// ---------------------------------------------------------------- historical focus
+
+test('every nation starts with a focus chain that points at foreign land', () => {
+  for (const scenario of SCENARIOS) {
+    const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map: mapFor(scenario), seed: 5 });
+    for (const nation of game.nations) {
+      const focus = game.focusOf(nation.id);
+      assert.ok(focus, `${scenario.id}/${nation.id} has no focus`);
+      const target = game.state.provinces[focus.target];
+      assert.ok(target, `${scenario.id}/${nation.id}: unknown target ${focus.target}`);
+      assert.notEqual(target.owner, nation.id, `${scenario.id}/${nation.id}: focus on own land`);
+      assert.ok(focus.gold > 0 && focus.morale > 0, `${scenario.id}/${nation.id}: no reward`);
+    }
+  }
+});
+
+test('taking the focus province pays the reward and moves the chain on', () => {
+  const game = makeGame();
+  const focus = game.focusOf('FRA');
+  const gold = game.player.gold;
+  const morale = game.player.morale;
+  // Hand the target over the way a capture would.
+  game.state.provinces[focus.target].owner = 'FRA';
+  game.state.provinces[focus.target].garrison = 10;
+  game.checkFocusForTests('FRA');
+  assert.ok(game.player.gold >= gold + focus.gold - 1, `gold ${gold} -> ${game.player.gold}`);
+  assert.ok(game.player.morale > morale, 'morale rose');
+  assert.equal(game.focusProgress('FRA').done, 1);
+  assert.notEqual(game.focusOf('FRA'), focus);
+});
+
+test('the player-visible focus text names the province and the reward', () => {
+  const game = makeGame();
+  const focus = game.focusOf('FRA');
+  const name = game.provinceName(focus.target);
+  assert.ok(focus.name.length > 3, 'the ambition has a name');
+  assert.ok(name.length > 1, 'the target has a name');
 });

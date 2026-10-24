@@ -34,6 +34,10 @@
             <h1>Короны Европы</h1>
             <p class="tagline">Захвати континент. Оставь след в истории.</p>
           </div>
+          <div class="mode-switch" id="mode-switch" role="tablist">
+            <button type="button" class="mode-btn is-active" data-mode="europe" role="tab">Европа</button>
+            <button type="button" class="mode-btn" data-mode="atlantic" role="tab">Европа и Северная Америка</button>
+          </div>
           <div id="scenario-list" class="scenario-list"></div>
           <div class="menu-actions">
             <button id="btn-continue" class="btn ghost hidden">Продолжить партию</button>
@@ -114,6 +118,10 @@
             </span>
             <span class="chip-label">рекруты</span>
           </div>
+          <button id="btn-focus" class="chip chip-button focus-chip" title="Исторический фокус: чего добивается ваша держава">
+            <span class="ico" data-icon="flag"></span>
+            <span class="chip-label-inline" id="hud-focus">Фокус</span>
+          </button>
           <button id="btn-rankings" class="chip chip-button" title="Сводка по державам">
             <span class="ico" data-icon="list"></span>
             <span class="chip-label-inline">Державы</span>
@@ -131,6 +139,7 @@
         <div class="orders-bar" id="orders-bar"></div>
         <div class="offer-card hidden" id="offer-card"></div>
         <div class="route-card hidden" id="route-card"></div>
+        <div class="focus-card hidden" id="focus-card"></div>
         <div class="log-dock" id="log-dock">
           <button class="log-toggle" id="log-toggle" type="button" aria-expanded="true">
             <span class="lt-open">Свернуть журнал</span>

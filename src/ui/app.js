@@ -2,7 +2,7 @@ import { World } from '../render/world.js';
 import { LabelLayer } from '../render/labels.js';
 import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
-import { SCENARIOS, DOCTRINES, THEATRES, getScenario } from '../data/scenarios.js';
+import { SCENARIOS, DOCTRINES, THEATRES, getScenario, hasScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
 import {
   DEFAULT_RULES,
@@ -29,6 +29,7 @@ export class App {
   constructor(maps) {
     this.maps = maps;
     this.theatre = 'europe';
+    this.mapMode = 'europe';
     this.map = maps[this.theatre];
     this.mapById = Object.fromEntries(this.map.provinces.map((p) => [p.id, p]));
     this.settings = this.#loadSettings();
@@ -166,7 +167,7 @@ export class App {
   #buildMenu() {
     const list = $('#scenario-list');
     list.innerHTML = '';
-    for (const scenario of SCENARIOS) {
+    for (const scenario of SCENARIOS.filter((s) => (s.theatre ?? 'europe') === this.mapMode)) {
       const level = DIFFICULTY_LEVEL[scenario.difficulty] ?? 2;
       const dots = Array.from({ length: 3 }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
       const card = document.createElement('button');
@@ -192,8 +193,21 @@ export class App {
     $('#btn-continue').classList.toggle('hidden', !this.hasSave);
   }
 
+  /** Menu mode: the European map alone, or Europe together with North America. */
+  setMapMode(mode) {
+    this.mapMode = this.maps[mode] ? mode : 'europe';
+    for (const button of document.querySelectorAll('#mode-switch .mode-btn')) {
+      const active = button.dataset.mode === this.mapMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+    }
+    this.#buildMenu();
+  }
+
   showMenu() {
     this.game = null;
+    $('#focus-card').classList.add('hidden');
+    $('#btn-focus').classList.add('hidden');
     this.selectedProvince = null;
     this.#setScreen('menu');
     this.#clearArmies();
@@ -435,6 +449,11 @@ export class App {
           sfx.loss();
           this.#toast(`Потеряна ${game.provinceName(payload.provinceId)}`, 'bad');
         }
+      }
+      if (type === 'focus' && payload.nationId === game.state.nationId) {
+        this.#toast(`Фокус выполнен: ${payload.step.name} (+${payload.step.gold} золота)`, 'good');
+        sfx.select();
+        this.#updateFocus();
       }
       if (type === 'incoming') {
         // A marching enemy is the one event that must not be missed because
@@ -868,6 +887,7 @@ export class App {
     const spirit = $('#hud-spirit');
     spirit.classList.toggle('is-low', morale <= 40);
     spirit.classList.toggle('is-tired', exhaustion >= 45);
+    this.#updateFocus();
     $('#hud-progress-text').textContent = `${progress.owned}/${progress.total}`;
     $('#hud-progress-fill').style.width = `${(progress.share * 100).toFixed(1)}%`;
 
@@ -1193,6 +1213,64 @@ export class App {
         <span class="pp-diplo-hint">${wait > 0 ? `Ответят через ${wait} с` : hint}</span>
         ${oath > 0 ? `<p class="pp-warn soft">Нарушено пактов: ${oath} — вам верят меньше.</p>` : ''}
       </div>`;
+  }
+
+  /** HUD chip and card for the historical focus (a HOI-like national goal). */
+  #updateFocus() {
+    const game = this.game;
+    const chip = $('#btn-focus');
+    if (!game) {
+      chip.classList.add('hidden');
+      return;
+    }
+    chip.classList.remove('hidden');
+    const focus = game.focusOf();
+    const progress = game.focusProgress();
+    const label = $('#hud-focus');
+    if (!focus) {
+      label.textContent = 'Фокус выполнен';
+      chip.classList.add('is-done');
+    } else {
+      label.textContent = focus.name;
+      chip.classList.remove('is-done');
+    }
+    if (!$('#focus-card').classList.contains('hidden')) this.#renderFocusCard();
+    chip.title = focus
+      ? `Фокус ${progress.step} из ${progress.total}: ${focus.name} — взять ${game.provinceName(focus.target)}`
+      : 'Все исторические задачи выполнены';
+  }
+
+  #renderFocusCard() {
+    const game = this.game;
+    const card = $('#focus-card');
+    if (!game) return;
+    const focus = game.focusOf();
+    const progress = game.focusProgress();
+    const chain = game.player.focus?.chain ?? [];
+    const dots = chain
+      .map((step, index) => `<span class="fc-dot ${index < progress.done ? 'on' : ''}"></span>`)
+      .join('');
+    if (!focus) {
+      card.innerHTML = `
+        <div class="fc-head"><span class="fc-eyebrow">Исторический фокус</span></div>
+        <h4>Все задачи выполнены</h4>
+        <div class="fc-target">Держава добилась всего, что намечала. Дальше — только карта.</div>
+        <div class="fc-chain">${dots}</div>
+        <div class="fc-actions"><button type="button" class="btn ghost" data-fc-close>Понятно</button></div>`;
+      return;
+    }
+    const target = game.state.provinces[focus.target];
+    const holder = target?.owner ? game.state.nations[target.owner]?.short : 'нейтральная';
+    card.innerHTML = `
+      <div class="fc-head">
+        <span class="fc-eyebrow">Исторический фокус</span>
+        <span class="fc-step">${progress.step} из ${progress.total}</span>
+      </div>
+      <h4>${focus.name}</h4>
+      <div class="fc-target">Взять <b>${game.provinceName(focus.target)}</b> — сейчас ${holder}.</div>
+      <div class="fc-reward"><span>Награда: <b>+${focus.gold} золота</b></span><span><b>+${focus.morale} духа</b></span></div>
+      <div class="fc-chain">${dots}</div>
+      <div class="fc-actions"><button type="button" class="btn ghost" data-fc-close>Скрыть</button></div>`;
   }
 
   #buildOrders() {
@@ -1685,9 +1763,25 @@ export class App {
       $('#modal-pause').classList.add('hidden');
       this.#openRules();
     });
+    for (const button of document.querySelectorAll('#mode-switch .mode-btn')) {
+      button.addEventListener('click', () => {
+        sfx.select();
+        this.setMapMode(button.dataset.mode);
+      });
+    }
     $('#btn-continue').addEventListener('click', async () => {
       sfx.select();
-      const saved = await this.#resumeFromStorage();
+      let saved = await this.#resumeFromStorage();
+      // Saves made before the Atlantic map existed (or from a removed
+      // scenario) cannot be restored: drop them instead of failing mid-load.
+      if (saved && !hasScenario(saved?.game?.state?.scenarioId)) {
+        saved = null;
+        try {
+          localStorage.removeItem(SAVE_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
       // Old saves have no theatre field: fall back to the scenario it belongs to.
       const theatre = saved?.theatre ?? getScenario(saved?.game?.state?.scenarioId)?.theatre ?? 'europe';
       this.setTheatre(theatre);
@@ -1733,6 +1827,25 @@ export class App {
         sfx.click();
       });
     }
+
+    $('#btn-focus').addEventListener('click', () => {
+      const card = $('#focus-card');
+      if (card.classList.contains('hidden')) {
+        this.#renderFocusCard();
+        card.classList.remove('hidden');
+        // The HUD may wrap to two rows on a narrow screen: the card starts
+        // below it instead of guessing a fixed offset.
+        const hud = $('.hud-top')?.getBoundingClientRect();
+        if (hud) card.style.top = `${Math.round(hud.bottom + 10)}px`;
+        sfx.click();
+      } else {
+        card.classList.add('hidden');
+      }
+    });
+
+    $('#focus-card').addEventListener('click', (event) => {
+      if (event.target.closest('[data-fc-close]')) $('#focus-card').classList.add('hidden');
+    });
 
     $('#route-card').addEventListener('click', (event) => {
       if (event.target.closest('[data-rc-cancel]')) {

@@ -4152,3 +4152,201 @@ kbd {
     width: auto;
   }
 }
+
+/* ---------------------------------------------------------------- menu mode switch */
+/* Two maps, one menu: «Европа» and «Европа и Северная Америка». The switch sits
+   above the era cards and filters them, so the era list stays short. */
+
+.mode-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(9, 16, 27, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  align-self: center;
+}
+
+.mode-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.mode-btn:hover {
+  color: var(--ink);
+}
+
+.mode-btn.is-active {
+  color: var(--ink);
+  background: rgba(217, 180, 90, 0.14);
+  border-color: rgba(217, 180, 90, 0.42);
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .mode-switch {
+    padding: 3px;
+    order: -1;
+  }
+
+  .mode-btn {
+    font-size: 10px;
+    padding: 4px 10px;
+  }
+}
+
+@media (max-width: 560px) {
+  .mode-switch {
+    flex-direction: column;
+    width: 100%;
+    border-radius: 12px;
+  }
+
+  .mode-btn {
+    border-radius: 9px;
+  }
+}
+
+/* ---------------------------------------------------------------- historical focus */
+/* A one-line ambition in the HUD, opened into a small card: what to take, what
+   it pays, and where the nation stands in its chain. No modal, no full screen. */
+
+.focus-chip #hud-focus {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-chip.is-done {
+  opacity: 0.7;
+}
+
+.focus-card {
+  position: absolute;
+  right: 12px;
+  top: 84px;
+  z-index: 7;
+  width: min(320px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(16, 27, 43, 0.98), rgba(8, 14, 24, 0.98));
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+}
+
+.focus-card .fc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.focus-card .fc-eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.focus-card .fc-step {
+  font-size: 9.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-card h4 {
+  margin: 2px 0 6px;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.focus-card .fc-target {
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.focus-card .fc-target b {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.focus-card .fc-reward {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.focus-card .fc-reward b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.focus-card .fc-chain {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.focus-card .fc-dot {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.focus-card .fc-dot.on {
+  background: var(--gold);
+}
+
+.focus-card .fc-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.focus-card .fc-actions .btn {
+  padding: 6px 12px;
+  font-size: 11.5px;
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .focus-card {
+    top: 84px;
+    right: 116px;
+    width: min(300px, calc(100vw - 460px));
+    padding: 9px 11px;
+  }
+
+  .focus-card h4 {
+    font-size: 14px;
+    margin: 1px 0 4px;
+  }
+
+  .focus-card .fc-target {
+    font-size: 10.5px;
+    margin-bottom: 4px;
+  }
+}
+
+@media (max-width: 700px) and (orientation: landscape) {
+  .focus-card {
+    right: 8px;
+    top: 76px;
+    width: min(300px, calc(100vw - 24px));
+  }
+}

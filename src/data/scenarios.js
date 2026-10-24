@@ -6,18 +6,18 @@ export const THEATRES = {
     short: 'Европа',
     blurb: 'Плотная карта: короткие границы, много соседей, быстрые войны.',
   },
-  america: {
-    id: 'america',
-    title: 'Северная Америка',
-    short: 'Сев. Америка',
-    blurb: 'Простор: огромные расстояния, редкие границы, морские пути вдоль берегов.',
+  atlantic: {
+    id: 'atlantic',
+    title: 'Европа и Северная Америка',
+    short: 'Европа + Америка',
+    blurb: 'Два берега Атлантики на одной карте: старые державы и Новый Свет, связанные морскими путями.',
   },
 };
 
 /** "Победа: <phrase> под вашей короной" reads correctly for every theatre. */
 export const THEATRE_GENITIVE = {
   europe: 'вся Европа',
-  america: 'весь Новый Свет',
+  atlantic: 'оба берега Атлантики',
 };
 
 export const SCENARIOS = [
@@ -354,114 +354,189 @@ export const SCENARIOS = [
     ],
     balance: { aiAggression: 1.0, aiEco: 1.0, neutralStrength: 0.9 },
   },
-  {
-    id: 'neworld',
-    theatre: 'america',
-    title: 'Новый Свет',
-    era: '1815',
-    startYear: 1815,
-    startMonth: 6,
-    monthsPerSecond: 0.3,
-    difficulty: 'Средне',
-    blurb:
-      'Молодая республика на востоке, британские земли на севере, испанские вице-королевства на юге и русские владения на северо-западе. Атлантика далеко, а соседи близко.',
-    nations: [
-      {
-        id: 'USA',
-        army: 1.1,
-        name: 'Соединённые Штаты', short: 'США', color: '#3f6fb5', capital: 'NE',
-        // The frontier west and Louisiana stay contested, otherwise the republic
-        // owns two thirds of the map before the first shot is fired.
-        provinces: ['NE', 'MW', 'SO'], ai: { aggression: 1.0, eco: 1.1 },
-      },
-      {
-        id: 'BNA',
-        army: 1.2,
-        name: 'Британская Северная Америка', short: 'Британия', color: '#b04a4a', capital: 'CA',
-        provinces: ['CA', 'GL'], army: 1.5, ai: { aggression: 0.85, eco: 1.05 },
-      },
-      {
-        id: 'ESP',
-        army: 0.9,
-        name: 'Испанские колонии', short: 'Испания', color: '#b5651d', capital: 'MX',
-        provinces: ['MX', 'CU', 'FL'], ai: { aggression: 0.85, eco: 1.0 },
-      },
-      {
-        id: 'RUS',
-        army: 1.0,
-        name: 'Российско-американская компания', short: 'Русская Америка', color: '#4f8a5b', capital: 'AK',
-        // Alaska alone fields 21 men and borders a much stronger colony, so the
-        // Oregon country stays with Russia too — otherwise the nation is a dead end.
-        provinces: ['AK', 'NW'], army: 1.4, ai: { aggression: 0.7, eco: 0.95 },
-      },
-      {
-        id: 'HAI',
-        army: 0.6,
-        name: 'Государство Гаити', short: 'Гаити', color: '#8a6aa8', capital: 'HI',
-        provinces: ['HI'], army: 1.1, ai: { aggression: 0.75, eco: 0.9 },
-      },
-    ],
-    neutrals: [
-      { province: 'PL', garrison: 0.8, fort: 0 },
-      { province: 'WE', garrison: 0.8, fort: 1 },
-    ],
-    balance: { aiAggression: 0.9, aiEco: 1.0, neutralStrength: 0.9 },
-  },
-  {
-    id: 'civil1861',
-    theatre: 'america',
-    title: 'Дом разделённый',
-    era: '1861',
-    startYear: 1861,
-    startMonth: 4,
-    monthsPerSecond: 0.5,
-    difficulty: 'Высоко',
-    blurb:
-      'Союз и Конфедерация делят один континент. Пока армии сходятся в поле, Британия держит север, а Мексика и Гаити ждут своего часа. Каждая неделя дороже предыдущей.',
-    nations: [
-      {
-        id: 'USA',
-        army: 1.15,
-        name: 'Соединённые Штаты', short: 'Союз', color: '#3f6fb5', capital: 'NE',
-        provinces: ['NE', 'MW', 'WE'], ai: { aggression: 1.0, eco: 1.1 },
-      },
-      {
-        id: 'CSA',
-        army: 1.05,
-        name: 'Конфедеративные Штаты', short: 'Конфедерация', color: '#8c8c94', capital: 'SO',
-        provinces: ['SO', 'FL', 'PL'], ai: { aggression: 1.05, eco: 0.95 },
-      },
-      {
-        id: 'BNA',
-        army: 1.0,
-        name: 'Британская Северная Америка', short: 'Британия', color: '#b04a4a', capital: 'CA',
-        provinces: ['CA', 'NW'], ai: { aggression: 0.75, eco: 1.05 },
-      },
-      {
-        id: 'MEX',
-        army: 0.85,
-        name: 'Мексиканская республика', short: 'Мексика', color: '#b5651d', capital: 'MX',
-        provinces: ['MX', 'CU'], ai: { aggression: 0.85, eco: 0.95 },
-      },
-      {
-        id: 'HAI',
-        army: 0.55,
-        name: 'Государство Гаити', short: 'Гаити', color: '#8a6aa8', capital: 'HI',
-        provinces: ['HI'], ai: { aggression: 0.7, eco: 0.9 },
-      },
-    ],
-    neutrals: [
-      { province: 'AK', garrison: 0.4, fort: 0 },
-      { province: 'GL', garrison: 0.35, fort: 1 },
-    ],
-    balance: { aiAggression: 1.0, aiEco: 1.0, neutralStrength: 0.85 },
-  },
 ];
+
+// ---------------------------------------------------------------- Atlantic mode
+//
+// The same eras, but on the map that also carries North America. European
+// powers keep their home provinces and gain their historical overseas lands;
+// the United States exists in its own right. Everything is one map now, so a
+// war can cross the ocean through the sea routes instead of changing theatres.
+
+const USA_1815 = {
+  id: 'USA',
+  army: 0.9,
+  name: 'Соединённые Штаты',
+  short: 'США',
+  color: '#3f6fb5',
+  capital: 'NE',
+  provinces: ['NE', 'MW', 'SO', 'FL', 'LO', 'WE'],
+  ai: { aggression: 0.95, eco: 1.1 },
+};
+
+const USA_1939 = {
+  id: 'USA',
+  army: 1.25,
+  name: 'Соединённые Штаты',
+  short: 'США',
+  color: '#3f6fb5',
+  capital: 'NE',
+  provinces: ['NE', 'MW', 'SO', 'FL', 'LO', 'WE', 'AK'],
+  ai: { aggression: 0.7, eco: 1.2 },
+};
+
+function withAmerica(base, { extra = {}, nations = [], blurb, neutrals = [], balance = {} }) {
+  return {
+    ...base,
+    id: `${base.id}-atlantic`,
+    theatre: 'atlantic',
+    title: `${base.title}`,
+    blurb,
+    nations: [
+      ...base.nations.map((nation) => ({
+        ...nation,
+        provinces: [...nation.provinces, ...(extra[nation.id] ?? [])],
+      })),
+      ...nations,
+    ],
+    neutrals: [
+      ...base.neutrals,
+      // Britain's Canadian and Russian Alaska holdings are part of those
+      // empires; the rest of the New World starts as free, unclaimed land.
+      ...neutrals,
+    ],
+    balance: { ...base.balance, ...balance },
+  };
+}
+
+const concertAtlantic = withAmerica(SCENARIOS.find((s) => s.id === 'concert'), {
+  extra: { GBR: ['CA', 'NW'], ESP: ['MX', 'CU', 'HI'], RUS: ['AK'] },
+  nations: [USA_1815],
+  blurb:
+    'Европа после Наполеона и молодые Штаты за океаном: одна карта, два берега, Атлантика вместо границы. Британия, Испания и Россия держат свои заморские земли — их можно отнять.',
+  neutrals: [
+    { province: 'GL', garrison: 0.3, fort: 0 },
+  ],
+});
+
+const eve1939Atlantic = withAmerica(SCENARIOS.find((s) => s.id === 'eve1939'), {
+  extra: { GBR: ['CA', 'NW'] },
+  nations: [USA_1939],
+  blurb:
+    'Канун войны на двух континентах: Европа уже поделена, а за океаном ждут США. Нейтральная Америка — рынок, убежище и будущий фронт.',
+  neutrals: [
+    { province: 'MX', garrison: 0.6, fort: 0 },
+    { province: 'CU', garrison: 0.4, fort: 0 },
+    { province: 'HI', garrison: 0.4, fort: 0 },
+    { province: 'GL', garrison: 0.3, fort: 0 },
+  ],
+  balance: { aiAggression: 0.95 },
+});
+
+const mosaicAtlantic = withAmerica(SCENARIOS.find((s) => s.id === 'mosaic'), {
+  blurb:
+    'Позднее Средневековье: знакомая Европа и неведомый Запад за океаном. Атлантика открыта — колонии можно взять силой, пока конкуренты не опомнились.',
+  neutrals: [
+    { province: 'GL', garrison: 0.25, fort: 0 },
+    { province: 'AK', garrison: 0.3, fort: 0 },
+  ],
+});
+
+// 1861: the American war with the old powers still standing across the ocean.
+const concertBase = SCENARIOS.find((s) => s.id === 'concert');
+const civil1861 = {
+  id: 'civil1861',
+  theatre: 'atlantic',
+  title: 'Дом разделённый',
+  era: '1861',
+  startYear: 1861,
+  startMonth: 4,
+  monthsPerSecond: 0.45,
+  difficulty: 'Высоко',
+  blurb:
+    'Союз и Конфедерация делят Новый Свет, а европейские державы смотрят через океан и держат свои колонии. Каждая неделя войны дороже предыдущей.',
+  nations: [
+    ...concertBase.nations.map((nation) => ({ ...nation })),
+    {
+      id: 'USA',
+      army: 1.15,
+      name: 'Соединённые Штаты',
+      short: 'Союз',
+      color: '#3f6fb5',
+      capital: 'NE',
+      provinces: ['NE', 'MW', 'WE'],
+      ai: { aggression: 1.0, eco: 1.1 },
+    },
+    {
+      id: 'CSA',
+      army: 1.05,
+      name: 'Конфедеративные Штаты',
+      short: 'Конфедерация',
+      color: '#8c8c94',
+      capital: 'SO',
+      provinces: ['SO', 'FL', 'LO'],
+      ai: { aggression: 1.05, eco: 0.95 },
+    },
+    {
+      id: 'BNA',
+      army: 1.0,
+      name: 'Британская Северная Америка',
+      short: 'Канада',
+      color: '#b04a4a',
+      capital: 'CA',
+      provinces: ['CA', 'NW'],
+      ai: { aggression: 0.75, eco: 1.05 },
+    },
+    {
+      id: 'MEX',
+      army: 0.85,
+      name: 'Мексиканская республика',
+      short: 'Мексика',
+      color: '#b5651d',
+      capital: 'MX',
+      provinces: ['MX'],
+      ai: { aggression: 0.85, eco: 0.95 },
+    },
+    {
+      id: 'HAI',
+      army: 0.55,
+      name: 'Государство Гаити',
+      short: 'Гаити',
+      color: '#8a6aa8',
+      capital: 'HI',
+      provinces: ['HI'],
+      ai: { aggression: 0.7, eco: 0.9 },
+    },
+  ],
+  // Keep European colonies with their metropoles: Spain holds Cuba, Britain
+  // keeps Canada, and Alaska stays a distant Russian outpost.
+  neutrals: [
+    { province: 'GL', garrison: 0.3, fort: 0 },
+  ],
+  balance: { aiAggression: 0.95, aiEco: 1.0, neutralStrength: 0.85 },
+};
+// The base roster already owns GB/ES/RU: their overseas lands are added here.
+const civilExtra = { GBR: ['CA', 'NW'], ESP: ['CU'], RUS: ['AK'] };
+civil1861.nations = civil1861.nations.map((nation) =>
+  nation.id === 'BNA' || nation.id === 'MEX'
+    ? nation
+    : { ...nation, provinces: [...nation.provinces, ...(civilExtra[nation.id] ?? [])] },
+);
+// BNA is Canada itself; Britain does not own it twice.
+civil1861.nations = civil1861.nations.map((nation) =>
+  nation.id === 'GBR' ? { ...nation, provinces: nation.provinces.filter((id) => id !== 'CA' && id !== 'NW') } : nation,
+);
+
+SCENARIOS.push(concertAtlantic, eve1939Atlantic, mosaicAtlantic, civil1861);
 
 export const SCENARIO_BY_ID = Object.fromEntries(SCENARIOS.map((s) => [s.id, s]));
 
 export function getScenario(id) {
   return SCENARIO_BY_ID[id] ?? SCENARIOS[0];
+}
+
+export function hasScenario(id) {
+  return Boolean(SCENARIO_BY_ID[id]);
 }
 
 export const DOCTRINES = [

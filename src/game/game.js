@@ -4,6 +4,7 @@ import { Rng } from './rng.js';
 import { aiThink, assignDoctrine } from './ai.js';
 import { normalizeRules, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH } from './rules.js';
 import { offerSentence, marchesVerb } from './text.js';
+import { buildFocusChain } from '../data/focuses.js';
 
 export const SAVE_VERSION = 1;
 
@@ -127,6 +128,15 @@ export class Game {
     }
 
     state.stats.peak = this.#provinceCount(nationId, state);
+
+    // Historical focus chains are built last: they look at who owns what, and
+    // an ambition the nation already fulfils is skipped.
+    for (const nation of Object.values(state.nations)) {
+      nation.focus = {
+        chain: buildFocusChain(this, nation, sc.id, state),
+        index: 0,
+      };
+    }
     return state;
   }
 
@@ -1026,6 +1036,49 @@ export class Game {
     return this.#provinceCount(nationId);
   }
 
+  /** Current ambition of a nation, or null when the whole chain is done. */
+  focusOf(nationId = this.state.nationId) {
+    const nation = this.state.nations[nationId];
+    const chain = nation?.focus?.chain;
+    if (!chain?.length) return null;
+    return chain[nation.focus.index] ?? null;
+  }
+
+  /** 1-based position in the chain and its length, for «2 из 3» in the panel. */
+  focusProgress(nationId = this.state.nationId) {
+    const nation = this.state.nations[nationId];
+    const chain = nation?.focus?.chain ?? [];
+    return { step: Math.min(chain.length, (nation?.focus?.index ?? 0) + 1), total: chain.length, done: nation?.focus?.index ?? 0 };
+  }
+
+  /** Test hook: the same check the capture path runs. */
+  checkFocusForTests(nationId) {
+    this.#checkFocus(nationId);
+  }
+
+  /**
+   * Called whenever land changes hands: a focus whose target is now ours pays
+   * out and the next one becomes active. AI nations run the same chains, so the
+   * bonus is not a player-only advantage.
+   */
+  #checkFocus(nationId) {
+    const nation = this.state.nations[nationId];
+    if (!nation?.focus) return;
+    for (let guard = 0; guard < 4; guard += 1) {
+      const step = this.focusOf(nationId);
+      if (!step) return;
+      const target = this.state.provinces[step.target];
+      if (!target || target.owner !== nationId) return;
+      nation.gold += step.gold;
+      this.#adjustMorale(nationId, step.morale);
+      nation.focus.index += 1;
+      if (nation.isPlayer) {
+        this.#log(`Фокус выполнен: ${step.name} — +${step.gold} золота, +${step.morale} духа`, 'good');
+      }
+      this.#emit('focus', { nationId, step, index: nation.focus.index });
+    }
+  }
+
   upgrade(provinceId, kind) {
     const p = this.state.provinces[provinceId];
     const nation = this.player;
@@ -1386,6 +1439,7 @@ export class Game {
       }
       if (previousOwner) this.#refreshNation(previousOwner);
       this.#refreshNation(army.owner);
+      this.#checkFocus(army.owner);
     } else {
       const ratio = (atkPower * roll) / Math.max(1, defPower);
       const survivors = Math.max(1, Math.round(target.garrison * (1 - BAL.loserSurvivorBase * Math.min(0.95, ratio))));
