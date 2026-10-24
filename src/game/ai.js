@@ -33,6 +33,7 @@ export function aiThink(game, nation) {
   }
   maybeSueForPeace(game, nation, owned);
   maybeBreakPact(game, nation, owned);
+  maybeAskPassage(game, nation, owned);
   if (!attack(game, nation, owned)) {
     reinforceLine(game, nation, owned);
   }
@@ -116,6 +117,65 @@ function maybeSueForPeace(game, nation, owned) {
     if (!game.rng.chance(0.22)) return;
   }
   game.offerPeace(nation.id);
+}
+
+/**
+ * An AI at war with a nation it cannot touch — the enemy borders the player,
+ * not the AI — asks the player for a road. Without this the right of passage
+ * would be a player-only button; with it, a war on the far side of a neutral
+ * country gives that country a real decision to make.
+ */
+/**
+ * A province matching `wanted` that touches the player's land but cannot be
+ * reached from our own: the one case where asking for a road is worth it.
+ */
+function unreachableOnPlayerBorder(game, mine, touchesPlayer, wanted) {
+  for (const p of game.provinces) {
+    if (!wanted(p)) continue;
+    if (game.neighbors(p.id).some((nid) => mine.has(nid))) continue; // reachable
+    if (!touchesPlayer(p.id)) continue;
+    return p;
+  }
+  return null;
+}
+
+function maybeAskPassage(game, nation, owned) {
+  const state = game.state;
+  const playerId = state.nationId;
+  const player = state.nations[playerId];
+  if (!player?.alive || !nation.alive || nation.isPlayer) return;
+  if (game.hasPassage(playerId, nation.id)) return; // already have a road
+  if (game.hasWar(nation.id, playerId)) return; // an enemy gets nothing
+  // A nation asks for a road when a war is stuck, not on the first day of it.
+  if (nation.exhaustion > 70) return;
+  if (game.rng.chance(0.8)) return; // rare thought, not a queue of requests
+  const touchesPlayer = (pid) =>
+    game.neighbors(pid).some((nid) => state.provinces[nid].owner === playerId);
+  const mine = new Set(owned.map((p) => p.id));
+  // A province we cannot reach, standing on the player's border: the player's
+  // land is the only road to it. Enemies at war come first — a war that cannot
+  // be reached is worse than an unclaimed field — and neutral land second.
+  let blocked = null;
+  for (const enemy of Object.values(state.nations)) {
+    if (!enemy.alive || enemy.id === nation.id || enemy.id === playerId) continue;
+    const since = game.warSince(nation.id, enemy.id);
+    if (since == null || state.time - since < 30) continue;
+    blocked = unreachableOnPlayerBorder(game, mine, touchesPlayer, (p) => p.owner === enemy.id);
+    if (blocked) break;
+  }
+  // Unclaimed land: a nation that has room at home does not push through a
+  // neighbour for it, so this is a rare thought.
+  if (!blocked && game.rng.chance(0.75)) {
+    blocked = unreachableOnPlayerBorder(game, mine, touchesPlayer, (p) => !p.owner);
+  }
+  if (!blocked) return;
+  // Our own land has to touch the player, otherwise the road leads nowhere.
+  const adjacent = owned.some((p) => touchesPlayer(p.id));
+  if (!adjacent) return;
+  // A nation does not beg someone who will obviously refuse, but a refusal is
+  // not a disaster either: asking is how a road gets opened in the first place.
+  if (game.passageChance(nation.id, playerId) < 0.12) return;
+  game.offerPassage(nation.id);
 }
 
 /**
@@ -212,12 +272,54 @@ function attack(game, nation, owned) {
       if (!best || score < best.score) best = { from: p.id, to: nid, def, atk, score };
     }
   }
+  if (!best && game.passagesOf(nation.id).length) {
+    // No neighbour worth attacking, but a road through a friendly country may
+    // open a front that is otherwise out of reach.
+    const routeTarget = attackThroughPassage(game, nation, owned);
+    if (routeTarget) return true;
+  }
   if (!best) return false;
 
   const margin = best.def / best.atk;
   const ratio = margin < 0.45 ? 0.7 : margin < 0.7 ? 0.82 : 0.95;
   const troops = game.launchArmy(nation.id, best.from, best.to, ratio);
   return troops > 0;
+}
+
+/**
+ * Picks a hostile province on the far side of a passage and marches at it.
+ * Only provinces that are the *final* step of a route count: the column walks
+ * through the friendly country without a fight and battles on arrival.
+ */
+function attackThroughPassage(game, nation, owned) {
+  const state = game.state;
+  const style = styleOf(game);
+  const margin = nation.exhaustion > BAL.warWearyAt ? BAL.warWearyMargin : style.margin;
+  let best = null;
+  for (const p of owned) {
+    if (p.garrison < 28) continue;
+    for (const holder of game.passagesOf(nation.id)) {
+      for (const landId of Object.keys(state.provinces)) {
+        if (state.provinces[landId].owner !== holder.id) continue;
+        for (const nid of game.neighbors(landId)) {
+          const target = state.provinces[nid];
+          if (!target.owner || target.owner === nation.id) continue;
+          if (target.owner === holder.id) continue; // do not bite the hand that feeds
+          if (game.hasTruce(nation.id, target.owner)) continue;
+          const route = game.routeBetween(p.id, nid, nation.id);
+          if (!route || route.length < 2) continue;
+          const travel = game.routeTime(route, nation.id);
+          const atk = p.garrison * game.attackModifier(nation.id);
+          const def = game.projectedDefense(nid, travel);
+          if (atk < def * margin) continue;
+          const score = def + travel;
+          if (!best || score < best.score) best = { from: p.id, to: nid, score };
+        }
+      }
+    }
+  }
+  if (!best) return false;
+  return game.launchRouteFor(nation.id, best.from, best.to, 0.75) > 0;
 }
 
 function reinforceLine(game, nation, owned) {

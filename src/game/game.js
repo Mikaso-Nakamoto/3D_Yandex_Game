@@ -422,11 +422,11 @@ export class Game {
     if (from.owner !== this.state.nationId) return { ok: false, reason: 'Это не ваша провинция' };
     if (fromId === toId) return { ok: false, reason: 'Выберите другую провинцию' };
     // A direct neighbour is always reachable. Anything beyond it needs a land
-    // route through the player's own provinces — that is how a column can be
-    // sent to the far end of the realm without waiting for each hop by hand.
-    if (!this.neighbors(fromId).includes(toId) && !this.routeBetween(fromId, toId)) {
-      return { ok: false, reason: 'Нет пути по своим провинциям' };
-    }
+    // route: through the player's own provinces, or through a nation that gave
+    // us a right of passage — that is how a column reaches the far end of the
+    // realm (or Alaska reaches the mainland) without waiting for each hop.
+    const route = this.neighbors(fromId).includes(toId) ? [fromId, toId] : this.routeBetween(fromId, toId);
+    if (!route) return { ok: false, reason: 'Нет пути: нужен проход через чужую землю' };
     // Several armies may leave the same province at once; only the troops that are
     // still at home can march, so the garrison is the single source of truth.
     if (this.sendableTroops(fromId, this.state.sendRatio) < BAL.minSend) {
@@ -438,10 +438,18 @@ export class Game {
         ok: false,
         needsBreak: true,
         with: to.owner,
+        route,
+        through: this.routeThrough(route),
         reason: `Пакт о ненападении с ${this.state.nations[to.owner]?.short ?? 'противником'}`,
       };
     }
-    return { ok: true };
+    // Marching into the land of a nation that let us through is a betrayal:
+    // allowed, but the player is told about it by the caller.
+    const betrayal =
+      to.owner && to.owner !== this.state.nationId && this.hasPassage(to.owner, this.state.nationId)
+        ? to.owner
+        : null;
+    return { ok: true, route, through: this.routeThrough(route), betrayal };
   }
 
   /**
@@ -458,8 +466,12 @@ export class Game {
       const current = queue.shift();
       for (const nid of this.neighbors(current)) {
         const p = this.state.provinces[nid];
-        if (!p || p.owner !== me) continue;
-        const cost = dist.get(current) + this.travelTime(current, nid);
+        if (!p) continue;
+        // Own land and land we hold a right of passage through: both are road.
+        if (p.owner !== me && !this.hasPassage(p.owner, me)) continue;
+        const foreign = p.owner !== me;
+        const cost =
+          dist.get(current) + this.travelTime(current, nid) * (foreign ? BAL.passageTravelMul : 1);
         if (dist.has(nid) && dist.get(nid) <= cost) continue;
         dist.set(nid, cost);
         reach.add(nid);
@@ -501,9 +513,12 @@ export class Game {
         if (done.has(nid)) continue;
         const p = s.provinces[nid];
         if (!p) continue;
-        // Walk only through our own land; the destination itself may be hostile.
-        if (nid !== toId && p.owner !== nationId) continue;
-        const cost = dist.get(current) + this.travelTime(current, nid, nationId);
+        // Walk through our own land or through a nation that signed us a right
+        // of passage; the destination itself may be hostile.
+        if (nid !== toId && !this.canTransit(nationId, nid)) continue;
+        const foreign = p.owner !== nationId && nid !== toId;
+        const cost =
+          dist.get(current) + this.travelTime(current, nid, nationId) * (foreign ? BAL.passageTravelMul : 1);
         if (dist.has(nid) && dist.get(nid) <= cost) continue;
         dist.set(nid, cost);
         prev.set(nid, current);
@@ -524,17 +539,34 @@ export class Game {
   /** Total march time along a route, used for the arrival forecast. */
   routeTime(path, nationId = this.state.nationId) {
     let total = 0;
-    for (let i = 1; i < path.length; i += 1) total += this.travelTime(path[i - 1], path[i], nationId);
+    const last = path.length - 1;
+    for (let i = 1; i < path.length; i += 1) {
+      const foreign = this.state.provinces[path[i]]?.owner !== nationId && i !== last;
+      total += this.travelTime(path[i - 1], path[i], nationId) * (foreign ? BAL.passageTravelMul : 1);
+    }
     return total;
+  }
+
+  /**
+   * Nations whose land a route crosses without owning it. Used by the UI to
+   * say «через Канаду» instead of silently marching through a third country.
+   */
+  routeThrough(path, nationId = this.state.nationId) {
+    const seen = [];
+    for (const id of path.slice(1, -1)) {
+      const owner = this.state.provinces[id]?.owner;
+      if (owner && owner !== nationId && !seen.includes(owner)) seen.push(owner);
+    }
+    return seen;
   }
 
   sendTroops(fromId, toId, ratio = this.state.sendRatio, options = {}) {
     const check = this.canSend(fromId, toId);
     if (!check.ok) return check;
-    const route = this.neighbors(fromId).includes(toId) && !options.forceRoute
-      ? [fromId, toId]
-      : this.routeBetween(fromId, toId);
-    if (!route) return { ok: false, reason: 'Нет пути по своим провинциям' };
+    const route = options.forceRoute
+      ? this.routeBetween(fromId, toId)
+      : check.route ?? this.routeBetween(fromId, toId);
+    if (!route) return { ok: false, reason: 'Нет пути: нужен проход через чужую землю' };
     if (this.state.provinces[toId].owner !== this.state.nationId) this.state.playerAggro = true;
     const amount = options.leave || route.length > 2
       ? this.#launchRoute(this.state.nationId, route, ratio, options.leave ?? {})
@@ -547,8 +579,21 @@ export class Game {
       duration: army?.duration,
       sea: this.isSeaRoute(fromId, toId),
       route,
+      through: this.routeThrough(route),
+      betrayal: check.betrayal,
       routeTime: this.routeTime(route),
     };
+  }
+
+  /**
+   * Sends a column along a land/sea route for any nation. The AI uses it to
+   * march through a right of passage as well; the player reaches it through
+   * sendTroops, which also handles the «через Канаду» feedback.
+   */
+  launchRouteFor(nationId, fromId, toId, ratio = 0.5) {
+    const route = this.routeBetween(fromId, toId, nationId);
+    if (!route || route.length < 2) return 0;
+    return this.#launchRoute(nationId, route, ratio, {});
   }
 
   // ---------------------------------------------------------------- auto orders
@@ -714,6 +759,7 @@ export class Game {
       sea,
     });
 
+    this.#onAttack(nationId, toId);
     this.#announceIncoming({ to: toId, from: fromId, troops: amount }, nationId);
     return amount;
   }
@@ -723,15 +769,19 @@ export class Game {
    * on the globe: easy to miss, and the first news was the province falling.
    */
   #announceIncoming(army, nationId) {
-    const target = this.state.provinces[army.to];
+    // A column may cross our land on its way somewhere else: only its *final*
+    // destination matters, otherwise a friendly transit is announced as an
+    // attack on the province it merely passes through.
+    const finalId = army.path ? army.path[army.path.length - 1] : army.to;
+    const target = this.state.provinces[finalId];
     if (target?.owner !== this.state.nationId || nationId === this.state.nationId) return;
     const attacker = this.state.nations[nationId];
     // No case declension of province names: the arrow form already used for
     // captures reads the same for «Латвия», «Кипр» and «США».
     const who = attacker?.short ?? 'Противник';
-    this.#log(`${who} ${marchesVerb(who)} войска: ${army.troops} → ${this.provinceName(army.to)}`, 'bad');
+    this.#log(`${who} ${marchesVerb(who)} войска: ${army.troops} → ${this.provinceName(finalId)}`, 'bad');
     // The folded log must not hide the one message that needs an answer now.
-    this.#emit('incoming', { to: army.to, from: army.from, amount: army.troops, attacker: nationId });
+    this.#emit('incoming', { to: finalId, from: army.from, amount: army.troops, attacker: nationId });
   }
 
   /** Seconds an army needs for the march. Includes the player's march bonus. */
@@ -863,6 +913,107 @@ export class Game {
     return Boolean(rel) && rel.truceUntil > this.state.time;
   }
 
+  // ------------------------------------------------------------- right of passage
+
+  /**
+   * Seconds left on the permission `giverId` gave `receiverId` to march through
+   * its land (0 when there is none). Stored per giver inside the pair, because
+   * two neighbours may grant passage to each other at the same time.
+   */
+  passageLeft(giverId, receiverId) {
+    const rel = this.state.relations?.[Game.pairKey(giverId, receiverId)];
+    const until = rel?.passage?.[giverId] ?? 0;
+    return Math.max(0, until - this.state.time);
+  }
+
+  hasPassage(giverId, receiverId) {
+    return Boolean(giverId) && giverId !== receiverId && this.passageLeft(giverId, receiverId) > 0;
+  }
+
+  /** Every nation whose land the given country may cross right now. */
+  passageHolders(nationId) {
+    return Object.values(this.state.nations)
+      .filter((other) => other.alive && this.hasPassage(other.id, nationId))
+      .map((other) => other.id);
+  }
+
+  #grantPassage(giverId, receiverId, seconds = BAL.passageTruce) {
+    const key = Game.pairKey(giverId, receiverId);
+    this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
+    this.state.relations[key].passage = this.state.relations[key].passage ?? {};
+    this.state.relations[key].passage[giverId] = this.state.time + seconds;
+  }
+
+  #revokePassage(giverId, receiverId) {
+    const rel = this.state.relations?.[Game.pairKey(giverId, receiverId)];
+    if (!rel?.passage?.[giverId]) return false;
+    delete rel.passage[giverId];
+    return true;
+  }
+
+  /**
+   * Can `nationId` use this province as a step on a march? Own land always,
+   * foreign land only with a signed right of passage. A nation that is at war
+   * with the owner never gets through — war voids the permission.
+   */
+  canTransit(nationId, provinceId) {
+    const p = this.state.provinces[provinceId];
+    if (!p) return false;
+    if (p.owner === nationId) return true;
+    if (!p.owner) return false;
+    return this.hasPassage(p.owner, nationId);
+  }
+
+  // --------------------------------------------------------------------- wars
+
+  /** Start of the current war between two nations, or null (no war / truce). */
+  warSince(a, b) {
+    if (!a || !b || a === b) return null;
+    const rel = this.state.relations?.[Game.pairKey(a, b)];
+    if (!rel || rel.warSince == null) return null;
+    if (rel.truceUntil > this.state.time) return null;
+    return rel.warSince;
+  }
+
+  hasWar(a, b) {
+    return this.warSince(a, b) != null;
+  }
+
+  /** Every nation `nationId` is fighting right now, newest war first. */
+  warsOf(nationId) {
+    const list = [];
+    for (const other of Object.values(this.state.nations)) {
+      if (other.id === nationId || !other.alive) continue;
+      const since = this.warSince(nationId, other.id);
+      if (since == null) continue;
+      list.push({ id: other.id, since, left: Math.max(0, this.state.time - since) });
+    }
+    return list.sort((a, b) => a.since - b.since);
+  }
+
+  /**
+   * Marks a pair as being at war. Called when a column is sent at someone else's
+   * land, and again on every battle, so a war does not "expire" because the
+   * front went quiet for two minutes.
+   */
+  #declareWar(a, b) {
+    if (!a || !b || a === b) return;
+    const key = Game.pairKey(a, b);
+    this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
+    const rel = this.state.relations[key];
+    if (rel.truceUntil > this.state.time) return; // a truce is still in force
+    if (rel.warSince == null) rel.warSince = this.state.time;
+    // War cancels passage in both directions: an enemy does not get a road.
+    this.#revokePassage(a, b);
+    this.#revokePassage(b, a);
+  }
+
+  #endWar(a, b) {
+    const rel = this.state.relations?.[Game.pairKey(a, b)];
+    if (!rel) return;
+    rel.warSince = null;
+  }
+
   truceLeft(a, b) {
     const rel = this.state.relations?.[Game.pairKey(a, b)];
     return rel ? Math.max(0, rel.truceUntil - this.state.time) : 0;
@@ -890,6 +1041,7 @@ export class Game {
     // Hostility is a property of the pair, not of a nation: fighting someone
     // else must not look like being at war with the player.
     this.state.relations[key].lastClash = this.state.time;
+    this.#declareWar(a, b);
     const nationA = this.state.nations[a];
     const nationB = this.state.nations[b];
     if (nationA) nationA.lastClash = this.state.time;
@@ -941,10 +1093,17 @@ export class Game {
     return count;
   }
 
-  /** True when these two nations traded blows recently (i.e. they are at war). */
+  /**
+   * True when these two nations are fighting: either there is a declared war
+   * (which lasts until peace, not for a fixed window) or the last battle was
+   * recent. A signed truce makes them peaceful at once.
+   */
   hasFoughtRecently(a, b, window = BAL.peaceTalksWindow) {
     const rel = this.state.relations?.[Game.pairKey(a, b)];
-    if (!rel || rel.lastClash === undefined) return false;
+    if (!rel) return false;
+    if (rel.truceUntil > this.state.time) return false;
+    if (rel.warSince != null) return true;
+    if (rel.lastClash === undefined) return false;
     return this.state.time - rel.lastClash < window;
   }
 
@@ -989,6 +1148,34 @@ export class Game {
     return { ok: true, offer };
   }
 
+  /**
+   * An AI asks the player for a road: its enemy is on the far side of the
+   * player's land and the war is going nowhere without it. Offers about land
+   * are rare by design — a nation does not beg for a road it can do without.
+   */
+  offerPassage(fromId) {
+    const from = this.state.nations[fromId];
+    if (!from || from.isPlayer || !from.alive) return { ok: false, reason: 'Нельзя' };
+    if (this.state.status !== 'playing') return { ok: false, reason: 'Партия завершена' };
+    if (this.hasPassage(this.state.nationId, fromId)) return { ok: false, reason: 'Проход уже есть' };
+    if (this.state.offers.some((o) => o.from === fromId)) return { ok: false, reason: 'Предложение уже сделано' };
+    // A card with four requests is a card nobody reads: two at a time is plenty.
+    if (this.state.offers.length >= 2) return { ok: false, reason: 'Слишком много предложений' };
+    if (this.state.time < (from.offersFrom ?? 0)) return { ok: false, reason: 'Слишком рано' };
+    const offer = {
+      id: this.state.nextOfferId++,
+      from: fromId,
+      to: this.state.nationId,
+      kind: 'passage',
+      expires: this.state.time + 45,
+    };
+    this.state.offers.push(offer);
+    from.offersFrom = this.state.time + BAL.offerCooldown;
+    this.#log(offerSentence(from.short ?? 'Противник', 'passage'), 'war');
+    this.#emit('offer', offer);
+    return { ok: true, offer };
+  }
+
   /** Player answers a peace offer or a non-aggression pact. */
   answerPeace(offerId, accept) {
     const index = this.state.offers.findIndex((o) => o.id === offerId);
@@ -996,6 +1183,22 @@ export class Game {
     const offer = this.state.offers[index];
     this.state.offers.splice(index, 1);
     const from = this.state.nations[offer.from];
+    if (offer.kind === 'passage') {
+      if (!accept) {
+        if (from) from.offersFrom = this.state.time + BAL.offerCooldownAfterRefusal;
+        this.#log(`${from?.short ?? 'Противник'}: проход отклонён`, 'war');
+        this.#emit('offerClosed', { offer, accepted: false });
+        return { ok: true, accepted: false };
+      }
+      this.#grantPassage(this.state.nationId, offer.from);
+      this.#log(
+        `Право прохода: ${from?.short ?? 'противник'} — ${Math.round(BAL.passageTruce)} с через вашу землю`,
+        'war',
+      );
+      this.#emit('passage', { with: offer.from, by: this.state.nationId, granted: true });
+      this.#emit('offerClosed', { offer, accepted: true });
+      return { ok: true, accepted: true };
+    }
     const pact = offer.kind === 'pact';
     if (!accept) {
       if (from) from.offersFrom = this.state.time + BAL.offerCooldownAfterRefusal;
@@ -1012,6 +1215,7 @@ export class Game {
     this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
     this.state.relations[key].truceUntil = this.state.time + duration;
     this.state.relations[key].kind = pact ? 'pact' : 'peace';
+    this.state.relations[key].warSince = null;
     this.#adjustExhaustion(offer.from, -relief);
     this.#adjustExhaustion(this.state.nationId, -relief);
     this.#recallColumns(offer.from, this.state.nationId);
@@ -1056,6 +1260,7 @@ export class Game {
     rel.truceUntil = 0;
     rel.kind = null;
     rel.grudge = byId;
+    rel.warSince = this.state.time;
     const breaker = this.state.nations[byId];
     const victim = this.state.nations[withId];
     if (breaker) breaker.oathbreaks = (breaker.oathbreaks ?? 0) + 1;
@@ -1136,6 +1341,7 @@ export class Game {
     s.relations[key].truceUntil = s.time + duration;
     s.relations[key].kind = pact ? 'pact' : 'peace';
     s.relations[key].grudge = null;
+    s.relations[key].warSince = null;
     this.#adjustExhaustion(nationId, -(pact ? BAL.pactRelief : BAL.peaceRelief) * 0.5);
     this.#recallColumns(nationId, s.nationId);
     this.#log(
@@ -1149,6 +1355,75 @@ export class Game {
     return { ok: true, accepted: true, chance, until: s.relations[key].truceUntil, kind: pact ? 'pact' : 'peace' };
   }
 
+  /**
+   * 0..1 estimate of how willing a nation is to let our columns cross its land.
+   * Unlike a pact, passage is about convenience, not fear: a tired friend says
+   * yes, an enemy says no, and a nation that already distrusts us says no too.
+   */
+  passageOutlook(nationId) {
+    return this.passageChance(this.state.nationId, nationId);
+  }
+
+  /**
+   * How willing `giverId` is to let `askerId` cross its land (0..1). Shared by
+   * the player's button and the AI's own judgement, so both sides of the
+   * negotiation use the same rules.
+   */
+  passageChance(askerId, giverId) {
+    const s = this.state;
+    const me = s.nations[askerId];
+    const them = s.nations[giverId];
+    if (!me?.alive || !them?.alive || them.id === me.id) return 0;
+    if (this.hasPassage(them.id, me.id)) return 1;
+    // Nobody opens a road to an enemy.
+    if (this.hasWar(them.id, me.id)) return 0.01;
+    let score = 0.24;
+    const power = this.armyTotal(me.id) / Math.max(1, this.armyTotal(giverId));
+    // A strong neighbour is not refused lightly; a weak one is ignored.
+    score += Math.max(-0.12, Math.min(0.2, Math.log(Math.max(0.2, power)) * 0.12));
+    if (this.hasTruce(giverId, me.id)) score += 0.24;
+    // A tired nation wants quiet on its border, not a new war over a road.
+    score += (them.exhaustion / 100) * 0.16;
+    // Breaking a word costs more than any road is worth.
+    score -= Math.min(0.4, (me.oathbreaks ?? 0) * 0.13);
+    if (this.holdsGrudge(giverId, askerId)) score -= 0.2;
+    // An aggressive nation guards its land.
+    if ((them.ai?.aggression ?? 0.9) > 1.05) score -= 0.06;
+    return Math.max(0.02, Math.min(0.95, score));
+  }
+
+  /** The player asks a nation for a right of passage. */
+  requestPassage(nationId) {
+    const s = this.state;
+    if (s.status !== 'playing') return { ok: false, reason: 'Партия завершена' };
+    const them = s.nations[nationId];
+    if (!them || !them.alive) return { ok: false, reason: 'Державы больше нет' };
+    if (nationId === s.nationId) return { ok: false, reason: 'Это ваша держава' };
+    if (this.hasPassage(nationId, s.nationId)) return { ok: false, reason: 'Проход уже есть' };
+    if (this.hasWar(nationId, s.nationId)) {
+      return { ok: false, reason: 'Сначала нужен мир: врагу дорогу не дают' };
+    }
+    if (s.time < (them.passageAskedUntil ?? 0)) {
+      return { ok: false, reason: 'Они уже ответили — попробуйте позже' };
+    }
+    const chance = this.passageOutlook(nationId);
+    const accepted = this.rng.chance(chance);
+    them.passageAskedUntil =
+      s.time + (accepted ? BAL.passageAskCooldown : BAL.passageAskCooldownAfterRefusal);
+    if (!accepted) {
+      this.#log(`Отказ: ${them.short} не даёт право прохода`, 'war');
+      this.#emit('passage', { with: nationId, accepted: false, chance });
+      return { ok: true, accepted: false, chance };
+    }
+    this.#grantPassage(nationId, s.nationId);
+    this.#log(
+      `Право прохода: ${them.short} — ${Math.round(BAL.passageTruce)} с через чужую землю`,
+      'good',
+    );
+    this.#emit('passage', { with: nationId, accepted: true, chance });
+    return { ok: true, accepted: true, chance, until: s.time + BAL.passageTruce };
+  }
+
   /** Seconds left on a truce with `withId` (0 when there is none). */
   truceLeft(withId, nationId = this.state.nationId) {
     const rel = this.state.relations?.[Game.pairKey(withId, nationId)];
@@ -1157,9 +1432,31 @@ export class Game {
   }
 
   /** True when the player broke a pact with this nation and it remembers. */
-  holdsGrudge(nationId) {
-    const rel = this.state.relations?.[Game.pairKey(nationId, this.state.nationId)];
-    return rel?.grudge === this.state.nationId;
+  holdsGrudge(nationId, byId = this.state.nationId) {
+    const rel = this.state.relations?.[Game.pairKey(nationId, byId)];
+    return rel?.grudge === byId;
+  }
+
+  /** Every nation that gave `nationId` a right of passage, with seconds left. */
+  passagesOf(nationId) {
+    const out = [];
+    for (const other of Object.values(this.state.nations)) {
+      if (!other.alive || other.id === nationId) continue;
+      const left = this.passageLeft(other.id, nationId);
+      if (left > 0) out.push({ id: other.id, left });
+    }
+    return out;
+  }
+
+  /** Every nation that may march through `nationId`'s land (it granted them). */
+  passagesGrantedBy(nationId) {
+    const out = [];
+    for (const other of Object.values(this.state.nations)) {
+      if (!other.alive || other.id === nationId) continue;
+      const left = this.passageLeft(nationId, other.id);
+      if (left > 0) out.push({ id: other.id, left });
+    }
+    return out;
   }
 
   /** Truce partners of a nation (for the diplomacy list in the pause menu). */
@@ -1462,9 +1759,23 @@ export class Game {
     const path = army.path;
     const target = s.provinces[army.to];
     const isFinal = !path || army.leg >= path.length - 1;
+    // Own land or land crossed by a right of passage: the column walks on
+    // without a battle, but it can only leave a garrison on its own soil.
+    const walkOn = target && this.canTransit(army.owner, army.to);
 
-    if (!isFinal && target && target.owner === army.owner) {
-      const leave = Math.max(0, Math.min(army.leave?.[army.to] ?? 0, army.troops));
+    if (!isFinal && !walkOn) {
+      // The road ahead is no longer ours: the province was lost, or the right
+      // of passage that made it a road was revoked. The column turns back
+      // instead of treating a waypoint as a target.
+      if (army.owner === s.nationId) {
+        this.#log(`Поход прерван: ${this.provinceName(army.to)} больше не наша дорога`, 'bad');
+      }
+      return this.#turnBack(army);
+    }
+
+    if (!isFinal && walkOn) {
+      const ownHere = target.owner === army.owner;
+      const leave = ownHere ? Math.max(0, Math.min(army.leave?.[army.to] ?? 0, army.troops)) : 0;
       if (leave > 0) {
         target.garrison += leave;
         army.troops -= leave;
@@ -1474,15 +1785,21 @@ export class Game {
       }
       const nextId = path[army.leg + 1];
       const next = s.provinces[nextId];
-      // Only the destination may be hostile; if an intermediate province falls
-      // to the enemy mid-march the column has nowhere to walk.
-      const blocked = next && next.owner !== army.owner && army.leg + 1 < path.length - 1;
+      // Only the destination may be hostile; if the permission to cross a
+      // country is revoked mid-march, the column has nowhere to walk.
+      const blocked = next && !this.canTransit(army.owner, nextId) && army.leg + 1 < path.length - 1;
       if (army.troops < BAL.minSend || blocked) {
-        // The road ahead is gone (province lost) or nobody is left to march:
-        // the column stays where it is instead of vanishing with its men.
-        if (army.troops > 0) target.garrison += army.troops;
-        if (blocked && army.owner === s.nationId) {
-          this.#log(`Поход прерван: ${this.provinceName(nextId)} больше не ваша`, 'bad');
+        // The road ahead is gone (province lost, passage revoked) or nobody is
+        // left to march: the column turns back instead of vanishing with its men.
+        if (blocked) {
+          if (army.owner === s.nationId) {
+            this.#log(`Поход прерван: ${this.provinceName(nextId)} больше не наша дорога`, 'bad');
+          }
+          return this.#turnBack(army);
+        }
+        if (army.troops > 0) {
+          if (ownHere) target.garrison += army.troops;
+          else this.#turnBack(army);
         }
         return false;
       }
@@ -1497,6 +1814,55 @@ export class Game {
 
     this.#resolveArrival(army);
     return false;
+  }
+
+  /**
+   * Sends a stranded column back the way it came. Used when the right of
+   * passage that made the road is revoked while the men are still on foreign
+   * soil — they must not be handed over to a nation they no longer have a
+   * treaty with, and they must not disappear either.
+   */
+  #turnBack(army) {
+    const s = this.state;
+    const travelled = army.path ? army.path.slice(0, army.leg + 1) : [army.from, army.to];
+    const back = [];
+    for (let i = travelled.length - 1; i >= 0; i -= 1) {
+      back.push(travelled[i]);
+      if (s.provinces[travelled[i]]?.owner === army.owner) break;
+    }
+    if (back.length < 2) return false;
+    army.path = back;
+    army.leg = 1;
+    army.from = back[0];
+    army.to = back[1];
+    army.t = 0;
+    army.duration = this.travelTime(army.from, army.to, army.owner);
+    army.sea = this.isSeaRoute(army.from, army.to);
+    return true;
+  }
+
+  /**
+   * Consequences of marching into someone else's province: war starts, and if
+   * that nation had given us a right of passage, the treaty is torn up. Shared
+   * by the player and the AI, so betrayal costs everyone the same.
+   */
+  #onAttack(nationId, toId) {
+    const target = this.state.provinces[toId];
+    const owner = target?.owner;
+    if (!owner || owner === nationId) return;
+    if (this.hasPassage(owner, nationId)) {
+      this.#revokePassage(owner, nationId);
+      const rel = this.state.relations[Game.pairKey(owner, nationId)];
+      if (rel) rel.grudge = nationId;
+      const attacker = this.state.nations[nationId];
+      if (attacker) attacker.oathbreaks = (attacker.oathbreaks ?? 0) + 1;
+      this.#log(
+        `Право прохода отменено: ${this.state.nations[owner]?.short ?? 'противник'} закрывает границу`,
+        nationId === this.state.nationId ? 'bad' : 'war',
+      );
+      this.#emit('passage', { with: owner, by: nationId, broken: true });
+    }
+    this.#declareWar(nationId, owner);
   }
 
   #resolveArrival(army) {
@@ -1533,6 +1899,7 @@ export class Game {
     }
 
     const defender = target.owner ? s.nations[target.owner] : null;
+    this.#onAttack(army.owner, army.to);
     const defPower = this.defenseValue(target.id);
     const atkPower = army.troops * this.attackModifier(army.owner);
     const chance = Game.winChance(atkPower, defPower);

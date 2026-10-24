@@ -1694,3 +1694,238 @@ test('the world scenario is playable from the first frame', () => {
   const neutrals = Object.values(game.state.provinces).filter((p) => !p.owner && p.garrison > 0).length;
   assert.ok(neutrals > 20, `only ${neutrals} neutral provinces`);
 });
+
+// ---------------------------------------------------------------- right of passage
+
+/** Alaska can only reach the mainland of the USA through Canada. */
+const alaskaGame = (opts = {}) => {
+  const game = new Game({
+    scenarioId: 'world1939',
+    nationId: 'USA',
+    doctrineId: 'coin',
+    map: worldMap,
+    seed: 11,
+    ...opts,
+  });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  return game;
+};
+
+test('Alaska cannot reach the mainland without a right of passage', () => {
+  const game = alaskaGame();
+  assert.equal(game.province('AK').owner, 'USA');
+  assert.equal(game.province('NW').owner, 'BNA');
+  assert.equal(game.province('NE').owner, 'USA');
+  assert.equal(game.routeBetween('AK', 'NE', 'USA'), null, 'the land route goes through Canada');
+  const result = game.canSend('AK', 'NE');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /проход/i);
+});
+
+test('a right of passage opens the Alaska road without a war', () => {
+  const game = alaskaGame();
+  game.state.relations['BNA|USA'] = { truceUntil: 0, passage: { BNA: game.state.time + BAL.passageTruce } };
+  assert.equal(game.hasPassage('BNA', 'USA'), true);
+  assert.equal(game.hasPassage('USA', 'BNA'), false, 'a passage goes one way');
+  assert.deepEqual(game.passageHolders('USA'), ['BNA']);
+
+  const route = game.routeBetween('AK', 'NE', 'USA');
+  assert.ok(route, 'the road is open');
+  assert.deepEqual(route.slice(0, 2), ['AK', 'NW'], `route: ${route}`);
+  assert.deepEqual(game.routeThrough(route, 'USA'), ['BNA']);
+  const check = game.canSend('AK', 'NE');
+  assert.equal(check.ok, true);
+  assert.deepEqual(check.through, ['BNA']);
+
+  const sent = game.sendTroops('AK', 'NE', 0.5);
+  assert.equal(sent.ok, true, sent.reason);
+  assert.deepEqual(sent.through, ['BNA']);
+  assert.ok(sent.amount > 0);
+  assert.equal(game.state.armies.length, 1);
+  assert.equal(game.hasWar('USA', 'BNA'), false, 'marching through a friend is not a war');
+
+  // The column walks the whole way and arrives in the mainland.
+  const before = game.province('NE').garrison;
+  for (let i = 0; i < 600 && game.state.armies.length; i += 1) game.update(0.1);
+  assert.equal(game.state.armies.length, 0, 'the column arrived');
+  assert.equal(game.province('NE').owner, 'USA');
+  assert.ok(game.province('NE').garrison > before, 'the men reached the mainland');
+  assert.equal(game.province('NW').owner, 'BNA', 'Canada was not attacked on the way');
+  assert.equal(game.hasWar('USA', 'BNA'), false);
+});
+
+test('a right of passage costs time on the road', () => {
+  const game = alaskaGame();
+  game.state.relations['BNA|USA'] = { truceUntil: 0, passage: { BNA: game.state.time + BAL.passageTruce } };
+  const route = game.routeBetween('AK', 'NE', 'USA');
+  const bare = route.reduce((sum, id, i) => (i ? sum + game.travelTime(route[i - 1], id) : 0), 0);
+  assert.ok(game.routeTime(route, 'USA') > bare + 0.1, 'foreign soil is slower than own');
+});
+
+test('attacking the nation that gave the passage tears the treaty up', () => {
+  const game = alaskaGame();
+  game.state.relations['BNA|USA'] = { truceUntil: 0, passage: { BNA: game.state.time + BAL.passageTruce } };
+  const check = game.canSend('AK', 'NW');
+  assert.equal(check.ok, true);
+  assert.equal(check.betrayal, 'BNA', 'the UI has to warn about the betrayal');
+
+  const before = game.player.oathbreaks ?? 0;
+  const sent = game.sendTroops('AK', 'NW', 0.9);
+  assert.equal(sent.ok, true, sent.reason);
+  assert.equal(game.hasPassage('BNA', 'USA'), false, 'the road is closed');
+  assert.equal(game.hasWar('USA', 'BNA'), true, 'and it is a war');
+  assert.equal(game.player.oathbreaks, before + 1, 'a broken road is a broken word');
+  assert.equal(game.holdsGrudge('BNA', 'USA'), true);
+});
+
+test('war lasts until peace, not for a fixed window', () => {
+  const game = makeGame();
+  game.launchArmy('FRA', 'FR', 'DE', 0.3);
+  assert.equal(game.hasWar('FRA', 'PRU'), true, 'marching at Prussia starts a war');
+  // A quiet front does not end it: the old "recent clash" window expires.
+  game.state.time += BAL.peaceTalksWindow * 3;
+  assert.equal(game.hasWar('FRA', 'PRU'), true);
+  const wars = game.warsOf('FRA');
+  assert.deepEqual(wars.map((w) => w.id), ['PRU']);
+
+  game.state.offers.push({ id: 'peace-war', from: 'PRU', kind: 'peace', expires: game.state.time + 45 });
+  assert.equal(game.answerPeace('peace-war', true).accepted, true);
+  assert.equal(game.hasWar('FRA', 'PRU'), false, 'peace ends the war');
+  assert.equal(game.warsOf('FRA').length, 0);
+});
+
+test('breaking a truce starts a war at once', () => {
+  const game = makeGame();
+  game.state.relations['FRA|PRU'] = { truceUntil: game.state.time + 300, kind: 'pact' };
+  game.breakTruce('FRA', 'PRU');
+  assert.equal(game.hasWar('FRA', 'PRU'), true);
+});
+
+test('a right of passage is refused to an enemy', () => {
+  const game = alaskaGame();
+  game.state.relations['BNA|USA'] = { truceUntil: 0, warSince: game.state.time - 10 };
+  assert.ok(game.passageOutlook('BNA') < 0.05);
+  const answer = game.requestPassage('BNA');
+  assert.equal(answer.ok, false);
+  assert.match(answer.reason, /мир/i);
+});
+
+test('the player can ask for a passage, and an accepted one opens the road', () => {
+  const game = alaskaGame();
+  game.rng.chance = () => true; // the roll is tested through passageOutlook
+  const answer = game.requestPassage('BNA');
+  assert.equal(answer.ok, true, answer.reason);
+  assert.equal(answer.accepted, true);
+  assert.equal(game.hasPassage('BNA', 'USA'), true);
+  assert.ok(game.passageLeft('BNA', 'USA') > 0);
+  assert.deepEqual(game.passagesOf('USA').map((p) => p.id), ['BNA']);
+  assert.equal(game.requestPassage('BNA').ok, false, 'no asking twice in a row');
+});
+
+test('a refused passage is not offered again right away', () => {
+  const game = alaskaGame();
+  game.rng.chance = () => false;
+  const answer = game.requestPassage('BNA');
+  assert.equal(answer.accepted, false);
+  assert.equal(game.hasPassage('BNA', 'USA'), false);
+  const again = game.requestPassage('BNA');
+  assert.equal(again.ok, false);
+  assert.match(again.reason, /позже/i);
+});
+
+test('an AI can ask the player for a road, and the player can accept it', () => {
+  const game = alaskaGame();
+  const offer = game.offerPassage('BNA');
+  assert.equal(offer.ok, true, offer.reason);
+  assert.equal(offer.offer.kind, 'passage');
+  assert.equal(game.answerPeace(offer.offer.id, true).accepted, true);
+  assert.equal(game.hasPassage('USA', 'BNA'), true, 'the player granted the road');
+  assert.deepEqual(game.passageHolders('BNA'), ['USA']);
+});
+
+test('passages are told apart by direction', () => {
+  const game = alaskaGame();
+  game.rng.chance = () => true;
+  game.requestPassage('BNA');
+  assert.deepEqual(game.passagesOf('USA').map((p) => p.id), ['BNA'], 'Canada lets us through');
+  assert.deepEqual(game.passagesGrantedBy('USA'), [], 'we did not let Canada through');
+  assert.deepEqual(game.passagesGrantedBy('BNA').map((p) => p.id), ['USA']);
+  const offer = game.offerPassage('BNA');
+  if (offer.ok) game.answerPeace(offer.offer.id, true);
+  assert.deepEqual(game.passagesGrantedBy('USA').map((p) => p.id), ['BNA'], 'now we do');
+  assert.equal(game.passagesOf('USA').length, 1);
+});
+
+test('a friendly column crossing our land is not announced as an attack', () => {
+  const game = alaskaGame();
+  // Canada sits in Alaska and marches at Mexico; the only road is through the
+  // USA, which let it through. That is a transit, not a war.
+  game.state.provinces.AK.owner = 'BNA';
+  game.state.provinces.NW.owner = 'USA';
+  game.state.provinces.WE.owner = 'USA';
+  // A neutral target: the column leaves our land and fights no one on the way.
+  game.state.provinces.MX.owner = null;
+  game.state.provinces.MX.garrison = 0;
+  game.state.relations[Game.pairKey('USA', 'BNA')] = {
+    truceUntil: 0,
+    passage: { USA: game.state.time + BAL.passageTruce },
+  };
+  const before = game.state.log.length;
+  const marched = game.launchRouteFor('BNA', 'AK', 'MX', 0.5);
+  const lines = game.state.log.slice(before).map((line) => line.text);
+  assert.ok(marched > 0, 'the AI used the road');
+  assert.deepEqual(game.routeBetween('AK', 'MX', 'BNA').slice(0, 3), ['AK', 'NW', 'WE']);
+  assert.equal(
+    lines.some((line) => /ведёт|ведут/.test(line)),
+    false,
+    `transit was announced as an attack: ${lines.join(' | ')}`,
+  );
+  // The arrival is a war with Mexico, not with the country that gave the road.
+  for (let i = 0; i < 900 && game.state.armies.some((a) => a.owner === 'BNA'); i += 1) game.update(0.1);
+  assert.equal(game.hasWar('BNA', 'USA'), false, 'no war with the host');
+  assert.equal(game.hasPassage('USA', 'BNA'), true, 'the road stays open');
+});
+
+test('a column whose passage is revoked mid-march is turned back, not lost', () => {
+  const game = alaskaGame();
+  game.state.relations['BNA|USA'] = { truceUntil: 0, passage: { BNA: game.state.time + BAL.passageTruce } };
+  const sent = game.sendTroops('AK', 'NE', 0.6);
+  assert.equal(sent.ok, true, sent.reason);
+  const army = game.state.armies.find((a) => a.owner === 'USA');
+  assert.ok(army, 'the column is on the road');
+  const troops = army.troops;
+  // The permission is cancelled while the men are still on Canadian soil.
+  game.state.relations['BNA|USA'].passage = {};
+  let steps = 0;
+  while (game.state.armies.some((a) => a.id === army.id) && steps < 400) {
+    game.update(0.1);
+    steps += 1;
+  }
+  const lost = troops - (game.province('AK').garrison - 0);
+  assert.ok(game.province('AK').garrison >= troops * 0.9, `men came home: ${game.province('AK').garrison} of ${troops} (lost ${lost})`);
+  assert.equal(game.province('NW').owner, 'BNA', 'Canada was not attacked');
+  assert.equal(game.hasWar('USA', 'BNA'), false);
+});
+
+test('the drag highlight lights up the far side of a right of passage', () => {
+  const game = alaskaGame();
+  const without = game.routeTargets('AK');
+  assert.equal(without.has('NE'), false, 'without a passage the mainland is not a target');
+  game.rng.chance = () => true;
+  game.requestPassage('BNA');
+  const withPassage = game.routeTargets('AK');
+  assert.equal(withPassage.has('NE'), true, 'the mainland is now reachable');
+  assert.equal(withPassage.has('MW'), true);
+  assert.equal(withPassage.has('AK'), false, 'the source itself is not a target');
+});
+
+test('a passage survives a save and a reload', () => {
+  const game = alaskaGame();
+  game.rng.chance = () => true;
+  game.requestPassage('BNA');
+  const save = JSON.parse(JSON.stringify(game.serialize()));
+  const restored = Game.deserialize(save, worldMap);
+  assert.ok(restored, 'the save loads');
+  assert.equal(restored.hasPassage('BNA', 'USA'), true);
+  assert.ok(restored.routeBetween('AK', 'NE', 'USA'), 'the road is still there');
+});

@@ -33,6 +33,7 @@ export class App {
     this.theatre = 'europe';
     this.mapMode = 'europe';
     this.panelFolded = false;
+    this.rankTab = 'nations';
     this.panelFoldTimer = null;
     this.autoFrom = null;
     this.map = maps[this.theatre];
@@ -806,7 +807,8 @@ export class App {
       const plan = this.routePlanner;
       if (!plan) return;
       const name = (id) => game.provinceName(id);
-      const total = plan.route.reduce((sum, id, i) => (i === 0 ? 0 : sum + Math.round(game.travelTime(plan.route[i - 1], id))), 0);
+      const total = Math.round(game.routeTime(plan.route));
+      const through = game.routeThrough(plan.route);
       const leftTotal = Object.values(plan.leave).reduce((a, b) => a + b, 0);
       const rows = plan.route
         .slice(1, -1)
@@ -826,6 +828,11 @@ export class App {
         <h4>План похода</h4>
         <div class="rc-path">${[plan.route[0], ...plan.route.slice(1)].map(name).join(' → ')}</div>
         <div class="rc-meta">${plan.route.length - 1} ${plan.route.length - 1 === 1 ? 'переход' : plan.route.length - 1 < 5 ? 'перехода' : 'переходов'} · примерно ${total} с · в колонне ${fmt(sendable)} чел.</div>
+        ${
+          through.length
+            ? `<div class="rc-through">Транзит по праву прохода: ${through.map((id) => game.state.nations[id]?.short ?? id).join(', ')} · на чужой земле дорога медленнее на ${Math.round((BAL.passageTravelMul - 1) * 100)}%</div>`
+            : ''
+        }
         <div class="rc-rows">${
           rows ||
           `<div class="rc-row"><span>Промежуточных провинций нет</span><span></span></div>`
@@ -860,6 +867,22 @@ export class App {
       return;
     }
     if (this.routePlanner) this.#closeRoutePlanner();
+    // Marching into the land of the nation that let us through is a betrayal:
+    // it is allowed, but only after a second, deliberate drag.
+    const check = this.game.canSend(from, to);
+    if (check.betrayal) {
+      const owner = check.betrayal;
+      const name = this.game.state.nations[owner]?.short ?? 'противник';
+      const now = performance.now();
+      if (!(this.pendingBreak?.owner === owner && now - this.pendingBreak.at < 12000)) {
+        this.pendingBreak = { owner, at: now };
+        this.#toast(`Проход через ${name}: нападение отменит договор. Перетащите ещё раз`, 'bad');
+        this.world.setSelected(from);
+        this.#updateHud();
+        return;
+      }
+      this.pendingBreak = null;
+    }
     let result = this.game.sendTroops(from, to);
     if (!result.ok && result.needsBreak) {
       const owner = result.with;
@@ -888,7 +911,11 @@ export class App {
     }
     sfx.march();
     const hop = result.route && result.route.length > 2 ? ` через ${result.route.length - 2} пров.` : '';
-    this.#toast(`${fmt(result.amount)} в походе${result.sea ? ' морем' : ''}${hop}`, 'good');
+    const neighbours = (result.through ?? [])
+      .map((id) => this.game.state.nations[id]?.short ?? id)
+      .join(', ');
+    const transit = neighbours ? ` · проход: ${neighbours}` : '';
+    this.#toast(`${fmt(result.amount)} в походе${result.sea ? ' морем' : ''}${hop}${transit}`, 'good');
     this.world.setValidTargets([]);
     this.world.setSelected(from);
     // Sending troops must not pop the province card over the map every time.
@@ -1078,6 +1105,9 @@ export class App {
   #offerText(offer) {
     const game = this.game;
     const left = Math.max(0, Math.ceil(offer.expires - game.state.time));
+    if (offer.kind === 'passage') {
+      return `Право прохода: ${Math.round(BAL.passageTruce)} с их колонны могут идти через вашу землю. Решение за вами — ${left} с.`;
+    }
     const pact = offer.kind === 'pact';
     return pact
       ? `Пакт о ненападении: ${Math.round(BAL.pactTruce)} с без нападений. Решение за вами — ${left} с.`
@@ -1105,6 +1135,7 @@ export class App {
         .map((offer) => {
           const nation = game.state.nations[offer.from];
           const pact = offer.kind === 'pact';
+          const passage = offer.kind === 'passage';
           return `
           <div class="offer-row" data-offer="${offer.id}">
             <span class="offer-dot" style="--swatch:${nation?.color ?? '#888'}"></span>
@@ -1113,8 +1144,8 @@ export class App {
               <span data-offer-text="${offer.id}">${this.#offerText(offer)}</span>
             </div>
             <div class="offer-actions">
-              <button class="btn small primary" data-answer="1">${pact ? 'Принять пакт' : 'Принять'}</button>
-              <button class="btn small ghost" data-answer="0">${pact ? 'Отклонить' : 'Воевать'}</button>
+              <button class="btn small primary" data-answer="1">${pact ? 'Принять пакт' : passage ? 'Пустить' : 'Принять'}</button>
+              <button class="btn small ghost" data-answer="0">${pact ? 'Отклонить' : passage ? 'Не пускать' : 'Воевать'}</button>
             </div>
           </div>`;
         })
@@ -1330,6 +1361,7 @@ export class App {
       </div>
 
       ${isMine ? this.#autoInline(province.id) : ''}
+      ${isMine ? this.#passageInline() : ''}
       ${!isMine && owner ? this.#diploBlock(owner) : ''}
       ${
         isMine
@@ -1489,34 +1521,62 @@ export class App {
     const me = game.state.nationId;
     if (owner.id === me) return '';
     const left = Math.ceil(game.truceLeft(owner.id));
+    const passage = Math.ceil(game.passageLeft(owner.id, me));
     const fought = game.hasFoughtRecently(owner.id, me);
-    if (left > 0) {
-      return `
-        <div class="pp-diplo has-pact">
-          <div class="pp-pact"><i></i>Пакт о ненападении · ещё ${left} с</div>
-          <div class="pp-pact-row">
-            <button class="pp-action danger" data-break="${owner.id}">Нарушить пакт</button>
-            <p class="pp-warn">Нападение нарушит договор. Это запомнят.</p>
-          </div>
-        </div>`;
-    }
-    const wait = Math.ceil((owner.pactAskedUntil ?? 0) - game.state.time);
-    const outlook = game.pactOutlook(owner.id);
-    const hint = outlook >= 0.6
-      ? 'Скорее согласятся'
-      : outlook >= 0.38
-        ? 'Могут согласиться'
-        : outlook >= 0.22
-          ? 'Вряд ли согласятся'
-          : 'Почти наверняка откажут';
+    const waitPact = Math.ceil((owner.pactAskedUntil ?? 0) - game.state.time);
+    const waitPass = Math.ceil((owner.passageAskedUntil ?? 0) - game.state.time);
+    const word = (value) =>
+      value >= 0.6 ? 'Скорее согласятся' : value >= 0.38 ? 'Могут согласиться' : value >= 0.22 ? 'Вряд ли согласятся' : 'Почти наверняка откажут';
+    const pactRow = left > 0
+      ? `<div class="pp-pact"><i></i>Пакт о ненападении · ещё ${left} с</div>
+         <div class="pp-diplo-row">
+           <button class="pp-action danger" data-break="${owner.id}">Нарушить пакт</button>
+           <span class="pp-diplo-hint">Нападение нарушит договор. Это запомнят.</span>
+         </div>`
+      : `<div class="pp-diplo-row">
+           <button class="pp-action" data-pact="${owner.id}" ${waitPact > 0 ? 'disabled' : ''}>
+             ${fought ? 'Предложить мир' : 'Предложить пакт'}
+           </button>
+           <span class="pp-diplo-hint">${waitPact > 0 ? `Ответят через ${waitPact} с` : word(game.pactOutlook(owner.id))}</span>
+         </div>`;
+    const passRow = passage > 0
+      ? `<div class="pp-pact pass"><i></i>Право прохода · ещё ${passage} с</div>
+         <p class="pp-warn soft">Ваши колонны могут идти через землю ${owner.short}. Нападение отменит проход.</p>`
+      : `<div class="pp-diplo-row">
+           <button class="pp-action" data-passage="${owner.id}" ${waitPass > 0 ? 'disabled' : ''}>Попросить проход</button>
+           <span class="pp-diplo-hint">${
+             waitPass > 0
+               ? `Ответят через ${waitPass} с`
+               : game.hasWar(owner.id, me)
+                 ? 'Сначала нужен мир'
+                 : word(game.passageOutlook(owner.id))
+           }</span>
+         </div>`;
     const oath = game.player.oathbreaks ?? 0;
     return `
       <div class="pp-diplo">
-        <button class="pp-action" data-pact="${owner.id}" ${wait > 0 ? 'disabled' : ''}>
-          ${fought ? 'Предложить мир' : 'Предложить пакт'}
-        </button>
-        <span class="pp-diplo-hint">${wait > 0 ? `Ответят через ${wait} с` : hint}</span>
-        ${oath > 0 ? `<p class="pp-warn soft">Нарушено пактов: ${oath} — вам верят меньше.</p>` : ''}
+        ${pactRow}
+        ${passRow}
+        ${oath > 0 ? `<p class="pp-warn soft">Нарушено договоров: ${oath} — вам верят меньше.</p>` : ''}
+      </div>`;
+  }
+
+  /** Rights of passage that involve the player, shown on their own province. */
+  #passageInline() {
+    const game = this.game;
+    const me = game.state.nationId;
+    const mine = game.passagesOf(me); // they let our columns through
+    const theirs = game.passagesGrantedBy(me); // we let their columns through
+    if (!mine.length && !theirs.length) return '';
+    const name = (id) => game.state.nations[id]?.short ?? id;
+    const rows = [
+      ...mine.map(({ id, left }) => `<span class="pp-pass-tag" title="Ваши войска могут идти через эту страну">→ ${name(id)} · ${Math.ceil(left)} с</span>`),
+      ...theirs.map(({ id, left }) => `<span class="pp-pass-tag back" title="Их войска могут идти через вашу землю">← ${name(id)} · ${Math.ceil(left)} с</span>`),
+    ];
+    return `
+      <div class="pp-passages">
+        <span class="pp-pass-label">Право прохода</span>
+        <div class="pp-pass-list">${rows.join('')}</div>
       </div>`;
   }
 
@@ -1826,11 +1886,54 @@ export class App {
     summary.textContent = describeRules(rules);
   }
 
+  /** Pact / peace with one nation, from the province card or the diplomacy list. */
+  #askPact(nationId) {
+    const result = this.game.proposePact(nationId);
+    const name = this.game.state.nations[nationId]?.short ?? 'противник';
+    if (!result.ok) this.#toast(result.reason, 'bad');
+    else if (result.accepted) {
+      this.#toast(result.kind === 'peace' ? `Мир с ${name}` : `Пакт с ${name}`, 'good');
+      sfx.select();
+    } else this.#toast(`${name}: отказ. Сила и усталость решают — попробуйте позже`, 'bad');
+    this.#afterDiplomacy();
+  }
+
+  /** Right of passage: the answer is a real treaty with a timer. */
+  #askPassage(nationId) {
+    const result = this.game.requestPassage(nationId);
+    const name = this.game.state.nations[nationId]?.short ?? 'противник';
+    if (!result.ok) this.#toast(result.reason, 'bad');
+    else if (result.accepted) {
+      this.#toast(`${name}: право прохода на ${Math.round(BAL.passageTruce)} с`, 'good');
+      sfx.select();
+    } else this.#toast(`${name}: проход не дали`, 'bad');
+    this.#afterDiplomacy();
+  }
+
+  #afterDiplomacy() {
+    this.#renderProvincePanel();
+    this.#updateHud();
+    if (!$('#modal-rankings').classList.contains('hidden')) this.#renderRankings();
+  }
+
   #openRankings() {
     if (!this.game) return;
     sfx.click();
     $('#modal-rankings').classList.remove('hidden');
+    this.#applyRankTab();
     this.#renderRankings();
+  }
+
+  /** «Державы» and «Переговоры» are tabs: both lists do not fit one screen. */
+  #applyRankTab() {
+    const tab = this.rankTab ?? 'nations';
+    for (const button of document.querySelectorAll('#rank-tabs [data-rank-tab]')) {
+      button.classList.toggle('active', button.dataset.rankTab === tab);
+      button.setAttribute('aria-selected', String(button.dataset.rankTab === tab));
+    }
+    for (const pane of document.querySelectorAll('#modal-rankings [data-rank-pane]')) {
+      pane.classList.toggle('hidden', pane.dataset.rankPane !== tab);
+    }
   }
 
   #renderRankings() {
@@ -1883,29 +1986,96 @@ export class App {
     if (!block || !this.game) return;
     const game = this.game;
     const player = game.player;
-    const truces = game.trucesOf(player.id)
+    const name = (id) => game.state.nations[id]?.short ?? id;
+    const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const wars = game
+      .warsOf(player.id)
+      .map((war) => `<span class="diplo-tag war">${name(war.id)} · ${clock(war.left)}</span>`);
+    const truces = game
+      .trucesOf(player.id)
       .sort((a, b) => a.left - b.left)
       .map(
-        (truce) =>
-          `<span class="diplo-tag">${game.state.nations[truce.id]?.short ?? truce.id} · мир ${Math.ceil(truce.left)} с</span>`,
+        (truce) => `<span class="diplo-tag is-pact">${name(truce.id)} · ${Math.ceil(truce.left)} с</span>`,
       );
+    const passages = game
+      .passagesOf(player.id)
+      .map((pass) => `<span class="diplo-tag pass">${name(pass.id)} · ${Math.ceil(pass.left)} с</span>`);
     const morale = Math.round(player.morale ?? 55);
     const exhaustion = Math.round(player.exhaustion ?? 0);
     const incomePenalty = Math.round(exhaustion * BAL.exhaustionIncome);
+    const oath = player.oathbreaks ?? 0;
+    const trust = Math.max(0, 100 - oath * 17);
+    // A compact strip instead of five label rows: on a landscape phone the rows
+    // ate the whole visible part of the dialog and the negotiation list — the
+    // reason the player opened the screen — fell below the fold.
     block.innerHTML = `
-      <div class="diplo-row">
-        <span class="diplo-label">Ваш дух</span>
-        <span class="diplo-value ${morale <= 40 ? 'is-bad' : morale >= 65 ? 'is-good' : ''}">${morale} / 100</span>
-        <span class="diplo-hint">влияет на силу боя: ${morale >= 50 ? '+' : ''}${((game.moraleModifier(player.id) - 1) * 100).toFixed(0)}%</span>
+      <div class="diplo-brief">
+        <span class="db-spirit"><em>Дух</em> <b class="${morale <= 40 ? 'is-bad' : morale >= 65 ? 'is-good' : ''}">${morale}</b> <i>${morale >= 50 ? '+' : ''}${((game.moraleModifier(player.id) - 1) * 100).toFixed(0)}% к бою</i></span>
+        <span class="db-wear"><em>Усталость</em> <b class="${exhaustion >= 55 ? 'is-bad' : ''}">${exhaustion}%</b> <i>${incomePenalty > 0 ? `доход −${incomePenalty}%` : 'без штрафа'}</i></span>
+        <span class="db-trust"><em>Доверие</em> <b class="${oath ? 'is-bad' : 'is-good'}">${trust}%</b> <i>${oath ? `нарушено договоров: ${oath}` : 'слово держите'}</i></span>
       </div>
-      <div class="diplo-row">
-        <span class="diplo-label">Военная усталость</span>
-        <span class="diplo-value ${exhaustion >= 55 ? 'is-bad' : ''}">${exhaustion}%</span>
-        <span class="diplo-hint">доход ${incomePenalty > 0 ? `−${incomePenalty}%` : 'без штрафа'}</span>
+      <div class="diplo-line">
+        <em>Войны</em>
+        <span class="diplo-tags">${wars.length ? wars.join('') : '<span class="diplo-empty">нет — мирное время</span>'}</span>
       </div>
-      <div class="diplo-row">
-        <span class="diplo-label">Перемирия</span>
-        <span class="diplo-tags">${truces.length ? truces.join('') : '<span class="diplo-empty">нет</span>'}</span>
+      <div class="diplo-line">
+        <em>Договоры</em>
+        <span class="diplo-tags">${[...truces, ...passages].join('') || '<span class="diplo-empty">нет</span>'}</span>
+      </div>`;
+    const nations = $('#diplo-nations');
+    if (nations) nations.innerHTML = this.#diploNations();
+  }
+
+  /**
+   * The negotiation screen: every living nation, its current relation with the
+   * player, and the two things one can ask for. This replaced a lonely «Пакт»
+   * button inside a province card — the player had no way to see who is at war
+   * with whom, how long a treaty lasts, or why nobody signs.
+   */
+  #diploNations() {
+    const game = this.game;
+    const me = game.state.nationId;
+    const rows = Object.values(game.state.nations)
+      .filter((nation) => nation.id !== me && nation.alive)
+      .sort((a, b) => game.provinceCount(b.id) - game.provinceCount(a.id))
+      .map((nation) => {
+        const war = game.warSince(nation.id, me);
+        const truce = game.truceLeft(nation.id);
+        const passage = game.passageLeft(nation.id, me);
+        const pactWait = Math.ceil((nation.pactAskedUntil ?? 0) - game.state.time);
+        const passWait = Math.ceil((nation.passageAskedUntil ?? 0) - game.state.time);
+        const chips = [];
+        if (war != null) {
+          const left = Math.max(0, game.state.time - war);
+          chips.push(`<span class="dn-chip is-war">война ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}</span>`);
+        }
+        if (truce > 0) chips.push(`<span class="dn-chip is-pact">${truce >= 200 ? 'пакт' : 'мир'} ${Math.ceil(truce)} с</span>`);
+        if (passage > 0) chips.push(`<span class="dn-chip is-pass">проход ${Math.ceil(passage)} с</span>`);
+        if (!chips.length) chips.push('<span class="dn-chip is-none">нейтралитет</span>');
+        const pactLabel = war != null ? 'Мир' : 'Пакт';
+        const passBlocked = passage > 0 || war != null || passWait > 0;
+        const power = Math.round(game.armyTotal(nation.id));
+        return `
+          <div class="dn-row">
+            <span class="dn-nation">
+              <i class="rank-swatch" style="--swatch:${nation.color}"></i>
+              <b>${nation.short}</b>
+              <em>${power} чел.</em>
+            </span>
+            <span class="dn-state">${chips.join('')}</span>
+            <span class="dn-actions">
+              <button class="dn-btn" data-rank-pact="${nation.id}" ${truce > 0 || pactWait > 0 ? 'disabled' : ''}>
+                ${truce > 0 ? 'Пакт' : pactLabel}
+              </button>
+              <button class="dn-btn" data-rank-passage="${nation.id}" ${passBlocked ? 'disabled' : ''}>Проход</button>
+            </span>
+          </div>`;
+      });
+    if (!rows.length) return '';
+    return `
+      <div class="dn-block">
+        <div class="dn-head"><span>Переговоры</span><em>пакт — не воевать · проход — ходить через землю</em></div>
+        ${rows.join('')}
       </div>`;
   }
 
@@ -2120,6 +2290,26 @@ export class App {
     this.#wireLogDock();
     $('#btn-pause-menu').addEventListener('click', () => this.openPause());
     $('#btn-rankings').addEventListener('click', () => this.#openRankings());
+    $('#rank-tabs').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-rank-tab]');
+      if (!button) return;
+      this.rankTab = button.dataset.rankTab;
+      this.#applyRankTab();
+      sfx.click();
+    });
+    // Delegated: the negotiation list is rebuilt on every tick of the modal.
+    $('#diplo-nations').addEventListener('click', (event) => {
+      if (!this.game) return;
+      const pact = event.target.closest('[data-rank-pact]');
+      if (pact) {
+        if (!pact.disabled) this.#askPact(pact.dataset.rankPact);
+        return;
+      }
+      const passage = event.target.closest('[data-rank-passage]');
+      if (passage) {
+        if (!passage.disabled) this.#askPassage(passage.dataset.rankPassage);
+      }
+    });
 
     for (const button of $('#ratio-group').children) {
       button.addEventListener('click', () => {
@@ -2179,8 +2369,9 @@ export class App {
         }
         sfx.march();
         const kept = Object.values(plan.leave).reduce((a, b) => a + b, 0);
+        const via = (result.through ?? []).map((id) => this.game.state.nations[id]?.short ?? id).join(', ');
         this.#toast(
-          `${fmt(result.amount - kept)} в походе через ${plan.route.length - 2} пров.${kept ? `, ${fmt(kept)} остаётся` : ''}`,
+          `${fmt(result.amount - kept)} в походе через ${plan.route.length - 2} пров.${via ? ` (${via})` : ''}${kept ? `, ${fmt(kept)} остаётся` : ''}`,
           'good',
         );
         this.world.setValidTargets([]);
@@ -2246,14 +2437,13 @@ export class App {
       const pactButton = event.target.closest('[data-pact]');
       if (pactButton && this.game) {
         if (pactButton.disabled) return;
-        const result = this.game.proposePact(pactButton.dataset.pact);
-        if (!result.ok) this.#toast(result.reason, 'bad');
-        else if (result.accepted) {
-          this.#toast(result.kind === 'peace' ? 'Мир заключён' : 'Пакт подписан', 'good');
-          sfx.select();
-        } else this.#toast('Отказались. Сила и усталость решают — попробуйте позже', 'bad');
-        this.#renderProvincePanel();
-        this.#updateHud();
+        this.#askPact(pactButton.dataset.pact);
+        return;
+      }
+      const passageButton = event.target.closest('[data-passage]');
+      if (passageButton && this.game) {
+        if (passageButton.disabled) return;
+        this.#askPassage(passageButton.dataset.passage);
         return;
       }
       const breakButton = event.target.closest('[data-break]');

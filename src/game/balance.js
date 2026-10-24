@@ -93,6 +93,15 @@ export const BAL = {
   pactTruce: 240, // a non-aggression pact lasts longer than a peace deal
   pactRelief: 10, // ...but calms the rivals down less
 
+  // Right of passage: a signed permission to march through someone else's
+  // land. It is shorter than a pact (it is given for a single campaign, not
+  // for a friendship) and costs time on the road: foreign soil is not a road
+  // works project of yours.
+  passageTruce: 180,
+  passageTravelMul: 1.15,
+  passageAskCooldown: 120,
+  passageAskCooldownAfterRefusal: 200,
+
   // Orders
   orderCooldown: 55,
   orderGold: { mobilize: 45, tax: 15, march: 20 },

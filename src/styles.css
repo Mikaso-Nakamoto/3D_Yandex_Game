@@ -2832,7 +2832,9 @@ kbd {
   top: 104px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 6;
+  /* Above the transient toasts: an offer is a decision with a countdown, and a
+     random battle report must not cover the text the player has to read. */
+  z-index: 9;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -4535,4 +4537,535 @@ kbd {
 
 .pp-mini:hover {
   background: rgba(243, 200, 90, 0.18);
+}
+
+/* ---------------------------------------------------------------- right of passage & negotiations */
+
+/* A passage is a second treaty, so it gets a second row instead of fighting
+   with the pact for the same line. */
+.pp-diplo-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.pp-pact.pass {
+  color: #9fc6e0;
+}
+
+.pp-pact.pass i {
+  background: #8fb6d0;
+  box-shadow: 0 0 0 3px rgba(143, 182, 208, 0.14);
+}
+
+/* Own province: who may cross us and whose land we may cross. */
+.pp-passages {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pp-pass-label {
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pp-pass-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pp-pass-tag {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: #a9cbe2;
+  background: rgba(120, 170, 205, 0.1);
+  border: 1px solid rgba(120, 170, 205, 0.32);
+  white-space: nowrap;
+}
+
+.pp-pass-tag.back {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Transit notice inside the march planner. */
+.rc-through {
+  margin-top: 5px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #a9cbe2;
+}
+
+/* Negotiation list under the rankings table: one row per living nation. */
+.dn-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dn-head span {
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dn-head em {
+  font-style: normal;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.dn-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1.1fr) minmax(120px, 1.3fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 7px;
+  border-radius: 8px;
+  font-size: 11.5px;
+}
+
+.dn-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.dn-nation {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.dn-nation b {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dn-nation em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dn-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dn-chip {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.dn-chip.is-war {
+  color: #e2a0a0;
+  background: rgba(196, 92, 74, 0.14);
+  border-color: rgba(196, 92, 74, 0.35);
+}
+
+.dn-chip.is-pact {
+  color: #a9d3a9;
+  background: rgba(120, 180, 120, 0.12);
+  border-color: rgba(120, 180, 120, 0.3);
+}
+
+.dn-chip.is-pass {
+  color: #a9cbe2;
+  background: rgba(120, 170, 205, 0.1);
+  border-color: rgba(120, 170, 205, 0.3);
+}
+
+.dn-chip.is-none {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dn-actions {
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.dn-btn {
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(217, 180, 90, 0.1);
+  border: 1px solid rgba(217, 180, 90, 0.34);
+  border-radius: 7px;
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.dn-btn:hover:not(:disabled) {
+  background: rgba(217, 180, 90, 0.2);
+}
+
+.dn-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .dn-row {
+    grid-template-columns: minmax(80px, 1fr) minmax(90px, 1fr) auto;
+    gap: 6px;
+    font-size: 10.5px;
+  }
+
+  .dn-nation em {
+    display: none;
+  }
+
+  .dn-btn {
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+}
+
+.diplo-tag.is-pact {
+  color: #a9d3a9;
+  background: rgba(120, 180, 120, 0.1);
+  border-color: rgba(120, 180, 120, 0.3);
+}
+
+.diplo-tag.pass {
+  color: #a9cbe2;
+  background: rgba(120, 170, 205, 0.1);
+  border-color: rgba(120, 170, 205, 0.3);
+}
+
+.diplo-tag.war {
+  color: #e2a0a0;
+  background: rgba(196, 92, 74, 0.14);
+  border-color: rgba(196, 92, 74, 0.35);
+}
+
+/* ---------------------------------------------------------------- rankings tabs */
+
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.modal-tabs button {
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.modal-tabs button:hover {
+  color: var(--ink);
+}
+
+.modal-tabs button.active {
+  color: #1a1409;
+  background: var(--gold);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.rank-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.rank-pane.hidden {
+  display: none;
+}
+
+/* The summary rows hold tags, not one short value: let the content wrap instead
+   of pushing the hint under the label. */
+.diplo-row:last-child {
+  grid-template-columns: 160px 90px 1fr;
+}
+
+@media (max-width: 720px) {
+  .diplo-row,
+  .diplo-row:last-child {
+    grid-template-columns: 96px 60px 1fr;
+    gap: 8px;
+  }
+
+  .modal-tabs button {
+    padding: 6px 11px;
+    font-size: 11px;
+  }
+}
+
+/* Compact diplomacy summary: one readable line, no boxes. The old five-row
+   table looked tidy on a monitor and pushed the nation list off a phone. */
+.diplo-brief {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.diplo-brief > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.diplo-brief em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.diplo-brief b {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diplo-brief b.is-good {
+  color: #8fc98a;
+}
+
+.diplo-brief b.is-bad {
+  color: #d98a7f;
+}
+
+.diplo-brief i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.diplo-line {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.diplo-line em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.diplo {
+  gap: 7px;
+}
+
+@media (max-width: 720px) {
+  .diplo-line {
+    grid-template-columns: 74px 1fr;
+    gap: 8px;
+  }
+
+}
+
+@media (max-width: 430px) {
+  .diplo-brief i {
+    display: none;
+  }
+}
+
+/* Short landscape phones: the explanation is the first thing to go, the list of
+   nations and the two buttons are the reason the dialog was opened. */
+@media (max-height: 560px) and (orientation: landscape) {
+  /* On a landscape phone the HUD wraps to a second row higher than on a
+     monitor, so the offer has to start below it. */
+  .offer-card {
+    top: 118px;
+  }
+
+  #modal-rankings .modal-sub {
+    display: none;
+  }
+
+  /* Spirit and weariness are already in the HUD chip row behind this dialog;
+     repeating them here cost the list two rows of height. */
+  .diplo-brief .db-spirit,
+  .diplo-brief .db-wear,
+  .diplo-brief i {
+    display: none;
+  }
+
+  /* War and treaty tags fit on one wrapped line instead of two labelled rows:
+     every saved row is another nation the player can see without scrolling. */
+  #modal-rankings .diplo {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+
+  #modal-rankings .diplo-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    grid-template-columns: none;
+  }
+
+  #modal-rankings .diplo-line em {
+    letter-spacing: 0.06em;
+  }
+
+  #modal-rankings .diplo-brief {
+    gap: 2px 10px;
+  }
+
+  #modal-rankings .modal-card {
+    padding: 16px 18px;
+  }
+
+  #modal-rankings h2 {
+    font-size: 22px;
+    margin: 2px 0 10px;
+  }
+
+  .modal-tabs {
+    margin-bottom: 9px;
+  }
+
+  .dn-row {
+    padding: 4px 6px;
+  }
+}
+
+/* The dialog itself does not scroll: the list does. Keeping the tabs, the
+   summary and the explanation fixed meant that on a landscape phone the list of
+   nations — the actual content — started below the fold. */
+#modal-rankings .modal-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: min(86vh, 720px);
+}
+
+#modal-rankings .rank-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#modal-rankings .rank-pane[data-rank-pane='nations'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#modal-rankings .rank-pane[data-rank-pane='diplomacy'] {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.rank-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  /* Scrollbars inside the game UI are styled to match the game. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 180, 90, 0.35) transparent;
+}
+
+.rank-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rank-scroll::-webkit-scrollbar-thumb {
+  background: rgba(217, 180, 90, 0.32);
+  border-radius: 99px;
+}
+
+.rank-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#modal-rankings .modal-sub {
+  flex: none;
+}
+
+/* The nation list is the content of this tab on a phone, so it takes the room
+   and the summary strip sits under it. */
+#modal-rankings #diplo-nations {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 180, 90, 0.35) transparent;
+}
+
+#modal-rankings #diplo-nations::-webkit-scrollbar {
+  width: 8px;
+}
+
+#modal-rankings #diplo-nations::-webkit-scrollbar-thumb {
+  background: rgba(217, 180, 90, 0.32);
+  border-radius: 99px;
+}
+
+#modal-rankings .diplo {
+  flex: none;
+  margin-top: 0;
+  padding: 8px 0 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  /* Solid, not translucent: the nation list scrolls right underneath and its
+     half-visible rows used to show through the summary. */
+  background: #0b1421;
+  box-shadow: 0 -10px 16px -10px rgba(0, 0, 0, 0.75);
+}
+
+#modal-rankings #diplo-nations {
+  padding-bottom: 6px;
 }

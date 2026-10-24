@@ -33,16 +33,28 @@ export function marchesVerb(name) {
   return verbFor(name, 'ведёт', 'ведут');
 }
 
+/** What exactly is being offered: «пакт о ненападении», «мир», «право прохода». */
+export function offerWhat(kind = 'peace') {
+  if (kind === 'pact') return 'пакт о ненападении';
+  if (kind === 'passage') return 'право прохода';
+  return 'мир';
+}
+
+/** «Пруссия просит право прохода» / «Османы просят право прохода». */
+export function asksVerb(name) {
+  return verbFor(name, 'просит', 'просят');
+}
+
 /** Full sentence for the event log. */
 export function offerSentence(name, kind = 'peace') {
-  const what = kind === 'pact' ? 'пакт о ненападении' : 'мир';
-  return `${name} ${offersVerb(name)} ${what}`;
+  if (kind === 'passage') return `${name} ${asksVerb(name)} право прохода`;
+  return `${name} ${offersVerb(name)} ${offerWhat(kind)}`;
 }
 
 /** Title of the offer card: no verb agreement problems, same wording. */
 export function offerTitle(name, kind = 'peace') {
-  const what = kind === 'pact' ? 'пакт о ненападении' : 'мир';
-  return `${name} ${offersVerb(name)} ${what}`;
+  if (kind === 'passage') return `${name} ${asksVerb(name)} право прохода`;
+  return `${name} ${offersVerb(name)} ${offerWhat(kind)}`;
 }
 
 /**
