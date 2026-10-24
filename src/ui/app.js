@@ -1526,7 +1526,14 @@ export class App {
     });
     for (const body of document.querySelectorAll('.modal-body')) {
       body.addEventListener('scroll', () => body.__sync?.(), { passive: true });
-      new ResizeObserver(() => body.__sync?.()).observe(body);
+      body.addEventListener('scroll', () => {
+        const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
+        body.classList.toggle('no-more', atEnd);
+      }, { passive: true });
+      new ResizeObserver(() => {
+        body.__sync?.();
+        body.classList.toggle('no-more', body.scrollHeight <= body.clientHeight + 2);
+      }).observe(body);
     }
     for (const button of document.querySelectorAll('[data-close]')) {
       button.addEventListener('click', () => {
