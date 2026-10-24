@@ -1493,6 +1493,38 @@ test('the player-visible focus text names the province and the reward', () => {
   assert.ok(name.length > 1, 'the target has a name');
 });
 
+// ---------------------------------------------------------------- population
+
+test('displayed population follows the era, not modern country sizes', async () => {
+  const { populationIndex } = await import('../src/data/population.js');
+  // 1815: Prussia must not outnumber France, and Italy is not yet a nation.
+  const concert = populationIndex({ id: 'concert' }, mapFor({ theatre: 'europe' }));
+  assert.ok(concert.get('FR') > concert.get('DE'), 'France is bigger than the German lands');
+  assert.ok(concert.get('IT') > 10, 'Italy is a real country even when unowned');
+  // 1939: the Soviet Union is the largest country in Europe.
+  const eve = populationIndex({ id: 'eve1939' }, mapFor({ theatre: 'europe' }));
+  assert.ok(eve.get('RU') > eve.get('DE'), 'the USSR is larger than Germany');
+  assert.ok(eve.get('RU') < 140, `one province of the USSR is not the whole country (${eve.get('RU')})`);
+  // The world map: China and India are the two giants of 1939.
+  const world = populationIndex({ id: 'world1939' }, mapFor({ theatre: 'world' }));
+  assert.ok(world.get('NCH') > 100, 'China is populous');
+  assert.ok(world.get('IND') > 250, 'India is populous');
+  assert.ok(world.get('BRA') < 100, `Brazil is not a giant in 1939 (${world.get('BRA')})`);
+});
+
+test('the whole map of each scenario has a believable population', async () => {
+  const { populationIndex } = await import('../src/data/population.js');
+  for (const scenario of SCENARIOS) {
+    const index = populationIndex(scenario, mapFor(scenario));
+    let total = 0;
+    for (const value of index.values()) {
+      assert.ok(Number.isFinite(value) && value >= 0, `${scenario.id}: bad population ${value}`);
+      total += value;
+    }
+    assert.ok(total > 40 && total < 4000, `${scenario.id}: ${Math.round(total)} млн is not a plausible map`);
+  }
+});
+
 // ---------------------------------------------------------------- palette
 
 test('no two nations of one scenario wear the same colour', async () => {

@@ -39,9 +39,6 @@ export const SCENARIOS = [
     startMonth: 6,
     monthsPerSecond: 0.25,
     difficulty: 'Средне',
-    // Population is shown in millions of the era: the simulation keeps its own
-    // numbers, the screen shows what a person of that century would read.
-    popScale: 0.26,
     blurb:
       'Европа после Наполеона. Пять великих держав делят континент, а Италия и Швейцария ещё ничьи. Дипломатия молчит — говорят пушки.',
     nations: [
@@ -131,9 +128,6 @@ export const SCENARIOS = [
     startMonth: 1,
     monthsPerSecond: 0.3,
     difficulty: 'Высоко',
-    // Population is shown in millions of the era: the simulation keeps its own
-    // numbers, the screen shows what a person of that century would read.
-    popScale: 0.7,
     blurb:
       'Мир замер перед большой войной. Танковые клинья, малые державы без шансов и нейтральная Прибалтика, которая вот-вот окажется между молотом и наковальней.',
     nations: [
@@ -292,9 +286,6 @@ export const SCENARIOS = [
     startMonth: 11,
     monthsPerSecond: 0.35,
     difficulty: 'Средне',
-    // Population is shown in millions of the era: the simulation keeps its own
-    // numbers, the screen shows what a person of that century would read.
-    popScale: 0.1,
     blurb:
       'Позднее Средневековье. Империя трещит по швам, унии держатся на династиях, а на востоке поднимается новая сила. Каждый сосед — соперник.',
     nations: [
@@ -417,9 +408,6 @@ function withAmerica(base, { extra = {}, nations = [], blurb, neutrals = [], bal
     theatre: 'atlantic',
     title: `${base.title}`,
     blurb,
-    // The Atlantic map adds a thinly populated continent: the same people are
-    // now spread over a bigger map, so the displayed millions are rescaled.
-    popScale: (base.popScale ?? 1) * 0.7,
     nations: [
       ...base.nations.map((nation) => ({
         ...nation,
@@ -484,9 +472,6 @@ const civil1861 = {
   startMonth: 4,
   monthsPerSecond: 0.45,
   difficulty: 'Высоко',
-    // Population is shown in millions of the era: the simulation keeps its own
-    // numbers, the screen shows what a person of that century would read.
-    popScale: 0.27,
   blurb:
     'Союз и Конфедерация делят Новый Свет, а европейские державы смотрят через океан и держат свои колонии. Каждая неделя войны дороже предыдущей.',
   nations: [
@@ -577,9 +562,6 @@ const world1939 = {
   startMonth: 9,
   monthsPerSecond: 0.12,
   difficulty: 'Высоко',
-    // Population is shown in millions of the era: the simulation keeps its own
-    // numbers, the screen shows what a person of that century would read.
-    popScale: 0.62,
   blurb:
     'Вся планета на одном столе: от Аляски до Камчатки, от Осло до Кейптауна. Сибирь связана с Америкой Беринговым проливом, а не дорогой через всю Европу. Карта листается влево и вправо без конца.',
   nations: [

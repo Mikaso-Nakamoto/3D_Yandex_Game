@@ -5,6 +5,7 @@ import { Game } from '../game/game.js';
 import { SCENARIOS, DOCTRINES, THEATRES, getScenario, hasScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
 import { assignNeutralColors } from '../data/neutral.js';
+import { populationIndex } from '../data/population.js';
 import {
   DEFAULT_RULES,
   AI_STYLE,
@@ -423,7 +424,7 @@ export class App {
         <span class="tile-bar"></span>
         <span class="tile-body">
           <span class="tile-name">${nation.short}</span>
-          <span class="tile-sub">${nation.provinces.length} пров. · ${(preview.pop * this.#popScale()).toFixed(1)} млн</span>
+          <span class="tile-sub">${nation.provinces.length} пров. · ${this.#popTotal(nation.provinces).toFixed(1)} млн</span>
           <span class="tile-army">Армия ${fmt(preview.army)}<span class="tile-diff" data-level="${difficulty.id}">${difficulty.label}</span></span>
         </span>`;
       item.addEventListener('click', () => this.#selectNation(nation.id, true));
@@ -433,9 +434,31 @@ export class App {
     this.#renderNationDetail();
   }
 
-  /** Millions shown on screen: the era's own numbers, not the simulation units. */
-  #popScale() {
-    return this.scenario?.popScale ?? this.game?.scenario?.popScale ?? 1;
+  /**
+   * Millions shown on screen. The simulation's weights are not people: each
+   * scenario has the population its century had (see data/population.js), and
+   * the index is cached per map because it never changes during a match.
+   */
+  #popIndex() {
+    const map = this.map;
+    const id = this.scenario?.id ?? this.game?.state?.scenarioId ?? '';
+    if (!map) return null;
+    if (this.popCache?.id !== id || this.popCache?.map !== map) {
+      this.popCache = { id, map, index: populationIndex(this.scenario ?? { id }, map) };
+    }
+    return this.popCache.index;
+  }
+
+  /** Population of one province, in millions. */
+  #popOf(provinceId) {
+    const index = this.#popIndex();
+    if (!index) return 0;
+    return index.get(provinceId) ?? 0;
+  }
+
+  /** Population of a nation, in millions. */
+  #popTotal(provinces) {
+    return provinces.reduce((sum, id) => sum + this.#popOf(id), 0);
   }
 
   #renderNationDetail() {
@@ -464,7 +487,7 @@ export class App {
         <span class="detail-diff" data-level="${difficulty.id}" title="${difficulty.hint}">${difficulty.label}</span>
       </div>
       <div class="detail-stats">
-        <div class="ds"><span class="k">Население</span><span class="v">${(preview.pop * this.#popScale()).toFixed(1)} млн</span></div>
+        <div class="ds"><span class="k">Население</span><span class="v">${this.#popTotal(nation.provinces).toFixed(1)} млн</span></div>
         <div class="ds"><span class="k">Доход</span><span class="v gold">+${preview.income.toFixed(1)}/с</span></div>
         <div class="ds"><span class="k">Армия</span><span class="v">${fmt(preview.army)}</span></div>
         <div class="ds"><span class="k">Рекруты</span><span class="v">+${(preview.recruits * 60).toFixed(0)}/мин</span></div>
@@ -1427,9 +1450,11 @@ export class App {
         <div class="meter ${over > 0 ? 'is-over' : ''}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>
         <div class="meter-foot">
           <span>${
+            // Every owned province replenishes from its owner's recruits, not
+            // only the player's: «Пополнение нет» on an enemy province was a lie.
             over > 0
               ? `<b class="over-note">сверх нормы +${fmt(over)}</b>`
-              : isMine
+              : regen > 0
                 ? `Пополнение +${regen.toFixed(1)}/с`
                 : 'Пополнение нет'
           }</span>
@@ -1485,7 +1510,7 @@ export class App {
               })()
             : ''
         }
-        <div class="pp-row"><span>Население</span><b>${(province.pop * this.#popScale()).toFixed(1)} млн</b></div>
+        <div class="pp-row"><span>Население</span><b>${this.#popOf(province.id).toFixed(1)} млн</b></div>
         ${
           // Income and recruits are only ever paid to the owner: on a foreign
           // province they were three rows of dashes that pushed the pact
