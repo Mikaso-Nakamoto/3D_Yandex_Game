@@ -2242,8 +2242,10 @@ kbd {
     display: none;
   }
 
+  /* The HUD wraps to a second row on a landscape phone (nation, date, gold,
+     spirit, focus, «Державы», speed): 44 px put every toast on top of it. */
   .toasts {
-    top: 44px;
+    top: 84px;
   }
 
   .menu-screen {

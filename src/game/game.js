@@ -1322,7 +1322,9 @@ export class Game {
   #moveArmies(dt) {
     const s = this.state;
     const finished = [];
-    for (const army of s.armies) {
+    // Snapshot: resolving an arrival can launch a counter-attack, and the new
+    // column must not be advanced in the same tick it was created.
+    for (const army of [...s.armies]) {
       const buff = army.owner === s.nationId && s.time < s.orders.marchUntil ? 1.6 : 1;
       army.t += dt * buff;
       if (army.t < army.duration) continue;

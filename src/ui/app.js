@@ -503,15 +503,22 @@ export class App {
     this.world.resetView();
     this.world.setAutoPan(false);
     this.world.zoomTarget = 1;
-    // On the wide Atlantic map the realm is a small patch: start the camera on
-    // the capital instead of showing two continents at once.
+    // On the wide Atlantic map the realm is a small patch: centre the camera on
+    // the *middle* of the player's lands (Britain's Canada is far from London)
+    // instead of showing two continents at once.
     if (this.map.width > 80 && this.game) {
-      // Geometry lives on the map data, not on the game state.
-      const capital = this.mapById[this.game.player.capital];
-      if (capital?.centroid) {
-        this.world.panTarget.x = capital.centroid[0];
-        this.world.panTarget.z = capital.centroid[1];
-        this.world.zoomTarget = 1.6;
+      const own = Object.values(this.game.state.provinces)
+        .filter((p) => p.owner === this.game.state.nationId)
+        .map((p) => this.mapById[p.id]?.centroid)
+        .filter(Boolean);
+      if (own.length) {
+        const cx = own.reduce((sum, c) => sum + c[0], 0) / own.length;
+        const cz = own.reduce((sum, c) => sum + c[1], 0) / own.length;
+        this.world.panTarget.x = cx;
+        this.world.panTarget.z = cz;
+        // A spread-out empire needs a wider view than a compact one.
+        const spread = Math.max(...own.map((c) => Math.hypot(c[0] - cx, c[1] - cz)));
+        this.world.zoomTarget = spread > 30 ? 1.1 : 1.55;
       }
     }
     this.labels.setVisible(this.settings.labels);
@@ -731,10 +738,14 @@ export class App {
     // many men stay in each province along the road. Neighbour moves stay
     // instant, as before.
     const route = this.game.neighbors(from).includes(to) ? null : this.game.routeBetween(from, to);
-    if (route && route.length > 2 && !this.routePlanner) {
-      this.#openRoutePlanner(from, to, route);
+    if (route && route.length > 2) {
+      // A new drag while a plan is open means the player changed their mind:
+      // replace the old plan instead of quietly sending it.
+      const same = this.routePlanner?.from === from && this.routePlanner?.to === to;
+      if (!same) this.#openRoutePlanner(from, to, route);
       return;
     }
+    if (this.routePlanner) this.#closeRoutePlanner();
     let result = this.game.sendTroops(from, to);
     if (!result.ok && result.needsBreak) {
       const owner = result.with;
