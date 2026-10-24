@@ -273,9 +273,72 @@ export function fallbackChain(game, nation, state = game.state) {
 }
 
 /**
+ * The other road out of the capital: a province on the opposite side of the
+ * country from the historical ambition. Each step is therefore a choice —
+ * «на запад» or «на восток» — and the map decides what that means.
+ */
+export function oppositeTarget(game, nation, step, taken, state = game.state) {
+  // Geography lives on the static map (`byId`), ownership on the live state.
+  const capital = game.byId[nation.capital]?.centroid;
+  const goal = game.byId[step.target]?.centroid;
+  if (!capital || !goal) return null;
+  const period = game.map?.wrap?.period;
+  // Signed shortest way round the cylinder: on the world map Kamchatka is just
+  // east of Moscow, not a whole planet west of it.
+  const delta = (a, b) => {
+    let d = a - b;
+    if (period) d = (((d + period / 2) % period) + period) % period - period / 2;
+    return d;
+  };
+  const side = Math.sign(delta(goal[0], capital[0])) || 1;
+  const goalOwner = state.provinces[step.target]?.owner ?? null;
+  const owned = Object.entries(state.provinces).filter(([, p]) => p.owner === nation.id);
+  const seen = new Set(taken);
+  seen.add(step.target);
+  let best = null;
+  for (const [id] of owned) {
+    for (const nid of game.neighbors(id)) {
+      const p = state.provinces[nid];
+      const geo = game.byId[nid];
+      if (!geo?.centroid || !p || p.owner === nation.id || seen.has(nid)) continue;
+      const dx = delta(geo.centroid[0], capital[0]);
+      const dy = geo.centroid[1] - capital[1];
+      const dist = game.distance(nation.capital, nid);
+      // Farther side of the country first, then a different neighbour: the
+      // worst answer would be «the same war you already planned, one province
+      // to the left».
+      const opposite = Math.sign(dx) === -side && Math.abs(dx) >= 0.5;
+      const otherWar = goalOwner == null || p.owner !== goalOwner;
+      const score = (opposite ? 0 : 2) + (otherWar ? 0 : 1);
+      const candidate = { id: nid, dist, dx, dy, score };
+      if (!best || candidate.score < best.score || (candidate.score === best.score && dist < best.dist)) {
+        best = candidate;
+      }
+    }
+  }
+  if (!best) return null;
+  const word =
+    Math.abs(best.dx) >= Math.abs(best.dy)
+      ? best.dx < 0
+        ? 'запад'
+        : 'восток'
+      : best.dy < 0
+        ? 'север'
+        : 'юг';
+  return {
+    name: `Поход на ${word}`,
+    target: best.id,
+    gold: step.gold,
+    morale: step.morale,
+    done: false,
+  };
+}
+
+/**
  * Builds the chain a nation starts with: hand-written ambitions first, then a
  * generated tail, and any target that is already its own is dropped. A chain is
  * never empty: if every ambition is already fulfilled, the generated one is used.
+ * Every step also carries an `alt` — the same reward for a push the other way.
  */
 export function buildFocusChain(game, nation, scenarioId, state = game.state) {
   const baseId = scenarioId.split('-')[0];
@@ -285,11 +348,17 @@ export function buildFocusChain(game, nation, scenarioId, state = game.state) {
     return province && province.owner !== nation.id;
   });
   if (!clean.length) clean.push(...fallbackChain(game, nation, state));
-  return clean.slice(0, 3).map((step) => ({
+  const chain = clean.slice(0, 3).map((step) => ({
     name: step.name,
     target: step.target,
     gold: step.gold,
     morale: step.morale,
     done: false,
   }));
+  const taken = [];
+  for (const step of chain) {
+    step.alt = oppositeTarget(game, nation, step, taken, state);
+    if (step.alt) taken.push(step.alt.target);
+  }
+  return chain;
 }

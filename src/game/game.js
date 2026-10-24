@@ -145,6 +145,9 @@ export class Game {
       nation.focus = {
         chain: buildFocusChain(this, nation, sc.id, state),
         index: 0,
+        // The player is asked which way to go first; the AI picks its own road
+        // without a card, since nobody would answer for it.
+        pick: nation.isPlayer ? null : 'main',
       };
     }
     return state;
@@ -1747,12 +1750,53 @@ export class Game {
     return this.#provinceCount(nationId);
   }
 
-  /** Current ambition of a nation, or null when the whole chain is done. */
+  /**
+   * Both roads offered at the current step. One entry means there was no land
+   * on the other side of the country; two mean the player has a real choice.
+   */
+  focusOptions(nationId = this.state.nationId) {
+    const nation = this.state.nations[nationId];
+    const step = nation?.focus?.chain?.[nation.focus.index];
+    if (!step) return [];
+    if (!step.alt) return [step];
+    // Once the road is picked the fork is closed: only the chosen one remains.
+    if (nation.focus.pick === 'alt') return [step.alt];
+    if (nation.focus.pick === 'main') return [step];
+    return [step, step.alt];
+  }
+
+  /** True while the player still has to pick a direction. */
+  focusPending(nationId = this.state.nationId) {
+    const nation = this.state.nations[nationId];
+    if (!nation?.focus) return false;
+    return this.focusOptions(nationId).length > 1 && !nation.focus.pick;
+  }
+
+  /** Current ambition of a nation, or null when it is done or still unchosen. */
   focusOf(nationId = this.state.nationId) {
     const nation = this.state.nations[nationId];
     const chain = nation?.focus?.chain;
     if (!chain?.length) return null;
-    return chain[nation.focus.index] ?? null;
+    const step = chain[nation.focus.index] ?? null;
+    if (!step) return null;
+    if (!step.alt) return step;
+    if (!nation.focus.pick) return null;
+    return nation.focus.pick === 'alt' ? step.alt : step;
+  }
+
+  /** Picks the road at the current step. `which` is 'main' or 'alt'. */
+  chooseFocus(which, nationId = this.state.nationId) {
+    const nation = this.state.nations[nationId];
+    if (!nation?.focus) return { ok: false, reason: 'Фокусов нет' };
+    const options = this.focusOptions(nationId);
+    if (!options.length) return { ok: false, reason: 'Все задачи выполнены' };
+    const pick = which === 'alt' && options.length > 1 ? 'alt' : 'main';
+    nation.focus.pick = pick;
+    // The chosen land may already be ours: pay it out at once instead of
+    // leaving a finished step on screen.
+    this.#checkFocus(nationId);
+    this.#emit('focusChoice', { nationId, pick, focus: this.focusOf(nationId) });
+    return { ok: true, focus: this.focusOf(nationId) };
   }
 
   /** 1-based position in the chain and its length, for «2 из 3» in the panel. */
@@ -1783,6 +1827,8 @@ export class Game {
       nation.gold += step.gold;
       this.#adjustMorale(nationId, step.morale);
       nation.focus.index += 1;
+      // Every completed step opens a new fork: the next road is chosen again.
+      nation.focus.pick = nation.isPlayer ? null : 'main';
       if (nation.isPlayer) {
         this.#log(`Фокус выполнен: ${step.name} — +${step.gold} золота, +${step.morale} духа`, 'good');
       }

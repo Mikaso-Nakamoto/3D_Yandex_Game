@@ -702,20 +702,25 @@ export class App {
     platform.gameplayStart();
   }
 
+  /**
+   * The opening instruction sits in the hint pill above the map and changes in
+   * steps instead of stacking several «drag this» toasts on top of each other.
+   * Every step is skipped once the player has already done the thing.
+   */
   #onboard() {
     this.onboardTimers?.forEach(clearTimeout);
     const timers = [];
     timers.push(
       setTimeout(() => {
-        if (this.screen !== 'game') return;
-        this.#toast('Зажмите свою провинцию и отпустите на соседней', 'info');
-      }, 1200),
+        if (this.screen !== 'game' || this.selectedProvince) return;
+        this.#hint('Клик по провинции — улучшения, гарнизон и приказы');
+      }, 9000),
     );
     timers.push(
       setTimeout(() => {
         if (this.screen !== 'game') return;
-        this.#toast('Клик по провинции открывает улучшения и приказы', 'info');
-      }, 7000),
+        this.#hint('Договоры и войны — в «Державах», вкладка «Переговоры»');
+      }, 20000),
     );
     this.onboardTimers = timers;
   }
@@ -1745,20 +1750,35 @@ export class App {
       return;
     }
     chip.classList.remove('hidden');
+    const pending = game.focusPending();
     const focus = game.focusOf();
     const progress = game.focusProgress();
     const label = $('#hud-focus');
-    if (!focus) {
-      label.textContent = 'Фокус выполнен';
-      chip.classList.add('is-done');
-    } else {
-      label.textContent = focus.name;
+    if (pending) {
+      // A fork is waiting: the chip says so in words and invites a click.
+      label.textContent = 'Выберите фокус';
       chip.classList.remove('is-done');
+      chip.classList.add('is-choice');
+      if (!this.focusTipShown) {
+        this.focusTipShown = true;
+        this.#tip('focus', 'Фокус: выберите, куда идти, — кнопка «Выберите фокус» вверху');
+      }
+    } else {
+      chip.classList.remove('is-choice');
+      if (!focus) {
+        label.textContent = 'Фокус выполнен';
+        chip.classList.add('is-done');
+      } else {
+        label.textContent = focus.name;
+        chip.classList.remove('is-done');
+      }
     }
     if (!$('#focus-card').classList.contains('hidden')) this.#renderFocusCard();
-    chip.title = focus
-      ? `Фокус ${progress.step} из ${progress.total}: ${focus.name} — взять ${game.provinceName(focus.target)}`
-      : 'Все исторические задачи выполнены';
+    chip.title = pending
+      ? 'Фокус: выберите из двух направлений'
+      : focus
+        ? `Фокус ${progress.step} из ${progress.total}: ${focus.name} — цель: ${game.provinceName(focus.target)}`
+        : 'Все исторические задачи выполнены';
   }
 
   #renderFocusCard() {
@@ -1771,6 +1791,34 @@ export class App {
     const dots = chain
       .map((step, index) => `<span class="fc-dot ${index < progress.done ? 'on' : ''}"></span>`)
       .join('');
+    if (game.focusPending()) {
+      // Two roads, same pay: the choice is where to fight, not what it earns.
+      const options = game.focusOptions();
+      const cards = options
+        .map((step, index) => {
+          // Russian would need the genitive of «взять» plus a declined province
+          // name; a colon and a dash keep every name in the nominative.
+          const holder = game.state.provinces[step.target]?.owner;
+          const who = holder ? game.state.nations[holder]?.short : 'независимая';
+          return `
+          <button type="button" class="fc-option" data-fc-pick="${index === 0 ? 'main' : 'alt'}">
+            <span class="fc-opt-name">${step.name}</span>
+            <span class="fc-opt-target">Цель: <b>${game.provinceName(step.target)}</b> · сейчас — ${who}</span>
+            <span class="fc-opt-reward">+${step.gold} золота · +${step.morale} духа</span>
+          </button>`;
+        })
+        .join('');
+      card.innerHTML = `
+        <div class="fc-head">
+          <span class="fc-eyebrow">Исторический фокус</span>
+          <span class="fc-step">${progress.step} из ${progress.total}</span>
+        </div>
+        <h4>Куда идти дальше</h4>
+        <div class="fc-options">${cards}</div>
+        <div class="fc-chain">${dots}</div>
+        <div class="fc-actions"><button type="button" class="btn ghost" data-fc-close>Позже</button></div>`;
+      return;
+    }
     if (!focus) {
       card.innerHTML = `
         <div class="fc-head"><span class="fc-eyebrow">Исторический фокус</span></div>
@@ -1781,14 +1829,14 @@ export class App {
       return;
     }
     const target = game.state.provinces[focus.target];
-    const holder = target?.owner ? game.state.nations[target.owner]?.short : 'нейтральная';
+    const holder = target?.owner ? game.state.nations[target.owner]?.short : 'независимая';
     card.innerHTML = `
       <div class="fc-head">
         <span class="fc-eyebrow">Исторический фокус</span>
         <span class="fc-step">${progress.step} из ${progress.total}</span>
       </div>
       <h4>${focus.name}</h4>
-      <div class="fc-target">Взять <b>${game.provinceName(focus.target)}</b> — сейчас ${holder}.</div>
+      <div class="fc-target">Цель: <b>${game.provinceName(focus.target)}</b> · сейчас — ${holder}.</div>
       <div class="fc-reward"><span>Награда: <b>+${focus.gold} золота</b></span><span><b>+${focus.morale} духа</b></span></div>
       <div class="fc-chain">${dots}</div>
       <div class="fc-actions"><button type="button" class="btn ghost" data-fc-close>Скрыть</button></div>`;
@@ -2531,7 +2579,22 @@ export class App {
     });
 
     $('#focus-card').addEventListener('click', (event) => {
-      if (event.target.closest('[data-fc-close]')) $('#focus-card').classList.add('hidden');
+      if (event.target.closest('[data-fc-close]')) {
+        $('#focus-card').classList.add('hidden');
+        return;
+      }
+      const pick = event.target.closest('[data-fc-pick]');
+      if (pick) {
+        const result = this.game.chooseFocus(pick.dataset.fcPick);
+        if (!result.ok) {
+          this.#toast(result.reason, 'bad');
+          return;
+        }
+        sfx.select();
+        this.#renderFocusCard();
+        this.#updateFocus();
+        this.#updateHud();
+      }
     });
 
     $('#route-card').addEventListener('click', (event) => {

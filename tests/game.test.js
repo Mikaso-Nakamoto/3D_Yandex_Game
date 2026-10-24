@@ -1405,7 +1405,8 @@ test('every nation starts with a focus chain that points at foreign land', () =>
   for (const scenario of SCENARIOS) {
     const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map: mapFor(scenario), seed: 5 });
     for (const nation of game.nations) {
-      const focus = game.focusOf(nation.id);
+      // The player still has to pick a road, so the first step is a pair.
+      const focus = game.focusOf(nation.id) ?? game.focusOptions(nation.id)[0];
       assert.ok(focus, `${scenario.id}/${nation.id} has no focus`);
       const target = game.state.provinces[focus.target];
       assert.ok(target, `${scenario.id}/${nation.id}: unknown target ${focus.target}`);
@@ -1417,6 +1418,7 @@ test('every nation starts with a focus chain that points at foreign land', () =>
 
 test('taking the focus province pays the reward and moves the chain on', () => {
   const game = makeGame();
+  game.chooseFocus('main');
   const focus = game.focusOf('FRA');
   const gold = game.player.gold;
   const morale = game.player.morale;
@@ -1430,8 +1432,61 @@ test('taking the focus province pays the reward and moves the chain on', () => {
   assert.notEqual(game.focusOf('FRA'), focus);
 });
 
+test('the player picks a direction and the other road disappears', () => {
+  const game = makeGame();
+  assert.equal(game.focusPending('FRA'), true, 'a fork is offered at the start');
+  assert.equal(game.focusOf('FRA'), null, 'nothing is active before the choice');
+  const [main, alt] = game.focusOptions('FRA');
+  assert.ok(main && alt, 'two roads');
+  assert.notEqual(main.target, alt.target, 'the roads lead to different provinces');
+  assert.notEqual(main.name, alt.name, 'the roads have different names');
+  const result = game.chooseFocus('alt');
+  assert.equal(result.ok, true);
+  assert.equal(game.focusPending('FRA'), false);
+  assert.equal(game.focusOf('FRA').target, alt.target);
+  // The unchosen road is gone: the chain now holds the chosen ambition.
+  assert.equal(game.focusOptions('FRA').length, 1);
+  assert.equal(game.focusOptions('FRA')[0].target, alt.target);
+});
+
+test('every fork offers two different provinces and the AI never waits', () => {
+  for (const scenario of SCENARIOS) {
+    const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map: mapFor(scenario), seed: 3 });
+    let forks = 0;
+    for (const nation of game.nations) {
+      if (!nation.isPlayer) assert.equal(game.focusPending(nation.id), false, `${scenario.id}/${nation.id} waits for a human`);
+      for (const step of nation.focus.chain) {
+        if (!step.alt) continue;
+        forks += 1;
+        assert.notEqual(step.alt.target, step.target, `${scenario.id}/${nation.id}: two roads to one province`);
+        const target = game.state.provinces[step.alt.target];
+        assert.ok(target, `${scenario.id}/${nation.id}: unknown alternative ${step.alt.target}`);
+        assert.notEqual(target.owner, nation.id, `${scenario.id}/${nation.id}: road to own land`);
+        assert.equal(step.alt.gold, step.gold, 'both roads pay the same');
+        assert.ok(step.alt.name.includes('Поход'), `${scenario.id}/${nation.id}: the road has a name`);
+      }
+    }
+    assert.ok(forks > scenario.nations.length, `${scenario.id}: almost no forks were built`);
+  }
+});
+
+test('finishing a step asks for a new direction', () => {
+  const game = makeGame();
+  const [main] = game.focusOptions('FRA');
+  game.chooseFocus('main');
+  game.state.provinces[main.target].owner = 'FRA';
+  game.state.provinces[main.target].garrison = 10;
+  game.checkFocusForTests('FRA');
+  assert.equal(game.focusProgress('FRA').done, 1);
+  assert.equal(game.focusPending('FRA'), true, 'the next fork is open');
+  assert.equal(game.focusOf('FRA'), null, 'and nothing is active until it is picked');
+  game.chooseFocus('alt');
+  assert.ok(game.focusOf('FRA'), 'the second step is active again');
+});
+
 test('the player-visible focus text names the province and the reward', () => {
   const game = makeGame();
+  game.chooseFocus('main');
   const focus = game.focusOf('FRA');
   const name = game.provinceName(focus.target);
   assert.ok(focus.name.length > 3, 'the ambition has a name');

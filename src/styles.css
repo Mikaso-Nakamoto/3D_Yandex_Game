@@ -207,7 +207,8 @@ body {
 
 .toasts {
   position: absolute;
-  top: 76px;
+  /* Below the hint / «Сейчас» pill (56 px + 26 px): the two used to touch. */
+  top: 96px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
@@ -4323,6 +4324,73 @@ kbd {
 
 .focus-chip.is-done {
   opacity: 0.7;
+}
+
+/* A fork is waiting: the chip breathes gold until the player picks a road. */
+.focus-chip.is-choice {
+  border-color: rgba(243, 200, 90, 0.55);
+  color: var(--gold);
+  animation: focus-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes focus-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(243, 200, 90, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(243, 200, 90, 0.12);
+  }
+}
+
+.focus-card .fc-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+
+.focus-card .fc-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  font-family: inherit;
+  color: var(--ink-dim);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.focus-card .fc-option:hover {
+  background: rgba(243, 200, 90, 0.08);
+  border-color: rgba(243, 200, 90, 0.45);
+}
+
+.focus-card .fc-opt-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.focus-card .fc-opt-target {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.focus-card .fc-opt-target b {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.focus-card .fc-opt-reward {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .focus-card {
