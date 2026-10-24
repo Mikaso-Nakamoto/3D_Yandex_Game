@@ -8,6 +8,7 @@ import { BAL } from '../src/game/balance.js';
 import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
 import { NATION_COLORS, deltaE } from '../src/data/palette.js';
 import { NEUTRAL_SHADES, assignNeutralColors } from '../src/data/neutral.js';
+import { aiThink } from '../src/game/ai.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const atlanticMap = JSON.parse(readFileSync(new URL('../src/data/map-atlantic.json', import.meta.url), 'utf8'));
@@ -2178,4 +2179,140 @@ test('a destroyed nation leaves no open wars behind', () => {
   for (let i = 0; i < 130; i += 1) game.update(0.05);
   assert.equal(game.state.nations.PRU.alive, false, 'Prussia is gone');
   assert.equal(game.state.relations[key].warSince, null, 'its wars are closed');
+});
+
+// ---------------------------------------------------------------- AI plays by the same rules
+
+/**
+ * A tiny world for one AI: Prussia holds two provinces that both border the
+ * same Austrian province. Nothing else exists, so the only attack plan is the
+ * one the test wants to watch.
+ */
+function duelSetup(game) {
+  let triangle = null;
+  for (const t of game.provinces) {
+    const adj = game.neighbors(t.id);
+    if (adj.length < 2) continue;
+    triangle = { target: t.id, sources: adj.slice(0, 2) };
+    break;
+  }
+  assert.ok(triangle, 'a province with two neighbours exists');
+  for (const p of game.provinces) {
+    p.owner = null;
+    p.garrison = 3;
+    p.fort = 0;
+    p.factory = 0;
+    p.barracks = 0;
+  }
+  game.state.provinces[triangle.target].owner = 'AUS';
+  game.state.provinces[triangle.target].garrison = 260;
+  for (const id of triangle.sources) {
+    game.state.provinces[id].owner = 'PRU';
+    game.state.provinces[id].garrison = 200;
+  }
+  // Everything Prussia can reach is Austrian and well held: the only way in is
+  // to mass two columns on the one province both Prussian provinces border.
+  for (const id of triangle.sources) {
+    for (const nid of game.neighbors(id)) {
+      const p = game.state.provinces[nid];
+      if (p.owner === 'PRU') continue;
+      p.owner = 'AUS';
+      p.garrison = 260;
+      p.fort = 0;
+    }
+  }
+  game.state.nations.PRU.capital = triangle.sources[0];
+  game.state.nations.PRU.doctrine = 'sword';
+  game.state.nations.AUS.doctrine = 'wall';
+  game.state.nations.PRU.gold = 0; // no orders, no buildings: only the attack
+  game.state.relations[Game.pairKey('PRU', 'AUS')] = { truceUntil: 0, warSince: game.state.time };
+  game.rng.chance = () => true;
+  return triangle;
+}
+
+test('AI masses several columns when one would not be enough', () => {
+  const game = makeGame({ ai: true });
+  duelSetup(game);
+  const pru = game.state.nations.PRU;
+  aiThink(game, pru);
+  const byTarget = new Map();
+  for (const a of game.state.armies) {
+    if (a.owner !== 'PRU') continue;
+    const list = byTarget.get(a.to) ?? [];
+    list.push(a);
+    byTarget.set(a.to, list);
+  }
+  const massed = [...byTarget.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+  assert.ok(massed, 'the AI attacked something');
+  const [target, columns] = massed;
+  assert.ok(columns.length >= 2, `two columns at one target, got ${columns.length}`);
+  assert.notEqual(columns[0].from, columns[1].from, 'columns came from different provinces');
+  const total = columns.reduce((sum, a) => sum + a.troops, 0);
+  assert.ok(total > 260, `together they outnumber the garrison: ${total}`);
+  const def = game.defenseValue(target);
+  assert.ok(total * game.attackModifier('PRU') > def, 'the massed force can actually win');
+});
+
+test('AI keeps a reserve in its capital instead of stripping it', () => {
+  const game = makeGame({ ai: true });
+  const pru = game.state.nations.PRU;
+  const capital = game.state.provinces[pru.capital];
+  pru.capital = capital.id;
+  // The capital is the only strong province, everything else is a skeleton.
+  for (const p of game.provinces) if (p.owner === 'PRU') p.garrison = 3;
+  capital.garrison = 400;
+  pru.doctrine = 'sword';
+  game.rng.chance = () => true;
+  const max = game.maxGarrison(capital.id);
+  aiThink(game, pru);
+  assert.ok(capital.garrison >= max * BAL.aiCapitalReserve - 1, `capital keeps ${capital.garrison} of ${max}`);
+});
+
+test('AI sends help to a province with an enemy column marching at it', () => {
+  const game = makeGame({ ai: true });
+  const { target, sources } = duelSetup(game);
+  // Prussia owns the target; Austria marches at it from one of its own sides.
+  game.state.provinces[target].owner = 'PRU';
+  game.state.provinces[target].garrison = 8;
+  game.state.provinces[sources[0]].garrison = 240;
+  const enemy = game.neighbors(target).find((nid) => !sources.includes(nid));
+  assert.ok(enemy, 'the target has a third neighbour');
+  game.state.provinces[enemy].owner = 'AUS';
+  game.state.provinces[enemy].garrison = 300;
+  game.launchArmy('AUS', enemy, target, 0.3);
+  game.rng.chance = () => true;
+  aiThink(game, game.state.nations.PRU);
+  const help = game.state.armies.filter((a) => a.owner === 'PRU' && a.to === target);
+  assert.equal(help.length, 1, 'a column went to the threatened province');
+  assert.ok(help[0].troops > 50, `and it is a real column: ${help[0].troops}`);
+});
+
+test('AI uses the same orders the player has, with the same cooldown', () => {
+  const game = makeGame({ ai: true });
+  const pru = game.state.nations.PRU;
+  game.state.relations[Game.pairKey('PRU', 'AUS')] = { truceUntil: 0, warSince: game.state.time };
+  pru.gold = 300;
+  pru.manpower = 500;
+  const before = game.state.stats.aiOrders ?? 0;
+  game.rng.chance = () => true;
+  aiThink(game, pru);
+  assert.ok((game.state.stats.aiOrders ?? 0) > before, 'an order was cast');
+  assert.ok(pru.orders.taxUntil > game.state.time, 'the tax is running');
+  // The same 55-second cooldown applies: a second thought cannot cast it again.
+  const gold = pru.gold;
+  aiThink(game, pru);
+  assert.ok(pru.orders.taxReady > game.state.time, 'cooldown is set');
+  assert.ok(pru.gold <= gold, 'nothing is free');
+});
+
+test('AI does not pull troops out of a province that is about to be attacked', () => {
+  const game = makeGame({ ai: true });
+  const { target, sources } = duelSetup(game);
+  // An enemy column is already marching at one of the two Prussian provinces.
+  game.state.provinces[target].owner = 'AUS';
+  game.launchArmy('AUS', target, sources[0], 0.9);
+  game.rng.chance = () => true;
+  aiThink(game, game.state.nations.PRU);
+  const fromThreatened = game.state.armies.filter((a) => a.owner === 'PRU' && a.from === sources[0]);
+  assert.equal(fromThreatened.length, 0, 'the threatened province keeps its men at home');
 });

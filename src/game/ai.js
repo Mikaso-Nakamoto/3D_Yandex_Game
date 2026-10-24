@@ -7,9 +7,9 @@ import { BAL } from './balance.js';
  * of identical decisions per minute, which a player cannot feel.
  */
 const STYLE = {
-  calm: { chance: 0.72, margin: 1.85 },
-  normal: { chance: 1, margin: 1.5 },
-  hard: { chance: 1.32, margin: 1.16 },
+  calm: { chance: 0.72, margin: 1.85, columns: 1, react: 0, orders: 0 },
+  normal: { chance: 1, margin: 1.5, columns: 2, react: 0.5, orders: 1 },
+  hard: { chance: 1.32, margin: 1.16, columns: 3, react: 1, orders: 1 },
 };
 
 function styleOf(game) {
@@ -28,15 +28,43 @@ export function aiThink(game, nation) {
   const owned = game.provinces.filter((p) => p.owner === nation.id);
   if (!owned.length) return;
 
-  if (nation.gold > BAL.aiSpendReserve && game.rng.chance(0.75)) {
-    build(game, nation, owned);
-  }
+  if (styleOf(game).orders) maybeOrders(game, nation);
+  if (game.rng.chance(0.75)) build(game, nation, owned);
   maybeSueForPeace(game, nation, owned);
   game.maybeAiPeace(nation.id);
   maybeBreakPact(game, nation, owned);
   maybeAskPassage(game, nation, owned);
-  if (!attack(game, nation, owned)) {
+  // A column already marching at us is more important than a new offensive.
+  const helped = game.rng.chance(styleOf(game).react) ? defendThreats(game, nation, owned) : false;
+  if (!attack(game, nation, owned) && !helped) {
     reinforceLine(game, nation, owned);
+  }
+}
+
+/**
+ * The same three orders the player has, with the same cooldowns and the same
+ * price. Before this the AI fought with a handicap it never agreed to: it
+ * could not mobilise a reserve, double its income for a push, or speed a
+ * marching column up — and a player who used all three simply out-tempoed it.
+ */
+function maybeOrders(game, nation) {
+  const state = game.state;
+  const o = game.ordersOf(nation.id);
+  if (!o) return;
+  if (!game.warsOf(nation.id).length) return; // in peacetime gold is better spent on buildings
+  const ready = (kind) => state.time >= (o[`${kind}Ready`] ?? 0);
+  const affordable = (kind) => nation.gold >= BAL.orderGold[kind] + BAL.aiOrderReserve;
+
+  if (ready('tax') && affordable('tax')) game.castOrderFor(nation.id, 'tax');
+  if (ready('mobilize') && affordable('mobilize') && nation.manpower > 60) {
+    const thin = game.provinces.some(
+      (p) => p.owner === nation.id && p.garrison < game.maxGarrison(p.id) * 0.7,
+    );
+    if (thin) game.castOrderFor(nation.id, 'mobilize');
+  }
+  if (ready('march') && affordable('march')) {
+    const marching = state.armies.some((a) => a.owner === nation.id);
+    if (marching) game.castOrderFor(nation.id, 'march');
   }
 }
 
@@ -47,6 +75,11 @@ function upgradeCost(kind, level) {
 
 function build(game, nation, owned) {
   const state = game.state;
+  const atWar = game.warsOf(nation.id).length > 0;
+  // While fighting, part of the treasury is kept for orders; in peacetime the
+  // whole purse may go into buildings.
+  const reserve = atWar ? BAL.aiWarReserve : BAL.aiSpendReserve;
+  if (nation.gold <= reserve) return;
   const border = (p) =>
     game.neighbors(p.id).some((nid) => {
       const t = state.provinces[nid];
@@ -70,7 +103,8 @@ function build(game, nation, owned) {
       const preview = game.upgradePreview(p.id, kind);
       if (!preview) continue;
       let value = 0;
-      if (kind === 'factory') value = (preview.gold ?? 0) * HORIZON;
+      // A factory in the rear keeps producing when the border is on fire.
+      if (kind === 'factory') value = (preview.gold ?? 0) * HORIZON * (atWar && !border(p) ? 1.35 : 1);
       else if (kind === 'barracks') value = (preview.garrison ?? 0) * (border(p) ? 1.6 : 1);
       else value = (preview.defense ?? 0) * (threat ? 1.8 : 0.5);
       if (value <= 0) continue;
@@ -223,6 +257,94 @@ function coalitionLimit(state) {
   return 2;
 }
 
+/** Where a column is really heading: a route may pass through several provinces. */
+function finalTarget(army) {
+  return army.path ? army.path[army.path.length - 1] : army.to;
+}
+
+/**
+ * Provinces of `nation` that an enemy column is marching at right now. The AI
+ * needs this list for two things: it does not pull troops out of a province
+ * that is about to be attacked, and it sends help to that province instead of
+ * opening a new front elsewhere.
+ */
+function threatenedProvinces(game, nation) {
+  const state = game.state;
+  const set = new Set();
+  for (const army of state.armies) {
+    if (army.owner === nation.id) continue;
+    const target = state.provinces[finalTarget(army)];
+    if (target?.owner !== nation.id) continue;
+    if (game.hasTruce(army.owner, nation.id)) continue;
+    set.add(target.id);
+  }
+  return set;
+}
+
+/**
+ * Help for a province with a column already marching at it. The AI looks at
+ * the projected defence on arrival — the same number the player sees — and
+ * tops it up from a quiet neighbour. This is the answer to «the AI never
+ * notices my army until it lands».
+ */
+function defendThreats(game, nation, owned) {
+  const state = game.state;
+  const threatened = threatenedProvinces(game, nation);
+  if (!threatened.size) return false;
+  const committed = new Set(state.armies.filter((a) => a.owner === nation.id).map((a) => a.from));
+  let acted = false;
+  for (const tid of threatened) {
+    const target = state.provinces[tid];
+    if (!target || target.owner !== nation.id) continue;
+    // How long until the first column lands, and what will be standing there.
+    let eta = Infinity;
+    let incoming = 0;
+    let incomingMod = 1;
+    for (const army of state.armies) {
+      if (army.owner === nation.id) continue;
+      if (finalTarget(army) !== tid) continue;
+      const left = Math.max(0, army.duration - army.t);
+      if (left < eta) eta = left;
+      incoming += army.troops;
+      incomingMod = Math.max(incomingMod, game.attackModifier(army.owner));
+    }
+    if (!incoming) continue;
+    const threat = incoming * incomingMod;
+    const def = game.projectedDefense(tid, eta);
+    if (def >= threat * 0.6) continue; // the garrison can hold on its own
+    // Find the quietest neighbour with men to spare.
+    let best = null;
+    for (const nid of game.neighbors(tid)) {
+      const src = state.provinces[nid];
+      if (!src || src.owner !== nation.id) continue;
+      if (threatened.has(nid) || committed.has(nid)) continue;
+      if (src.garrison < 30) continue;
+      // The capital is not emptied to save a border village.
+      if (src.id === nation.capital) {
+        const keep = game.maxGarrison(src.id) * BAL.aiCapitalReserve;
+        if (src.garrison - keep < 30) continue;
+      }
+      if (!best || src.garrison > best.garrison) best = src;
+    }
+    if (!best) continue;
+    const need = Math.min(best.garrison, threat * 1.05 - def);
+    if (need < BAL.minSend) continue;
+    const ratio = Math.max(0.3, Math.min(BAL.aiThreatShare, need / best.garrison));
+    if (game.launchArmy(nation.id, best.id, tid, ratio) > 0) {
+      committed.add(best.id);
+      acted = true;
+    }
+  }
+  return acted;
+}
+
+/**
+ * One attack decision, with concentration. The AI collects every hostile
+ * province on its border together with the troops that could reach it, and
+ * sends two or three columns at one target when one column would not be enough
+ * — the same «сборный удар» the player has. A target it has chosen stays «the
+ * front» for 45 seconds, so an offensive does not change direction every think.
+ */
 function attack(game, nation, owned) {
   const state = game.state;
   const rules = state.rules ?? {};
@@ -236,63 +358,115 @@ function attack(game, nation, owned) {
   const style = styleOf(game);
   if (!game.rng.chance(0.55 * tempo * style.chance * (1 - nation.exhaustion / 160))) return false;
 
-  let best = null;
+  const margin = nation.exhaustion > BAL.warWearyAt ? BAL.warWearyMargin : style.margin;
+  const threatened = threatenedProvinces(game, nation);
+  const committed = new Set();
+  for (const army of state.armies) if (army.owner === nation.id) committed.add(army.from);
+  const inFlight = new Map();
+  for (const army of state.armies) {
+    if (army.owner !== nation.id) continue;
+    const to = finalTarget(army);
+    inFlight.set(to, (inFlight.get(to) ?? 0) + army.troops);
+  }
+  const capitalId = nation.capital;
+  const capitalCap = capitalId ? game.maxGarrison(capitalId) * BAL.aiCapitalReserve : 0;
+  // Men that may leave a province: the capital always keeps a reserve at home.
+  const usable = (p, to) => {
+    if (p.id === to || p.id !== capitalId) return p.garrison;
+    return Math.max(0, p.garrison - capitalCap);
+  };
+
+  const plans = new Map();
   for (const p of owned) {
-    // It may already have armies on the road: only troops still at home matter.
     if (p.garrison < 28) continue;
-    const atk = p.garrison * game.attackModifier(nation.id);
+    if (committed.has(p.id)) continue;
+    if (threatened.has(p.id)) continue; // its men stay home to meet the column
     for (const nid of game.neighbors(p.id)) {
       const target = state.provinces[nid];
       if (!target || target.owner === nation.id) continue;
-      // The defender keeps reinforcing during the march, so plan against the
-      // province as it will look on arrival — the same number the player sees.
-      const def = game.projectedDefense(nid, game.travelTime(p.id, nid, nation.id));
-      // A tired nation only presses an attack it cannot lose; otherwise it
-      // shores up its own line instead of opening yet another front.
-      const margin = nation.exhaustion > BAL.warWearyAt ? BAL.warWearyMargin : style.margin;
-      if (atk < def * margin) continue;
-
-      let score = def;
-      if (!target.owner) score *= 0.75;
-      if (target.owner) {
-        const enemy = state.nations[target.owner];
-        if (enemy?.isPlayer) {
-          // A truce is a real pause: the AI keeps its word.
-          if (game.hasTruce(nation.id, target.owner)) continue;
-          // Peace guarantee: no AI declares war on the player until the player strikes first.
-          if (rules.peaceUntilFirstWar && !state.playerAggro) continue;
-          if (state.time < 120 && !state.playerAggro) continue;
-          // Coalition limit: a nation that is not yet at war with the player
-          // joins only while the player still has a war to fight on one or two
-          // fronts. Five simultaneous invaders is not a fight, it is a funeral.
-          const alreadyFighting = game.hasFoughtRecently(nation.id, target.owner);
-          if (!alreadyFighting && game.activeAttackers(target.owner) >= coalitionLimit(state)) continue;
-          score *= state.time < 240 ? 1.45 : 1.12;
-          // The stronger the player looks, the less tempting the target.
-          const playerPower = game.armyTotal ? game.armyTotal(target.owner) : 0;
-          if (playerPower > atk * 2.5) score *= 1.5;
-          // A king who broke his word is a king worth punishing.
-          const rel = state.relations?.[game.constructor.pairKey(nation.id, target.owner)];
-          if (rel?.grudge === target.owner) score *= 0.75;
-        }
-        if (enemy && game.provinceCount(enemy.id) > owned.length * 2) score *= 1.35;
+      if (target.owner && game.hasTruce(nation.id, target.owner)) continue;
+      if (usable(p, nid) < BAL.minSend) continue;
+      let plan = plans.get(nid);
+      if (!plan) {
+        plan = { to: nid, owner: target.owner, sources: [], def: 0, score: 0 };
+        plans.set(nid, plan);
       }
-      if (target.pop > 25) score *= 0.95;
-      if (!best || score < best.score) best = { from: p.id, to: nid, def, atk, score };
+      plan.sources.push(p);
     }
+  }
+  if (!plans.size && !game.passagesOf(nation.id).length) return false;
+
+  const front = nation.ai.front;
+  for (const plan of plans.values()) {
+    const target = state.provinces[plan.to];
+    const enemy = plan.owner ? state.nations[plan.owner] : null;
+    if (enemy?.isPlayer) {
+      if (rules.peaceUntilFirstWar && !state.playerAggro) continue;
+      if (state.time < 120 && !state.playerAggro) continue;
+      const alreadyFighting = game.hasFoughtRecently(nation.id, plan.owner);
+      if (!alreadyFighting && game.activeAttackers(plan.owner) >= coalitionLimit(state)) continue;
+    }
+    plan.sources.sort((a, b) => usable(b, plan.to) - usable(a, plan.to));
+    // Plan against the province as it will look on arrival, as the player does.
+    const travel = game.travelTime(plan.sources[0].id, plan.to, nation.id);
+    plan.def = game.projectedDefense(plan.to, travel);
+    // A little extra on top of the style's margin: a joint attack that only
+    // barely outweighs the defender is a coin toss that costs three provinces.
+    plan.required = plan.def * margin * 1.1;
+    let have = inFlight.get(plan.to) ?? 0;
+    plan.take = [];
+    for (const src of plan.sources) {
+      if (have >= plan.required || plan.take.length >= Math.min(BAL.aiMaxColumns, style.columns)) break;
+      have += usable(src, plan.to) * BAL.aiColumnShare * game.attackModifier(nation.id);
+      plan.take.push(src);
+    }
+    if (have < plan.required) {
+      // Not enough even together: do not feed the grinder. Clearing `take`
+      // matters — a half-filled plan used to look like a ready one.
+      plan.take = [];
+      continue;
+    }
+    plan.ready = true;
+
+    let score = plan.def;
+    if (!plan.owner) score *= 0.75;
+    if (plan.owner) {
+      if (enemy?.isPlayer) {
+        score *= state.time < 240 ? 1.45 : 1.12;
+        const playerPower = game.armyTotal ? game.armyTotal(plan.owner) : 0;
+        if (playerPower > plan.def * 2.5) score *= 1.5;
+        const rel = state.relations?.[game.constructor.pairKey(nation.id, plan.owner)];
+        if (rel?.grudge === plan.owner) score *= 0.75;
+      }
+      if (enemy && game.provinceCount(enemy.id) > owned.length * 2) score *= 1.35;
+    }
+    if (target.pop > 25) score *= 0.95;
+    // The front chosen a few seconds ago keeps its priority: one offensive at a time.
+    if (front && front.to === plan.to && front.until > state.time) score *= 0.7;
+    plan.score = score;
+  }
+
+  let best = null;
+  for (const plan of plans.values()) {
+    if (!plan.ready || !plan.take?.length) continue;
+    if (!best || plan.score < best.score) best = plan;
   }
   if (!best && game.passagesOf(nation.id).length) {
     // No neighbour worth attacking, but a road through a friendly country may
     // open a front that is otherwise out of reach.
-    const routeTarget = attackThroughPassage(game, nation, owned);
-    if (routeTarget) return true;
+    if (attackThroughPassage(game, nation, owned)) return true;
   }
   if (!best) return false;
 
-  const margin = best.def / best.atk;
-  const ratio = margin < 0.45 ? 0.7 : margin < 0.7 ? 0.82 : 0.95;
-  const troops = game.launchArmy(nation.id, best.from, best.to, ratio);
-  return troops > 0;
+  nation.ai.front = { to: best.to, until: state.time + BAL.aiFrontSeconds };
+  if (globalThis.__AIDEBUG) globalThis.__AIDEBUG.push({ t: +state.time.toFixed(1), who: nation.id, to: best.to, est: Math.round(best.def), need: Math.round(best.required), take: best.take.length, real: Math.round(game.defenseValue(best.to)), owner: state.provinces[best.to].owner });
+  let sent = 0;
+  for (const src of best.take) {
+    const ratio = Math.min(BAL.aiColumnShare, usable(src, best.to) / Math.max(1, src.garrison));
+    const troops = game.launchArmy(nation.id, src.id, best.to, ratio);
+    if (troops > 0) sent += troops;
+  }
+  return sent > 0;
 }
 
 /**

@@ -840,7 +840,7 @@ export class Game {
   /** Seconds an army needs for the march. Includes the player's march bonus. */
   travelTime(fromId, toId, nationId = this.state.nationId) {
     const sea = this.isSeaRoute(fromId, toId);
-    const marchBuff = nationId === this.state.nationId && this.state.orders.marchUntil > this.state.time ? 1.6 : 1;
+    const marchBuff = this.marchBuff(nationId);
     const raw = (this.distance(fromId, toId) / (BAL.armySpeed * marchBuff)) * (sea ? BAL.seaTravelMul : 1);
     return Math.max(sea ? BAL.seaMinTravel : BAL.minTravel, Math.min(BAL.maxTravel, raw));
   }
@@ -1823,9 +1823,45 @@ export class Game {
     return { defense, text: `+${Math.round(defense)} к обороне сейчас` };
   }
 
+  /**
+   * Order book of any nation. The player's lives in `state.orders` (it is part
+   * of the HUD and of every save), an AI's is created on first use — the AI
+   * fights by exactly the same cooldowns, so its buffs are not free magic.
+   */
+  ordersOf(nationId) {
+    const nation = this.state.nations[nationId];
+    if (!nation) return null;
+    if (nation.isPlayer) return this.state.orders;
+    nation.orders = nation.orders ?? {
+      mobilizeReady: 0,
+      taxReady: 0,
+      marchReady: 0,
+      taxUntil: 0,
+      marchUntil: 0,
+    };
+    return nation.orders;
+  }
+
+  /** Income multiplier from the «военный налог» order. */
+  taxBuff(nationId) {
+    const o = this.ordersOf(nationId);
+    return o && this.state.time < o.taxUntil ? 2 : 1;
+  }
+
+  /** March-speed multiplier from the «форсированный марш» order. */
+  marchBuff(nationId) {
+    const o = this.ordersOf(nationId);
+    return o && this.state.time < o.marchUntil ? BAL.marchBuff : 1;
+  }
+
   castOrder(kind) {
-    const nation = this.player;
-    const o = this.state.orders;
+    return this.castOrderFor(this.state.nationId, kind);
+  }
+
+  castOrderFor(nationId, kind) {
+    const nation = this.state.nations[nationId];
+    if (!nation) return { ok: false, reason: 'Державы нет' };
+    const o = this.ordersOf(nationId);
     if (this.state.status !== 'playing') return { ok: false, reason: 'Партия завершена' };
     if (!ORDERS[kind]) return { ok: false, reason: 'Неизвестный приказ' };
     if (this.state.time < o[`${kind}Ready`]) {
@@ -1855,16 +1891,17 @@ export class Game {
         p.garrison += wants[i] * scale;
       });
       nation.manpower -= budget;
-      this.#log(`Мобилизация: +${Math.round(budget)} рекрутов в строй`, 'order');
+      if (nation.isPlayer) this.#log(`Мобилизация: +${Math.round(budget)} рекрутов в строй`, 'order');
     } else if (kind === 'tax') {
       o.taxUntil = this.state.time + BAL.buffDuration.tax;
-      this.#log('Военный налог: доход удвоен', 'order');
+      if (nation.isPlayer) this.#log('Военный налог: доход удвоен', 'order');
     } else if (kind === 'march') {
       o.marchUntil = this.state.time + BAL.buffDuration.march;
-      this.#log('Форсированный марш: армии ускорены', 'order');
+      if (nation.isPlayer) this.#log('Форсированный марш: армии ускорены', 'order');
     }
     o[`${kind}Ready`] = this.state.time + BAL.orderCooldown;
-    this.#emit('order', { kind });
+    if (nation.isPlayer) this.#emit('order', { kind });
+    else this.state.stats.aiOrders = (this.state.stats.aiOrders ?? 0) + 1;
     return { ok: true };
   }
 
@@ -1923,7 +1960,7 @@ export class Game {
       const ruleEco = nation.isPlayer ? 1 : AI_ECONOMY[this.rules.aiEconomy]?.eco ?? 1;
       income *= (1 + doctrineMod(nation.doctrine, 'income')) * nation.ai.eco * ruleEco;
       income *= this.exhaustionModifier(nation.id);
-      if (nation.isPlayer && s.time < s.orders.taxUntil) income *= 2;
+      income *= this.taxBuff(nation.id);
       nation.income = income;
       nation.manpowerRate = manpower;
       nation.pop = pop;
@@ -2011,7 +2048,7 @@ export class Game {
     // Snapshot: resolving an arrival can launch a counter-attack, and the new
     // column must not be advanced in the same tick it was created.
     for (const army of [...s.armies]) {
-      const buff = army.owner === s.nationId && s.time < s.orders.marchUntil ? 1.6 : 1;
+      const buff = this.marchBuff(army.owner);
       army.t += dt * buff;
       if (army.t < army.duration) continue;
       if (!this.#advanceArmy(army)) finished.push(army);

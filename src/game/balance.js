@@ -130,11 +130,22 @@ export const BAL = {
   orderCooldown: 55,
   orderGold: { mobilize: 45, tax: 15, march: 20 },
   buffDuration: { tax: 40, march: 24 },
+  marchBuff: 1.6,
   mobilizeShare: 0.35,
 
   // Economy multipliers for AI
   aiSpendReserve: 45,
-  aiThinkBase: 4.2,
+  // The AI plays the same game as the player: orders with the same cooldowns,
+  // two or three columns at one target, a reserve at home, and a treasury that
+  // is not empty when the shooting starts.
+  aiWarReserve: 40, // gold it will not spend while at war, so an order stays affordable
+  aiOrderReserve: 55, // extra gold on top of the order price before it is cast
+  aiFrontSeconds: 45, // how long a chosen target stays «the front»
+  aiMaxColumns: 3,
+  aiColumnShare: 0.75,
+  aiCapitalReserve: 0.45, // share of the capital's garrison never sent away
+  aiThreatShare: 0.5, // share of a province's men that goes to a threatened neighbour
+  aiThinkBase: 5.2,
   // The AI starts cautious and winds up: at t=0 it acts on ~45 % of its usual
   // aggression, reaching the full tempo after this many seconds. Without the
   // ramp a 3-province neighbour swallowed five neutral provinces inside a
