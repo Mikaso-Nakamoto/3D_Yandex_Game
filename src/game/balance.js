@@ -60,6 +60,18 @@ export const BAL = {
   // A tired nation does not open new fronts: above this exhaustion it only
   // attacks when it is clearly stronger than the defender.
   warWearyAt: 45,
+  // A war that has been won decisively ends: a nation that has lost its
+  // capital and this share of the land it held when the war began gives up
+  // instead of being scraped off the map province by province. AI only — the
+  // player still loses only by losing every province.
+  capitulationShare: 0.6,
+  capitulationExhaustion: 8,
+  tributeTruce: 300,
+  tributeGold: 120,
+  // Two AI nations stop bleeding each other after a long, tiring war.
+  aiPeaceExhaustion: 62,
+  aiPeaceAfter: 90,
+  aiPeaceChance: 0.12,
   warWearyMargin: 2.1,
   counterAttack: 0.05, // odds of the defender counter-attacking the attacker's home province
   counterAttackMargin: 0.35, // share of the defender's surviving garrison that marches
@@ -89,6 +101,10 @@ export const BAL = {
   exhaustionCapture: 4,
   exhaustionDecay: 0.5, // per second while not fighting
   exhaustionCalmAfter: 35, // seconds without battles before decay starts
+  // Weariness also bleeds away between battles: a nation fighting on five
+  // fronts used to sit at 100 % forever, because it never got 35 quiet seconds.
+  exhaustionWarCalm: 10, // seconds without a clash enough for a slow recovery
+  exhaustionWarDecay: 0.08, // per second while still at war
   exhaustionIncome: 0.3, // income penalty at 100 % weariness
   peaceOfferAt: 55, // exhaustion level that makes an AI sue for peace
   peaceTalksWindow: 150,

@@ -37,6 +37,7 @@ export function marchesVerb(name) {
 export function offerWhat(kind = 'peace') {
   if (kind === 'pact') return 'пакт о ненападении';
   if (kind === 'passage') return 'право прохода';
+  if (kind === 'tribute') return 'мир с уступкой';
   return 'мир';
 }
 

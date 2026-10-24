@@ -565,7 +565,10 @@ export class App {
       }
       if (type === 'offerClosed') {
         this.#renderOffers();
-        if (payload.accepted) this.#toast('Мир заключён: перемирие', 'good');
+        if (payload.accepted) {
+          const kind = payload.offer?.kind;
+          this.#toast(kind === 'tribute' ? 'Дань получена: мир с уступкой' : 'Мир заключён: перемирие', 'good');
+        }
         else if (payload.expired) this.#toast('Предложение мира истекло', 'info');
       }
       if (type === 'truceBroken') {
@@ -1113,6 +1116,13 @@ export class App {
       return `Право прохода: ${Math.round(BAL.passageTruce)} с их колонны могут идти через вашу землю. Решение за вами — ${left} с.`;
     }
     const pact = offer.kind === 'pact';
+    if (offer.kind === 'tribute') {
+      const parts = [];
+      const province = offer.terms?.province;
+      if (province) parts.push(`провинция «${game.provinceName(province)}»`);
+      if (offer.terms?.gold > 0) parts.push(`${offer.terms.gold} золота`);
+      return `Мир с уступкой: ${parts.length ? parts.join(' и ') : 'без дани'} — перемирие ${Math.round(BAL.tributeTruce)} с. Решение за вами — ${left} с.`;
+    }
     return pact
       ? `Пакт о ненападении: ${Math.round(BAL.pactTruce)} с без нападений. Решение за вами — ${left} с.`
       : `Перемирие ${Math.round(BAL.peaceTruce)} с. Обе стороны теряют усталость. Решение за вами — ${left} с.`;
@@ -1131,7 +1141,9 @@ export class App {
       }
       return;
     }
-    const signature = offers.map((offer) => `${offer.id}:${offer.kind ?? 'peace'}`).join(',');
+    const signature = offers
+      .map((offer) => `${offer.id}:${offer.kind ?? 'peace'}:${offer.terms?.province ?? ''}:${offer.terms?.gold ?? ''}`)
+      .join(',');
     // Rebuilding the card under the pointer eats the click (mousedown and mouseup
     // land on different nodes), so only tick the countdowns until the set changes.
     if (signature !== this.offerSignature) {
@@ -1148,7 +1160,7 @@ export class App {
               <span data-offer-text="${offer.id}">${this.#offerText(offer)}</span>
             </div>
             <div class="offer-actions">
-              <button class="btn small primary" data-answer="1">${pact ? 'Принять пакт' : passage ? 'Пустить' : 'Принять'}</button>
+              <button class="btn small primary" data-answer="1">${pact ? 'Принять пакт' : passage ? 'Пустить' : offer.kind === 'tribute' ? 'Взять дань' : 'Принять'}</button>
               <button class="btn small ghost" data-answer="0">${pact ? 'Отклонить' : passage ? 'Не пускать' : 'Воевать'}</button>
             </div>
           </div>`;
@@ -1939,6 +1951,27 @@ export class App {
     this.#afterDiplomacy();
   }
 
+  /** «Отдайте землю и мир»: a treaty the player dictates from a won war. */
+  #askDemand(nationId) {
+    const game = this.game;
+    const name = game.state.nations[nationId]?.short ?? 'противник';
+    const target = game.demandTarget(nationId);
+    const provinceName = target ? game.provinceName(target) : null;
+    const result = game.demandPeace(nationId);
+    if (!result.ok) {
+      this.#toast(result.reason, 'bad');
+      return;
+    }
+    if (result.accepted) {
+      const gold = result.gold > 0 ? ` и ${result.gold} золота` : '';
+      this.#toast(`${name} уступает провинцию «${provinceName ?? '?'}»${gold} — мир`, 'good');
+      sfx.select();
+    } else {
+      this.#toast(`${name}: отказ — ${Math.round(result.chance * 100)}% было мало, укрепитесь и спросите снова`, 'bad');
+    }
+    this.#afterDiplomacy();
+  }
+
   #afterDiplomacy() {
     this.#renderProvincePanel();
     this.#updateHud();
@@ -2097,6 +2130,15 @@ export class App {
                 ${truce > 0 ? 'Пакт' : pactLabel}
               </button>
               <button class="dn-btn" data-rank-passage="${nation.id}" ${passBlocked ? 'disabled' : ''}>Проход</button>
+              ${
+                war != null
+                  ? `<button class="dn-btn is-demand" data-rank-demand="${nation.id}" ${game.demandOutlook(nation.id) > 0 ? '' : 'disabled'} title="Мир за одну пограничную провинцию">
+                      <span class="dn-long">Мир за землю</span><span class="dn-short">Земля</span>${
+                        game.demandOutlook(nation.id) > 0 ? ` <em>${Math.round(game.demandOutlook(nation.id) * 100)}%</em>` : ''
+                      }
+                    </button>`
+                  : ''
+              }
             </span>
           </div>`;
       });
@@ -2337,6 +2379,11 @@ export class App {
       const passage = event.target.closest('[data-rank-passage]');
       if (passage) {
         if (!passage.disabled) this.#askPassage(passage.dataset.rankPassage);
+        return;
+      }
+      const demand = event.target.closest('[data-rank-demand]');
+      if (demand) {
+        if (!demand.disabled) this.#askDemand(demand.dataset.rankDemand);
       }
     });
 

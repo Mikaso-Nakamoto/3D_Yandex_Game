@@ -4715,6 +4715,7 @@ kbd {
   display: flex;
   gap: 5px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .dn-btn {
@@ -4740,6 +4741,28 @@ kbd {
   cursor: not-allowed;
 }
 
+/* «Дань» is a treaty dictated from a won war, not an ordinary offer. */
+.dn-btn.is-demand {
+  color: #f0d9a0;
+  background: rgba(217, 180, 90, 0.2);
+  border-color: rgba(217, 180, 90, 0.5);
+}
+
+.dn-btn.is-demand:hover:not(:disabled) {
+  background: rgba(217, 180, 90, 0.32);
+}
+
+.dn-btn.is-demand em {
+  font-style: normal;
+  font-weight: 500;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+.dn-btn .dn-short {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .dn-row {
     grid-template-columns: minmax(80px, 1fr) minmax(90px, 1fr) auto;
@@ -4754,6 +4777,14 @@ kbd {
   .dn-btn {
     padding: 5px 7px;
     font-size: 10px;
+  }
+
+  .dn-btn .dn-long {
+    display: none;
+  }
+
+  .dn-btn .dn-short {
+    display: inline;
   }
 }
 

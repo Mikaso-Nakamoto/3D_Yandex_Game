@@ -32,6 +32,7 @@ export function aiThink(game, nation) {
     build(game, nation, owned);
   }
   maybeSueForPeace(game, nation, owned);
+  game.maybeAiPeace(nation.id);
   maybeBreakPact(game, nation, owned);
   maybeAskPassage(game, nation, owned);
   if (!attack(game, nation, owned)) {
@@ -110,6 +111,14 @@ function maybeSueForPeace(game, nation, owned) {
     const losing = game.provinceCount(playerId) >= game.provinceCount(nation.id);
     if (!losing) return;
     if (!game.rng.chance(0.4)) return;
+    // A nation that is clearly losing does not ask for a white peace: it buys
+    // one with land and gold. That is the difference between «перемирие» and
+    // «мир с уступкой» on the card, and it gives the player a real choice.
+    const terms = game.tributeTerms(nation.id);
+    if (terms) {
+      game.offerPeace(nation.id, 'tribute', terms);
+      return;
+    }
   } else {
     // No war with the player yet: a wary, tired neighbour offers a pact.
     const playerLooksStrong = game.provinceCount(playerId) >= game.provinceCount(nation.id) * 0.8;

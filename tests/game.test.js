@@ -2021,3 +2021,161 @@ test('a sea crossing costs a few men, a land march costs none', () => {
   assert.equal(sea.sea, true);
   assert.ok(game.state.log.some((line) => /Шторм/.test(line.text)), 'the loss is reported');
 });
+
+// ---------------------------------------------------------------- ending a war
+
+test('an AI nation capitulates when its capital and most of its land are lost', () => {
+  const game = makeGame();
+  const loser = 'AUS';
+  const winner = 'PRU';
+  const start = game.provinceCount(loser);
+  assert.ok(start >= 3, `Austria holds ${start}`);
+  game.state.relations[Game.pairKey(loser, winner)] = {
+    truceUntil: 0,
+    warSince: game.state.time,
+    start: { [loser]: start, [winner]: game.provinceCount(winner) },
+  };
+  // The capital falls, and the winner has taken 60 % of the pre-war land.
+  const capital = game.state.nations[loser].capital;
+  game.state.provinces[capital].owner = winner;
+  const rest = game.provinces.filter((p) => p.owner === loser && p.id !== capital);
+  const need = Math.ceil(start * 0.6) - 1; // the capital is already counted
+  for (let i = 0; i < need; i += 1) game.state.provinces[rest[i].id].owner = winner;
+  assert.ok(game.provinceCount(loser) >= 1, 'something is still Austrian');
+
+  const done = game.maybeCapitulate(loser, winner);
+  assert.equal(done, true);
+  assert.equal(game.state.nations[loser].alive, false, 'Austria gave up');
+  assert.equal(game.state.nations[loser].eliminated, true);
+  assert.equal(game.provinces.some((p) => p.owner === loser), false, 'all its land changed hands');
+  assert.equal(game.provinces.some((p) => p.owner === winner), true);
+  assert.equal(game.state.log.some((line) => /Капитуляция/.test(line.text)), true, 'the player is told');
+  assert.equal(game.hasWar(loser, winner), false, 'the war is over');
+});
+
+test('a nation that still holds most of its land does not capitulate', () => {
+  const game = makeGame();
+  const loser = 'AUS';
+  const winner = 'PRU';
+  const start = game.provinceCount(loser);
+  game.state.relations[Game.pairKey(loser, winner)] = {
+    truceUntil: 0,
+    warSince: game.state.time,
+    start: { [loser]: start, [winner]: game.provinceCount(winner) },
+  };
+  game.state.provinces[game.state.nations[loser].capital].owner = winner;
+  assert.equal(game.maybeCapitulate(loser, winner), false, 'the capital alone is not a surrender');
+  assert.equal(game.state.nations[loser].alive, true);
+});
+
+test('the player never capitulates: only losing every province ends the game', () => {
+  const game = makeGame();
+  game.state.nations.FRA.capital = 'FR';
+  game.state.relations[Game.pairKey('FRA', 'PRU')] = { truceUntil: 0, warSince: 0, start: { FRA: 2, PRU: 3 } };
+  game.state.provinces.FR.owner = 'PRU';
+  const capital = game.state.provinces.FR;
+  capital.owner = 'PRU';
+  // A capture by Prussia cannot make the player capitulate: the flag is never set.
+  assert.equal(game.state.nations.FRA.isPlayer, true);
+  assert.equal(game.state.nations.FRA.eliminated, false);
+});
+
+test('two AI nations stop a long, tiring war', () => {
+  const game = makeGame();
+  const rel = { truceUntil: 0, warSince: game.state.time - 200, lastClash: game.state.time };
+  game.state.relations[Game.pairKey('PRU', 'AUS')] = rel;
+  game.state.nations.PRU.exhaustion = 90;
+  game.state.nations.AUS.exhaustion = 90;
+  game.rng.chance = () => true;
+  const before = game.activeAttackers('PRU');
+  const made = game.maybeAiPeace('PRU');
+  assert.equal(made, true);
+  assert.equal(rel.warSince, null, 'the war is over');
+  assert.ok(rel.truceUntil > game.state.time, 'with a truce');
+  assert.equal(game.hasWar('PRU', 'AUS'), false);
+  assert.ok(game.activeAttackers('PRU') <= before);
+});
+
+test('a beaten nation can be made to pay with land for peace', () => {
+  const game = makeGame();
+  const them = 'PRU';
+  game.state.relations[Game.pairKey('FRA', them)] = {
+    truceUntil: 0,
+    warSince: game.state.time - 120,
+    start: { FRA: 1, PRU: 3 },
+  };
+  game.state.nations[them].exhaustion = 80;
+  game.state.nations.FRA.gold = 500;
+  // Make the player overwhelmingly stronger: Prussia's army is spent.
+  for (const p of game.provinces) if (p.owner === them) p.garrison = 2;
+  game.province('FR').garrison = 400;
+  const province = game.demandTarget(them);
+  assert.ok(province, 'there is a border province to demand');
+  assert.ok(game.demandOutlook(them) > 0.2, `outlook ${game.demandOutlook(them)}`);
+  game.rng.chance = () => true;
+  const result = game.demandPeace(them);
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(result.accepted, true);
+  assert.equal(game.province(province).owner, 'FRA', 'the province changed hands');
+  assert.equal(game.hasWar('FRA', them), false, 'the war ended');
+  assert.ok(game.state.log.some((line) => /уступкой/.test(line.text)));
+});
+
+test('a nation that is winning does not hand over land', () => {
+  const game = makeGame();
+  game.state.relations[Game.pairKey('FRA', 'PRU')] = { truceUntil: 0, warSince: game.state.time };
+  // Prussia is far stronger than the player.
+  game.province('FR').garrison = 5;
+  for (const p of game.provinces) if (p.owner === 'PRU') p.garrison = 400;
+  const result = game.demandPeace('PRU');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /превосходство/);
+});
+
+test('a losing AI offers land and gold for peace, and the player can take it', () => {
+  const game = makeGame();
+  const them = 'PRU';
+  game.state.relations[Game.pairKey('FRA', them)] = {
+    truceUntil: 0,
+    warSince: game.state.time - 90,
+    start: { FRA: 1, PRU: 3 },
+  };
+  game.state.nations[them].exhaustion = 80;
+  game.state.nations[them].gold = 300;
+  for (const p of game.provinces) if (p.owner === them) p.garrison = 3;
+  game.province('FR').garrison = 400;
+  const terms = game.tributeTerms(them);
+  assert.ok(terms, 'Prussia is ready to pay');
+  assert.ok(terms.province, 'the price is a province');
+  assert.equal(terms.gold, BAL.tributeGold);
+  const goldBefore = game.player.gold;
+  const { offer } = game.offerPeace(them, 'tribute', terms);
+  assert.equal(offer.kind, 'tribute');
+  assert.equal(offer.terms.province, terms.province);
+  game.answerPeace(offer.id, true);
+  assert.equal(game.province(terms.province).owner, 'FRA', 'the province was handed over');
+  assert.equal(game.player.gold, goldBefore + BAL.tributeGold, 'and the gold too');
+  assert.equal(game.hasWar('FRA', them), false);
+  assert.ok(game.truceLeft(them) >= BAL.tributeTruce - 1, 'a longer truce');
+  assert.equal(game.state.log.some((line) => /Мир: .*золота/.test(line.text)), true);
+});
+
+test('a nation that is winning does not offer tribute', () => {
+  const game = makeGame();
+  game.state.relations[Game.pairKey('FRA', 'PRU')] = { truceUntil: 0, warSince: game.state.time };
+  game.province('FR').garrison = 4;
+  for (const p of game.provinces) if (p.owner === 'PRU') p.garrison = 300;
+  assert.equal(game.tributeTerms('PRU'), null);
+});
+
+test('a destroyed nation leaves no open wars behind', () => {
+  const game = makeGame();
+  const key = Game.pairKey('PRU', 'AUS');
+  game.state.relations[key] = { truceUntil: 0, warSince: game.state.time - 40, start: { PRU: 3, AUS: 6 } };
+  const capital = game.state.nations.PRU.capital;
+  for (const p of game.provinces) if (p.owner === 'PRU') p.owner = 'FRA';
+  game.state.provinces[capital].owner = 'FRA';
+  for (let i = 0; i < 130; i += 1) game.update(0.05);
+  assert.equal(game.state.nations.PRU.alive, false, 'Prussia is gone');
+  assert.equal(game.state.relations[key].warSince, null, 'its wars are closed');
+});
