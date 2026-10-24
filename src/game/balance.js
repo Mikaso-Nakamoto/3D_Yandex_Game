@@ -131,7 +131,12 @@ export const BAL = {
   orderGold: { mobilize: 45, tax: 15, march: 20 },
   buffDuration: { tax: 40, march: 24 },
   marchBuff: 1.6,
-  mobilizeShare: 0.35,
+  // Mobilisation is a call-up of reserves, not a top-up to the norm: a province
+  // already at full strength still receives men, up to this ceiling. Without it
+  // the order did nothing at all in a quiet country and only worked if the
+  // player shuffled troops out of a province first — a trick, not a decision.
+  mobilizeShare: 0.3,
+  mobilizeCeiling: 1.45,
 
   // Economy multipliers for AI
   aiSpendReserve: 45,
@@ -188,7 +193,7 @@ export const ORDERS = {
     id: 'mobilize',
     name: 'Всеобщая мобилизация',
     icon: 'mobilize',
-    description: 'Сразу добавить войска во все провинции за рекрутов',
+    description: 'Сразу добавить войска во все провинции за рекрутов — даже сверх нормы, до 145 %',
   },
   tax: {
     id: 'tax',

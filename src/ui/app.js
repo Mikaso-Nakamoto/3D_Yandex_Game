@@ -423,7 +423,7 @@ export class App {
         <span class="tile-bar"></span>
         <span class="tile-body">
           <span class="tile-name">${nation.short}</span>
-          <span class="tile-sub">${nation.provinces.length} пров. · ${preview.pop.toFixed(1)} млн</span>
+          <span class="tile-sub">${nation.provinces.length} пров. · ${(preview.pop * this.#popScale()).toFixed(1)} млн</span>
           <span class="tile-army">Армия ${fmt(preview.army)}<span class="tile-diff" data-level="${difficulty.id}">${difficulty.label}</span></span>
         </span>`;
       item.addEventListener('click', () => this.#selectNation(nation.id, true));
@@ -431,6 +431,11 @@ export class App {
     }
     $('#nation-count').textContent = `${nationsCount(this.scenario.nations.length)} · ${this.scenario.era}`;
     this.#renderNationDetail();
+  }
+
+  /** Millions shown on screen: the era's own numbers, not the simulation units. */
+  #popScale() {
+    return this.scenario?.popScale ?? this.game?.scenario?.popScale ?? 1;
   }
 
   #renderNationDetail() {
@@ -459,7 +464,7 @@ export class App {
         <span class="detail-diff" data-level="${difficulty.id}" title="${difficulty.hint}">${difficulty.label}</span>
       </div>
       <div class="detail-stats">
-        <div class="ds"><span class="k">Население</span><span class="v">${preview.pop.toFixed(1)} млн</span></div>
+        <div class="ds"><span class="k">Население</span><span class="v">${(preview.pop * this.#popScale()).toFixed(1)} млн</span></div>
         <div class="ds"><span class="k">Доход</span><span class="v gold">+${preview.income.toFixed(1)}/с</span></div>
         <div class="ds"><span class="k">Армия</span><span class="v">${fmt(preview.army)}</span></div>
         <div class="ds"><span class="k">Рекруты</span><span class="v">+${(preview.recruits * 60).toFixed(0)}/мин</span></div>
@@ -1473,7 +1478,7 @@ export class App {
               })()
             : ''
         }
-        <div class="pp-row"><span>Население</span><b>${province.pop.toFixed(1)} млн</b></div>
+        <div class="pp-row"><span>Население</span><b>${(province.pop * this.#popScale()).toFixed(1)} млн</b></div>
         ${
           // Income and recruits are only ever paid to the owner: on a foreign
           // province they were three rows of dashes that pushed the pact

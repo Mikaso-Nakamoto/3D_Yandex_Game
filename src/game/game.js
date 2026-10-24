@@ -1885,13 +1885,14 @@ export class Game {
 
     if (kind === 'mobilize') {
       const owned = this.#ownedProvinces(nation.id);
-      const wants = owned.map((p) =>
-        Math.max(0, Math.min(this.#maxGarrison(p) * BAL.mobilizeShare, this.#maxGarrison(p) - p.garrison)),
-      );
+      const wants = owned.map((p) => {
+        const ceiling = this.#maxGarrison(p) * BAL.mobilizeCeiling;
+        return Math.max(0, Math.min(this.#maxGarrison(p) * BAL.mobilizeShare, ceiling - p.garrison));
+      });
       const totalWanted = wants.reduce((a, b) => a + b, 0);
       if (totalWanted < 1) {
         nation.gold += cost;
-        return { ok: false, reason: 'Все гарнизоны уже полны' };
+        return { ok: false, reason: 'Гарнизоны уже на пределе мобилизации' };
       }
       const budget = Math.min(nation.manpower, totalWanted);
       if (budget < 1) {

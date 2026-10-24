@@ -431,10 +431,68 @@ test('mobilization refuses politely when every garrison is already overfull', ()
   const gold = game.player.gold;
   const result = game.castOrder('mobilize');
   assert.equal(result.ok, false);
-  assert.match(result.reason, /полны/);
+  assert.match(result.reason, /предел/);
   assert.equal(game.player.gold, gold, 'gold must be refunded');
 });
 
+
+test('mobilization gives men even when every garrison is at full strength', () => {
+  const game = makeGame();
+  game.player.gold = 500;
+  game.player.manpower = 4000;
+  for (const province of game.provinces) {
+    if (province.owner === 'FRA') province.garrison = game.maxGarrison(province.id);
+  }
+  const before = game.provinces
+    .filter((p) => p.owner === 'FRA')
+    .reduce((sum, p) => sum + p.garrison, 0);
+  const result = game.castOrder('mobilize');
+  assert.equal(result.ok, true, result.reason);
+  const after = game.provinces.filter((p) => p.owner === 'FRA').reduce((sum, p) => sum + p.garrison, 0);
+  assert.ok(after > before, `the country really gained men: ${before} → ${after}`);
+  // And the ceiling is respected: another call cannot push past the limit.
+  for (const province of game.provinces) {
+    if (province.owner === 'FRA') province.garrison = game.maxGarrison(province.id) * 1.45;
+  }
+  game.state.orders.mobilizeReady = 0;
+  const refused = game.castOrder('mobilize');
+  assert.equal(refused.ok, false);
+});
+
+test('mobilization does not care whether troops were shuffled out first', () => {
+  // Two identical countries: one keeps its men where they are, the other moves
+  // a column from one province to another. The call-up must give both
+  // countries the same troops — otherwise «move 100 %, press mobilise» is a
+  // free reinforcement trick instead of a decision.
+  const setup = () => {
+    const game = makeGame();
+    game.state.provinces.BE.owner = 'FRA'; // a second French province
+    game.state.provinces.BE.garrison = 0;
+    game.player.gold = 500;
+    game.player.manpower = 4000;
+    for (const province of game.provinces) {
+      if (province.owner === 'FRA') province.garrison = game.maxGarrison(province.id);
+    }
+    return game;
+  };
+  const total = (game) => game.provinces.filter((p) => p.owner === 'FRA').reduce((s, p) => s + p.garrison, 0);
+
+  const atHome = setup();
+  const shuffled = setup();
+  const fr = shuffled.province('FR');
+  const moved = Math.floor(fr.garrison * 0.5);
+  fr.garrison -= moved;
+  shuffled.province('BE').garrison += moved;
+
+  const a0 = total(atHome);
+  const b0 = total(shuffled);
+  atHome.castOrder('mobilize');
+  shuffled.castOrder('mobilize');
+  const a1 = total(atHome) - a0;
+  const b1 = total(shuffled) - b0;
+  assert.ok(a1 > 0 && b1 > 0, `both gained men: ${Math.round(a1)} / ${Math.round(b1)}`);
+  assert.ok(Math.abs(a1 - b1) < a1 * 0.5, `the shuffle must not change the call-up: ${Math.round(a1)} vs ${Math.round(b1)}`);
+});
 
 test('one province can send armies to several neighbours at once', () => {
   const game = makeGame();
