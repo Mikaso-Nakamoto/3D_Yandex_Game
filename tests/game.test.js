@@ -2316,3 +2316,40 @@ test('AI does not pull troops out of a province that is about to be attacked', (
   const fromThreatened = game.state.armies.filter((a) => a.owner === 'PRU' && a.from === sources[0]);
   assert.equal(fromThreatened.length, 0, 'the threatened province keeps its men at home');
 });
+
+test('AI orders, fronts and war snapshots survive a save', () => {
+  const game = makeGame();
+  const pru = game.state.nations.PRU;
+  pru.gold = 200;
+  pru.orders = { mobilizeReady: 5, taxReady: 0, marchReady: 0, taxUntil: 60, marchUntil: 0 };
+  pru.ai.front = { to: 'DE', until: 120 };
+  game.state.relations[Game.pairKey('PRU', 'AUS')] = {
+    truceUntil: 0,
+    warSince: 3,
+    start: { PRU: 3, AUS: 6 },
+  };
+  const restored = Game.deserialize(JSON.parse(JSON.stringify(game.serialize())), map);
+  assert.equal(restored.state.nations.PRU.orders.taxUntil, 60, 'the order timer is kept');
+  assert.equal(restored.state.nations.PRU.ai.front.to, 'DE', 'the front is kept');
+  assert.deepEqual(restored.state.relations[Game.pairKey('PRU', 'AUS')].start, { PRU: 3, AUS: 6 });
+  // The restored game keeps running and its AI still thinks with the same tools.
+  for (let i = 0; i < 40; i += 1) restored.update(0.05);
+  assert.equal(restored.state.status, 'playing');
+});
+
+test('the forecast counts help that is already in the air', () => {
+  const game = makeGame();
+  // Prussia holds DE; France sends troops from FR to BE (Prussia's neighbour),
+  // and Prussia answers by marching a column into DE.
+  game.state.provinces.BE.owner = 'PRU';
+  game.state.provinces.BE.garrison = 40;
+  game.state.provinces.DE.garrison = 100;
+  game.state.armies = [];
+  const before = game.projectedDefense('BE', 60);
+  game.launchArmy('PRU', 'DE', 'BE', 0.5);
+  const after = game.projectedDefense('BE', 60);
+  assert.ok(after > before, `the incoming column is counted: ${before} → ${after}`);
+  // A column that cannot arrive in time is not counted.
+  const short = game.projectedDefense('BE', 0.01);
+  assert.ok(short < after, `too late to matter: ${short} vs ${after}`);
+});

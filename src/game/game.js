@@ -868,7 +868,19 @@ export class Game {
    */
   projectedGarrison(p, seconds) {
     const nation = p.owner ? this.state.nations[p.owner] : null;
-    if (!nation || !nation.alive || seconds <= 0) return p.garrison;
+    // Columns already marching home count: without this, the forecast shown to
+    // the player ignored the very help the AI had just sent, and a «70 %»
+    // attack landed on a province that had doubled its garrison in the air.
+    let inbound = 0;
+    for (const army of this.state.armies ?? []) {
+      if (army.owner !== p.owner) continue;
+      const target = army.path ? army.path[army.path.length - 1] : army.to;
+      if (target !== p.id) continue;
+      if (army.duration - army.t > seconds) continue;
+      inbound += army.troops;
+    }
+    if (!nation || !nation.alive) return p.garrison + inbound;
+    if (seconds <= 0) return p.garrison + inbound;
     const max = this.#maxGarrison(p);
     const full = max * BAL.reinforceShare * (1 + p.barracks * BAL.barracksReinforce);
     let garrison = p.garrison;
@@ -888,7 +900,7 @@ export class Game {
       const spend = Math.min(full * BAL.overfillShare * left, pool, room);
       garrison += spend;
     }
-    return garrison;
+    return garrison + inbound;
   }
 
   /**
