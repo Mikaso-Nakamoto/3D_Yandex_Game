@@ -5,6 +5,7 @@ import { Game } from '../src/game/game.js';
 import { SCENARIOS } from '../src/data/scenarios.js';
 import { normalizeRules, DEFAULT_RULES } from '../src/game/rules.js';
 import { BAL } from '../src/game/balance.js';
+import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const americaMap = JSON.parse(readFileSync(new URL('../src/data/map-america.json', import.meta.url), 'utf8'));
@@ -175,15 +176,21 @@ test('economy produces gold and manpower over time', () => {
   assert.ok(game.province('FR').garrison > troops, 'recruits should become soldiers');
 });
 
-test('victory triggers at the configured share of the map', () => {
+test('victory requires the whole map, not a share of it', () => {
   const game = makeGame();
-  let owned = 0;
+  // Take half the theatre: that used to be enough and now must not be.
+  let owned = game.provinceCount('FRA');
   for (const province of game.provinces) {
     if (owned >= Math.ceil(game.provinces.length * 0.5)) break;
     if (province.owner === 'FRA') continue;
     province.owner = 'FRA';
     owned += 1;
   }
+  game.update(0.05);
+  assert.equal(game.state.status, 'playing', 'half the map is progress, not victory');
+
+  // The last province makes it a win.
+  for (const province of game.provinces) province.owner = 'FRA';
   game.update(0.05);
   assert.equal(game.state.status, 'victory');
 });
@@ -270,10 +277,10 @@ test('rules: AI economy setting scales income', () => {
   assert.ok(strong.state.nations.PRU.income > weak.state.nations.PRU.income * 1.4);
 });
 
-test('rules: victory threshold is configurable at runtime', () => {
+test('an old save asking for a smaller share still plays to full conquest', () => {
   const game = makeGame();
   game.setRules({ victoryShare: 0.3 });
-  // Own 30% of the map, which is below the default 50% but above the configured 30%.
+  assert.equal(game.rules.victoryShare, 1, 'the threshold is not configurable any more');
   const need = Math.ceil(game.provinces.length * 0.3);
   let owned = game.provinceCount('FRA');
   for (const province of game.provinces) {
@@ -282,9 +289,8 @@ test('rules: victory threshold is configurable at runtime', () => {
     province.owner = 'FRA';
     owned += 1;
   }
-  game.setRules({ victoryShare: 0.3 });
   game.update(0.05);
-  assert.equal(game.state.status, 'victory');
+  assert.equal(game.state.status, 'playing', '30% must not end the match');
 });
 
 test('rules: unknown values fall back to defaults and survive a save', () => {
@@ -514,16 +520,20 @@ test('american adjacency is symmetric and does not link a province to itself', (
   }
 });
 
-test('the new world scenario fills every province of its theatre', () => {
+test('the new world scenario covers every province of its theatre', () => {
   const scenario = SCENARIOS.find((s) => s.id === 'neworld');
   assert.ok(scenario, 'scenario exists');
   const game = new Game({ scenarioId: 'neworld', nationId: 'USA', map: americaMap });
   for (const province of americaMap.provinces) {
-    const owner = game.state.provinces[province.id].owner;
-    assert.ok(owner, `${province.id} is unowned`);
+    const state = game.state.provinces[province.id];
+    // Every province is either held by a nation or is a defended neutral: the
+    // frontier lands are contested, not empty.
+    assert.ok(state.owner || state.garrison > 0, `${province.id} is empty`);
   }
   assert.equal(game.state.nations.USA.isPlayer, true);
-  assert.equal(game.provinceCount('USA'), 5);
+  assert.equal(game.provinceCount('USA'), 3);
+  const neutrals = americaMap.provinces.filter((p) => !game.state.provinces[p.id].owner).map((p) => p.id);
+  assert.deepEqual(neutrals.sort(), ['PL', 'WE']);
 });
 
 test('a game refuses a map from the wrong theatre', () => {
@@ -743,17 +753,26 @@ test('score never goes negative', () => {
   assert.equal(game.score().total, 0);
 });
 
-test('a rival reaching the victory share ends the match as a defeat', () => {
+test('a rival grabbing most of the map does not end the match while you hold land', () => {
   const game = makeGame();
-  const total = Object.keys(game.state.provinces).length;
-  const need = Math.ceil(total * game.rules.victoryShare);
   const others = Object.values(game.state.provinces).filter((p) => p.owner !== 'FRA' && p.owner);
-  for (const province of others.slice(0, need)) province.owner = 'PRU';
+  for (const province of others.slice(0, Math.floor(others.length * 0.8))) province.owner = 'PRU';
   // Keep the player alive with their own land.
   game.province('FR').owner = 'FRA';
+  game.province('FR').garrison = 50;
+  game.update(0.1);
+  assert.equal(game.state.status, 'playing', 'only losing every province ends the match');
+  assert.equal(game.state.nations.PRU.alive, true);
+});
+
+test('a rival taking the last province ends the match as elimination', () => {
+  const game = makeGame();
+  for (const province of Object.values(game.state.provinces)) {
+    if (province.owner === 'FRA') province.owner = 'PRU';
+  }
   game.update(0.1);
   assert.equal(game.state.status, 'defeat');
-  assert.equal(game.state.nations.PRU.alive, true);
+  assert.equal(game.state.nations.FRA.alive, false);
 });
 
 test('the player winning takes priority over a rival at the same moment', () => {
@@ -817,26 +836,32 @@ test('a full province keeps producing troops above the norm automatically', () =
   assert.ok(over > 1, `expected a visible surplus, got ${over}`);
 });
 
-test('over-norm production is limited by recruits, not by a hidden cap', () => {
-  const poor = makeGame();
-  poor.province('FR').garrison = poor.maxGarrison('FR');
-  poor.player.manpower = 0;
-  for (let i = 0; i < 800; i += 1) poor.update(0.1);
-  const poorGrowth = poor.province('FR').garrison - poor.maxGarrison('FR');
+test('reinforcement is limited by recruits, not by a hidden cap', () => {
+  const run = (manpower) => {
+    const game = makeGame();
+    const start = game.maxGarrison('FR') * 0.5;
+    game.province('FR').garrison = start;
+    game.player.manpower = manpower;
+    for (let i = 0; i < 100; i += 1) game.update(0.1);
+    return { grown: game.province('FR').garrison - start, game };
+  };
 
-  const rich = makeGame();
-  rich.province('FR').garrison = rich.maxGarrison('FR');
-  rich.player.manpower = 5000;
-  for (let i = 0; i < 800; i += 1) rich.update(0.1);
-  const richGrowth = rich.province('FR').garrison - rich.maxGarrison('FR');
+  const poor = run(0);
+  const rich = run(5000);
 
+  // Since the supply was balanced against the refill rate, a province with no
+  // reserve still creeps up on its own production — but never as fast as one
+  // with men in the pool, and it never borrows troops it does not have.
   assert.ok(
-    richGrowth > poorGrowth * 1.6,
-    `recruits are the real limit: rich ${richGrowth.toFixed(1)} vs poor ${poorGrowth.toFixed(1)}`,
+    rich.grown > poor.grown * 1.15,
+    `recruits are the real limit: rich ${rich.grown.toFixed(1)} vs poor ${poor.grown.toFixed(1)}`,
   );
-  assert.ok(richGrowth > 10, 'a full province keeps growing above the norm');
-  assert.ok(rich.state.stats.recruited > 0, 'recruitment is tracked');
-  assert.ok(rich.player.manpower < 5000, 'the pool is actually drained');
+  assert.ok(rich.grown > 10, 'a funded province refills at the full rate');
+  assert.ok(rich.game.state.stats.recruited > 0, 'recruitment is tracked');
+  assert.ok(rich.game.player.manpower < 5000, 'the pool is actually drained');
+  // With an empty pool the province still grows — but only by what it produces.
+  assert.ok(poor.grown > 0, 'a poor province still gets its own recruits');
+  assert.ok(poor.game.player.manpower < 5, 'the pool stays empty while the province is refilling');
 });
 
 test('depleted provinces are refilled before full ones grow above the norm', () => {
@@ -987,4 +1012,122 @@ test('a bigger defender is harder to take than a smaller one', () => {
   game.province('BE').garrison = 300;
   const hard = game.attackOdds('FR', 'BE', 1).chance;
   assert.ok(easy > hard, `${easy} should beat ${hard}`);
+});
+
+// ---------------------------------------------------------------- peace vs pact
+
+test('without a fight the AI offers a non-aggression pact, not peace', () => {
+  const game = makeGame();
+  const offer = game.offerPeace('NLD');
+  assert.equal(offer.ok, true);
+  assert.equal(offer.offer.kind, 'pact');
+  assert.ok(game.state.log.some((line) => line.text.includes('пакт о ненападении')));
+  // Accepting binds the nations for the longer pact term.
+  game.answerPeace(offer.offer.id, true);
+  assert.equal(game.hasTruce('FRA', 'NLD'), true);
+  assert.ok(game.truceLeft('FRA', 'NLD') > BAL.pactTruce - 5, 'pact truce lasts longer');
+});
+
+test('after a real clash the AI offers peace instead of a pact', () => {
+  const game = makeGame();
+  const key = 'FRA|NLD';
+  game.state.relations[key] = { truceUntil: 0, lastClash: game.state.time - 10 };
+  assert.equal(game.hasFoughtRecently('NLD', 'FRA'), true);
+  const offer = game.offerPeace('NLD');
+  assert.equal(offer.offer.kind, 'peace');
+  game.answerPeace(offer.offer.id, true);
+  assert.ok(game.truceLeft('FRA', 'NLD') <= BAL.peaceTruce + 1, 'peace uses the shorter truce');
+});
+
+test('hostility is tracked per pair, not per nation', () => {
+  const game = makeGame();
+  // France and Prussia trade blows; the Netherlands stay out of it.
+  game.state.relations['FRA|PRU'] = { truceUntil: 0, lastClash: game.state.time };
+  assert.equal(game.hasFoughtRecently('FRA', 'PRU'), true);
+  assert.equal(game.hasFoughtRecently('FRA', 'NLD'), false);
+  assert.equal(game.offerPeace('NLD').offer.kind, 'pact', 'the Netherlands never fought us');
+});
+
+test('old peace offers without a kind still work', () => {
+  const game = makeGame();
+  game.state.offers.push({ id: 99, from: 'PRU', to: 'FRA', expires: game.state.time + 30 });
+  const result = game.answerPeace(99, true);
+  assert.equal(result.accepted, true);
+  assert.equal(game.hasTruce('FRA', 'PRU'), true);
+});
+
+test('an enemy march on the player is announced in the log', () => {
+  const game = makeGame();
+  const player = game.state.nationId;
+  const myProvince = game.state.provinces[game.player.capital];
+  const attackerId = Object.values(game.state.nations).find((n) => !n.isPlayer).id;
+  const enemyLand = Object.values(game.state.provinces).find(
+    (p) => p.owner === attackerId && game.neighbors(p.id).includes(myProvince.id),
+  ) ?? Object.values(game.state.provinces).find((p) => p.owner === attackerId);
+  // Hand the attacker a neighbouring province if the scenario left it far away.
+  game.state.provinces[enemyLand.id].owner = attackerId;
+  const staging = game.neighbors(myProvince.id).find((id) => id !== enemyLand.id) ?? enemyLand.id;
+  game.state.provinces[staging].owner = attackerId;
+  game.state.provinces[staging].garrison = 40;
+  const before = game.state.log.length;
+  const sent = game.launchArmy(attackerId, staging, myProvince.id, 0.5);
+  assert.ok(sent >= BAL.minSend, 'the column actually marched');
+  const fresh = game.state.log.slice(before).map((e) => e.text);
+  assert.ok(
+    fresh.some((line) => /(ведёт|ведут) войска:/.test(line) && line.includes(game.provinceName(myProvince.id))),
+    `ожидалось предупреждение, получено: ${fresh.join(' | ')}`,
+  );
+  assert.equal(fresh.filter((line) => /(ведёт|ведут) войска:/.test(line)).length, 1, 'one warning per column');
+});
+
+test('the player launching troops does not warn about itself', () => {
+  const game = makeGame();
+  const mine = game.state.provinces[game.player.capital];
+  const target = game.neighbors(mine.id).find((id) => game.state.provinces[id].owner !== game.state.nationId);
+  const before = game.state.log.length;
+  game.launchArmy(game.state.nationId, mine.id, target, 0.5);
+  const fresh = game.state.log.slice(before).map((e) => e.text);
+  assert.ok(!fresh.some((line) => /(ведёт|ведут) войска:/.test(line)), `не должно быть предупреждения: ${fresh.join(' | ')}`);
+});
+
+test('offer wording agrees with the nation name', () => {
+  const plural = ['Османы', 'Нидерланды', 'США'];
+  const singular = ['Пруссия', 'Австрия', 'Франция', 'Британия', 'Россия', 'Гаити'];
+  for (const name of plural) assert.equal(offersVerb(name), 'предлагают', name);
+  for (const name of singular) assert.equal(offersVerb(name), 'предлагает', name);
+  assert.equal(offerSentence('Османы', 'pact'), 'Османы предлагают пакт о ненападении');
+  assert.equal(marchesVerb('Османы'), 'ведут');
+  assert.equal(marchesVerb('Пруссия'), 'ведёт');
+  assert.equal(offerSentence('Пруссия', 'peace'), 'Пруссия предлагает мир');
+  // Every nation in every scenario gets a readable line.
+  for (const scenario of SCENARIOS) {
+    for (const nation of scenario.nations) {
+      const line = offerSentence(nation.short, 'pact');
+      assert.ok(/^[^ ]+.* (предлагает|предлагают) пакт о ненападении$/.test(line), line);
+    }
+  }
+});
+
+test('a refused offer is not repeated immediately', () => {
+  const game = makeGame();
+  const neighbour = Object.values(game.state.nations).find((n) => !n.isPlayer);
+  game.state.time = 300;
+  const first = game.offerPeace(neighbour.id, 'pact');
+  assert.equal(first.ok, true);
+  game.answerPeace(first.offer.id, false);
+  const again = game.offerPeace(neighbour.id, 'pact');
+  assert.equal(again.ok, false, 'the same neighbour must stay quiet after a refusal');
+  game.state.time += BAL.offerCooldownAfterRefusal + 1;
+  const later = game.offerPeace(neighbour.id, 'pact');
+  assert.equal(later.ok, true, 'but the offer returns once the cooldown passes');
+});
+
+test('Russian plural forms for counts', () => {
+  assert.equal(provincesCount(1), '1 провинция');
+  assert.equal(provincesCount(3), '3 провинции');
+  assert.equal(provincesCount(11), '11 провинций');
+  assert.equal(provincesCount(21), '21 провинция');
+  assert.equal(nationsCount(5), '5 держав');
+  assert.equal(nationsCount(2), '2 державы');
+  assert.equal(nationsCount(0), '0 держав');
 });

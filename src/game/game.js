@@ -3,6 +3,7 @@ import { BAL, UPGRADES, ORDERS, doctrineMod } from './balance.js';
 import { Rng } from './rng.js';
 import { aiThink, assignDoctrine } from './ai.js';
 import { normalizeRules, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH } from './rules.js';
+import { offerSentence, marchesVerb } from './text.js';
 
 export const SAVE_VERSION = 1;
 
@@ -410,6 +411,17 @@ export class Game {
       duration,
       sea,
     });
+
+    // An enemy column heading for your land used to be visible only as an arrow
+    // on the globe: easy to miss, and the first news was the province falling.
+    const target = this.state.provinces[toId];
+    if (target?.owner === this.state.nationId && nationId !== this.state.nationId) {
+      const attacker = this.state.nations[nationId];
+      // No case declension of province names: the arrow form already used for
+      // captures reads the same for «Латвия», «Кипр» and «США».
+      const who = attacker?.short ?? 'Противник';
+      this.#log(`${who} ${marchesVerb(who)} войска: ${amount} → ${this.provinceName(toId)}`, 'bad');
+    }
     return amount;
   }
 
@@ -516,10 +528,65 @@ export class Game {
     if (!a || !b || a === b) return;
     const key = Game.pairKey(a, b);
     this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
+    // Hostility is a property of the pair, not of a nation: fighting someone
+    // else must not look like being at war with the player.
+    this.state.relations[key].lastClash = this.state.time;
     const nationA = this.state.nations[a];
     const nationB = this.state.nations[b];
     if (nationA) nationA.lastClash = this.state.time;
     if (nationB) nationB.lastClash = this.state.time;
+  }
+
+  /**
+   * Should this event go to the player's log? The log is a small window (seven
+   * lines) over a map where every AI fights every other AI. Without a filter
+   * the two lines that matter — the player's own battle and a column marching
+   * at his land — scrolled out of sight within seconds. World news is kept
+   * when it is close enough to matter: neutral land being carved up, a capture
+   * on the player's border, or a nation about to disappear.
+   */
+  #logWorthTelling(provinceId, a, b) {
+    const s = this.state;
+    const playerId = s.nationId;
+    if (a === playerId || b === playerId) return true;
+    const province = s.provinces[provinceId];
+    if (!province) return false;
+    // Land on the player's border, or taken from a nation that borders him.
+    const touches = this.neighbors(provinceId).some((n) => s.provinces[n].owner === playerId);
+    if (touches) return true;
+    if (!b) return true; // neutral land being claimed: the map is changing
+    const loser = s.nations[b];
+    if (loser && this.#provinceCount(b) <= 2) return true; // someone is being finished
+    return false;
+  }
+
+  /** All men a nation has on the map, garrisons and marching columns alike. */
+  armyTotal(nationId) {
+    let total = 0;
+    for (const p of Object.values(this.state.provinces)) if (p.owner === nationId) total += p.garrison;
+    for (const a of this.state.armies) if (a.owner === nationId) total += a.troops;
+    return total;
+  }
+
+  /**
+   * How many other nations are currently fighting `nationId`. Used to stop the
+   * whole map from piling onto one country at once: being attacked by two
+   * neighbours is a war, being attacked by five is a scripted execution.
+   */
+  activeAttackers(nationId) {
+    let count = 0;
+    for (const other of Object.values(this.state.nations)) {
+      if (!other.alive || other.id === nationId) continue;
+      if (this.hasFoughtRecently(other.id, nationId)) count += 1;
+    }
+    return count;
+  }
+
+  /** True when these two nations traded blows recently (i.e. they are at war). */
+  hasFoughtRecently(a, b, window = BAL.peaceTalksWindow) {
+    const rel = this.state.relations?.[Game.pairKey(a, b)];
+    if (!rel || rel.lastClash === undefined) return false;
+    return this.state.time - rel.lastClash < window;
   }
 
   #adjustMorale(nationId, delta) {
@@ -534,45 +601,68 @@ export class Game {
     nation.exhaustion = Math.max(0, Math.min(100, nation.exhaustion + delta));
   }
 
-  /** Peace offered by an AI to the player. */
-  offerPeace(fromId) {
+  /**
+   * An AI reaches out to the player. If the two have actually fought, this is a
+   * peace offer; if they never clashed, it is a non-aggression pact — offering
+   * "peace" to someone you are not fighting makes no sense.
+   */
+  offerPeace(fromId, kind = null) {
     const from = this.state.nations[fromId];
     if (!from || from.isPlayer) return { ok: false, reason: 'Нельзя' };
     if (this.state.status !== 'playing') return { ok: false, reason: 'Партия завершена' };
     if (this.hasTruce(fromId, this.state.nationId)) return { ok: false, reason: 'Уже перемирие' };
     if (this.state.offers.some((o) => o.from === fromId)) return { ok: false, reason: 'Предложение уже сделано' };
+    // One negotiation window per nation: without this the same neighbour asked
+    // again the second an offer expired, and the log read like a stuck record.
+    if (this.state.time < (from.offersFrom ?? 0)) return { ok: false, reason: 'Слишком рано' };
+    const type = kind ?? (this.hasFoughtRecently(fromId, this.state.nationId) ? 'peace' : 'pact');
     const offer = {
       id: this.state.nextOfferId++,
       from: fromId,
       to: this.state.nationId,
+      kind: type,
       expires: this.state.time + 45,
     };
     this.state.offers.push(offer);
-    this.#log(`${from.short} предлагает мир`, 'war');
+    from.offersFrom = this.state.time + BAL.offerCooldown;
+    this.#log(offerSentence(from.short ?? 'Противник', type), 'war');
     this.#emit('offer', offer);
     return { ok: true, offer };
   }
 
-  /** Player answers a peace offer. Accepting starts a truce and calms both sides. */
+  /** Player answers a peace offer or a non-aggression pact. */
   answerPeace(offerId, accept) {
     const index = this.state.offers.findIndex((o) => o.id === offerId);
     if (index < 0) return { ok: false, reason: 'Предложение устарело' };
     const offer = this.state.offers[index];
     this.state.offers.splice(index, 1);
     const from = this.state.nations[offer.from];
-    const player = this.player;
+    const pact = offer.kind === 'pact';
     if (!accept) {
-      this.#log(`${from?.short ?? 'Противник'}: мир отклонён`, 'war');
+      if (from) from.offersFrom = this.state.time + BAL.offerCooldownAfterRefusal;
+      this.#log(
+        `${from?.short ?? 'Противник'}: ${pact ? 'пакт отклонён' : 'мир отклонён'}`,
+        'war',
+      );
       this.#emit('offerClosed', { offer, accepted: false });
       return { ok: true, accepted: false };
     }
     const key = Game.pairKey(offer.from, this.state.nationId);
+    const duration = pact ? BAL.pactTruce : BAL.peaceTruce;
+    const relief = pact ? BAL.pactRelief : BAL.peaceRelief;
     this.state.relations[key] = this.state.relations[key] ?? { truceUntil: 0 };
-    this.state.relations[key].truceUntil = this.state.time + BAL.peaceTruce;
-    this.#adjustExhaustion(offer.from, -BAL.peaceRelief);
-    this.#adjustExhaustion(this.state.nationId, -BAL.peaceRelief);
-    this.#log(`Мир с ${from?.short ?? 'противником'}: ${Math.round(BAL.peaceTruce)} с перемирия`, 'good');
-    this.#emit('peace', { with: offer.from, until: this.state.relations[key].truceUntil });
+    this.state.relations[key].truceUntil = this.state.time + duration;
+    this.#adjustExhaustion(offer.from, -relief);
+    this.#adjustExhaustion(this.state.nationId, -relief);
+    this.#log(
+      pact
+        // Nation names are quoted in the nominative: «с Пруссией» would need
+        // hand-written declensions for a dozen shapes of name.
+        ? `Пакт о ненападении: ${from?.short ?? 'противник'} — ${Math.round(duration)} с без нападений`
+        : `Мир: ${from?.short ?? 'противник'} — перемирие ${Math.round(duration)} с`,
+      'good',
+    );
+    this.#emit('peace', { with: offer.from, until: this.state.relations[key].truceUntil, kind: offer.kind ?? 'peace' });
     this.#emit('offerClosed', { offer, accepted: true });
     return { ok: true, accepted: true, until: this.state.relations[key].truceUntil };
   }
@@ -584,7 +674,12 @@ export class Game {
     const expired = s.offers.filter((o) => o.expires <= s.time);
     if (!expired.length) return;
     s.offers = s.offers.filter((o) => o.expires > s.time);
-    for (const offer of expired) this.#emit('offerClosed', { offer, accepted: false, expired: true });
+    for (const offer of expired) {
+      // An ignored offer counts as a soft refusal: do not re-ask immediately.
+      const from = s.nations[offer.from];
+      if (from) from.offersFrom = s.time + BAL.offerCooldown;
+      this.#emit('offerClosed', { offer, accepted: false, expired: true });
+    }
   }
 
   /** The player breaking a truce: allowed, but it costs reputation and calm. */
@@ -595,7 +690,7 @@ export class Game {
     rel.truceUntil = 0;
     this.state.playerAggro = true;
     this.#adjustExhaustion(this.state.nationId, 8);
-    this.#log(`Перемирие с ${this.state.nations[withId]?.short} нарушено`, 'bad');
+    this.#log(`Перемирие нарушено: ${this.state.nations[withId]?.short ?? 'противник'}`, 'bad');
     this.#emit('truceBroken', { with: withId });
     return true;
   }
@@ -888,12 +983,14 @@ export class Game {
       if (attacker.isPlayer) s.stats.captured += 1;
       if (previousOwner === s.nationId) s.stats.lostProvinces += 1;
 
-      this.#log(
-        previousOwner
-          ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`
-          : `${this.provinceName(target.id)}: нейтральная → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`,
-        previousOwner === s.nationId ? 'bad' : attacker.isPlayer ? 'good' : 'war',
-      );
+      if (this.#logWorthTelling(target.id, army.owner, previousOwner)) {
+        this.#log(
+          previousOwner
+            ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`
+            : `${this.provinceName(target.id)}: нейтральная → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`,
+          previousOwner === s.nationId ? 'bad' : attacker.isPlayer ? 'good' : 'war',
+        );
+      }
       this.#emit('capture', {
         provinceId: target.id,
         from: previousOwner,
@@ -945,10 +1042,14 @@ export class Game {
           }
         }
       }
-      this.#log(
-        `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''} — ${Math.round(atkPower)} против ${Math.round(defPower)}`,
-        defender?.isPlayer ? 'good' : 'war',
-      );
+      // A failed AI attack on another AI is background noise; the player's own
+      // battles always show.
+      if (this.#logWorthTelling(target.id, army.owner, target.owner)) {
+        this.#log(
+          `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''} — ${Math.round(atkPower)} против ${Math.round(defPower)}`,
+          defender?.isPlayer ? 'good' : 'war',
+        );
+      }
       this.#emit('battle', {
         provinceId: target.id,
         attacker: army.owner,
@@ -1005,7 +1106,9 @@ export class Game {
     const total = Object.keys(s.provinces).length;
     const owned = this.#provinceCount(player.id);
     s.stats.peak = Math.max(s.stats.peak, owned);
-    if (owned / total >= this.state.rules.victoryShare) {
+    // One victory condition only: the whole theatre under your crown. Taking a
+    // share of the map is progress, not a win, and nobody else can win early either.
+    if (owned >= total) {
       s.status = 'victory';
       this.#log(`Победа: ${THEATRE_GENITIVE[this.scenario.theatre] ?? 'Европы'} под вашей короной`, 'good');
       this.#emit('end', { result: 'victory', owned, total });
@@ -1016,19 +1119,6 @@ export class Game {
       s.status = 'defeat';
       this.#log('Поражение: держава потеряла все земли', 'bad');
       this.#emit('end', { result: 'defeat', reason: 'eliminated', owned, total });
-      return;
-    }
-
-    // Another power can win the theatre too: if an AI reaches the victory share,
-    // the player has lost the race and the match is over.
-    for (const nation of Object.values(s.nations)) {
-      if (nation.isPlayer || !nation.alive) continue;
-      const theirs = this.#provinceCount(nation.id);
-      if (theirs / total < s.rules.victoryShare) continue;
-      s.status = 'defeat';
-      this.#log(`${nation.short} собрала ${Math.round(s.rules.victoryShare * 100)}% земель: вы проиграли гонку`, 'bad');
-      this.#emit('end', { result: 'defeat', reason: 'rival', rival: nation.id, owned, total });
-      return;
     }
   }
 

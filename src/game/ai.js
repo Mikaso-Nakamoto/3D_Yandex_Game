@@ -15,7 +15,7 @@ export function aiThink(game, nation) {
   if (nation.gold > BAL.aiSpendReserve && game.rng.chance(0.75)) {
     build(game, nation, owned);
   }
-  maybeSueForPeace(game, nation);
+  maybeSueForPeace(game, nation, owned);
   if (!attack(game, nation, owned)) {
     reinforceLine(game, nation, owned);
   }
@@ -70,20 +70,43 @@ function build(game, nation, owned) {
   game.state.stats.aiUpgrades = (game.state.stats.aiUpgrades ?? 0) + 1;
 }
 
-/** A tired and losing AI offers the player a truce instead of grinding on. */
-function maybeSueForPeace(game, nation) {
+/**
+ * A tired AI reaches out: a peace deal if it has actually fought the player,
+ * otherwise a non-aggression pact. Nations that do not border the player have
+ * nothing to negotiate about.
+ */
+function maybeSueForPeace(game, nation, owned) {
   const state = game.state;
   const playerId = state.nationId;
   if (!state.nations[playerId]?.alive) return;
   if (nation.exhaustion < BAL.peaceOfferAt) return;
   if (game.hasTruce(nation.id, playerId)) return;
   if (state.offers.some((offer) => offer.from === nation.id)) return;
-  const recentlyFought = state.time - (nation.lastClash ?? -999) < 120;
-  if (!recentlyFought) return;
-  const losing = game.provinceCount(playerId) >= game.provinceCount(nation.id);
-  if (!losing) return;
-  if (!game.rng.chance(0.4)) return;
+  const bordersPlayer = owned.some((p) =>
+    game.neighbors(p.id).some((nid) => state.provinces[nid].owner === playerId),
+  );
+  if (!bordersPlayer) return;
+
+  const fought = game.hasFoughtRecently(nation.id, playerId);
+  if (fought) {
+    const losing = game.provinceCount(playerId) >= game.provinceCount(nation.id);
+    if (!losing) return;
+    if (!game.rng.chance(0.4)) return;
+  } else {
+    // No war with the player yet: a wary, tired neighbour offers a pact.
+    const playerLooksStrong = game.provinceCount(playerId) >= game.provinceCount(nation.id) * 0.8;
+    if (!playerLooksStrong) return;
+    if (!game.rng.chance(0.22)) return;
+  }
   game.offerPeace(nation.id);
+}
+
+/** How many nations may be at war with one country at the same time. */
+function coalitionLimit(state) {
+  const style = state.rules?.aiStyle ?? 'normal';
+  if (style === 'calm') return 1;
+  if (style === 'hard') return 3;
+  return 2;
 }
 
 function attack(game, nation, owned) {
@@ -92,7 +115,11 @@ function attack(game, nation, owned) {
   if (rules.aiPassive) return false;
   // War weariness makes a nation hesitate; total exhaustion rules out new offensives.
   if (nation.exhaustion > 85) return false;
-  if (!game.rng.chance(0.55 * (1 - nation.exhaustion / 160))) return false;
+  // Early game the whole world expands more slowly, so the player is not left
+  // behind before the first minute is over.
+  const ramp = Math.min(1, state.time / (BAL.aiOpeningRamp || 300));
+  const tempo = (BAL.aiOpeningTempo ?? 0.45) + (1 - BAL.aiOpeningTempo) * ramp;
+  if (!game.rng.chance(0.55 * tempo * (1 - nation.exhaustion / 160))) return false;
 
   let best = null;
   for (const p of owned) {
@@ -117,7 +144,15 @@ function attack(game, nation, owned) {
           // Peace guarantee: no AI declares war on the player until the player strikes first.
           if (rules.peaceUntilFirstWar && !state.playerAggro) continue;
           if (state.time < 120 && !state.playerAggro) continue;
+          // Coalition limit: a nation that is not yet at war with the player
+          // joins only while the player still has a war to fight on one or two
+          // fronts. Five simultaneous invaders is not a fight, it is a funeral.
+          const alreadyFighting = game.hasFoughtRecently(nation.id, target.owner);
+          if (!alreadyFighting && game.activeAttackers(target.owner) >= coalitionLimit(state)) continue;
           score *= state.time < 240 ? 1.45 : 1.12;
+          // The stronger the player looks, the less tempting the target.
+          const playerPower = game.armyTotal ? game.armyTotal(target.owner) : 0;
+          if (playerPower > atk * 2.5) score *= 1.5;
         }
         if (enemy && game.provinceCount(enemy.id) > owned.length * 2) score *= 1.35;
       }

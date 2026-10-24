@@ -9,13 +9,13 @@ import {
   AI_STYLE,
   AI_ECONOMY,
   NEUTRAL_STRENGTH,
-  VICTORY_SHARES,
   normalizeRules,
   describeRules,
 } from '../game/rules.js';
 import { platform } from '../platform/yandex.js';
 import { sfx } from '../audio.js';
 import { icon } from './icons.js';
+import { offerTitle, provincesCount, nationsCount } from '../game/text.js';
 
 const SAVE_KEY = 'crowns.save.v1';
 const SETTINGS_KEY = 'crowns.settings.v1';
@@ -54,6 +54,9 @@ export class App {
     this.doctrine = 'coin';
     this.selectedProvince = null;
     this.lastSpeed = 1;
+    this.preferredRatio = 0.5;
+    this.pressing = false;
+    this.offerSignature = '';
     this.hudTimer = 0;
     this.saveTimer = 10;
     this.colorSignature = '';
@@ -167,13 +170,15 @@ export class App {
       const card = document.createElement('button');
       card.className = 'scenario-card';
       card.type = 'button';
+      card.dataset.scenario = scenario.id;
       card.innerHTML = `
         <div class="scenario-era">${scenario.era}</div>
         <div class="scenario-title">${scenario.title}</div>
         <div class="scenario-desc">${scenario.blurb}</div>
         <div class="scenario-meta">
-          <span>${THEATRES[scenario.theatre]?.title ?? 'Европа'}</span>
-          <span>${scenario.nations.length} держав</span>
+          <span class="th-long">${THEATRES[scenario.theatre]?.title ?? 'Европа'}</span>
+          <span class="th-short">${THEATRES[scenario.theatre]?.short ?? 'Европа'}</span>
+          <span>${nationsCount(scenario.nations.length)}</span>
           <span class="difficulty">${dots}<span>${scenario.difficulty}</span></span>
         </div>`;
       card.addEventListener('click', () => {
@@ -246,6 +251,20 @@ export class App {
     return { pop, income, army: Math.round(army), recruits };
   }
 
+  /**
+   * How hard the nation is to play, judged by the army it can field against the
+   * strongest rival on the map. Asking a newcomer to pick a one-province colony
+   * without saying so was the fastest way to lose them.
+   */
+  #nationDifficulty(nation) {
+    const previews = this.scenario.nations.map((n) => this.#nationPreview(n).army);
+    const strongest = Math.max(1, ...previews);
+    const share = this.#nationPreview(nation).army / strongest;
+    if (share >= 0.55) return { id: 'easy', label: 'Просто', hint: 'Сильная держава: можно диктовать условия' };
+    if (share >= 0.25) return { id: 'mid', label: 'Средне', hint: 'Равная борьба: решают первые минуты' };
+    return { id: 'hard', label: 'Трудно', hint: 'Малая держава: придётся выживать и расти' };
+  }
+
   #renderNations() {
     const list = $('#nation-list');
     list.innerHTML = '';
@@ -256,6 +275,7 @@ export class App {
     });
     for (const nation of nations) {
       const preview = this.#nationPreview(nation);
+      const difficulty = this.#nationDifficulty(nation);
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'nation-tile';
@@ -267,12 +287,12 @@ export class App {
         <span class="tile-body">
           <span class="tile-name">${nation.short}</span>
           <span class="tile-sub">${nation.provinces.length} пров. · ${preview.pop.toFixed(1)} млн</span>
-          <span class="tile-army">Армия ${fmt(preview.army)}</span>
+          <span class="tile-army">Армия ${fmt(preview.army)}<span class="tile-diff" data-level="${difficulty.id}">${difficulty.label}</span></span>
         </span>`;
       item.addEventListener('click', () => this.#selectNation(nation.id, true));
       list.appendChild(item);
     }
-    $('#nation-count').textContent = `${this.scenario.nations.length} держав · ${this.scenario.era}`;
+    $('#nation-count').textContent = `${nationsCount(this.scenario.nations.length)} · ${this.scenario.era}`;
     this.#renderNationDetail();
   }
 
@@ -289,19 +309,22 @@ export class App {
       return;
     }
     const preview = this.#nationPreview(nation);
+    const difficulty = this.#nationDifficulty(nation);
     const doctrine = DOCTRINES.find((d) => d.id === this.doctrine) ?? DOCTRINES[0];
     detail.innerHTML = `
+      <div class="detail-scroll">
       <div class="detail-head">
         <span class="detail-crest" style="--swatch:${nation.color}">${icon('flag', 22)}</span>
         <div>
-          <div class="eyebrow">${this.scenario.era} · ${nation.provinces.length} провинций</div>
+          <div class="eyebrow">${this.scenario.era} · ${provincesCount(nation.provinces.length)}</div>
           <h3>${nation.name}</h3>
         </div>
+        <span class="detail-diff" data-level="${difficulty.id}" title="${difficulty.hint}">${difficulty.label}</span>
       </div>
       <div class="detail-stats">
         <div class="ds"><span class="k">Население</span><span class="v">${preview.pop.toFixed(1)} млн</span></div>
         <div class="ds"><span class="k">Доход</span><span class="v gold">+${preview.income.toFixed(1)}/с</span></div>
-        <div class="ds"><span class="k">Армия на старте</span><span class="v">${fmt(preview.army)}</span></div>
+        <div class="ds"><span class="k">Армия</span><span class="v">${fmt(preview.army)}</span></div>
         <div class="ds"><span class="k">Рекруты</span><span class="v">+${(preview.recruits * 60).toFixed(0)}/мин</span></div>
       </div>
       <div class="detail-doctrine">
@@ -313,6 +336,7 @@ export class App {
         <span class="rules-label">Правила</span>
         <span class="rules-value">${describeRules(this.pendingRules)}</span>
         <button class="link-btn" data-open-rules>Изменить</button>
+      </div>
       </div>
       <button id="btn-start" class="btn primary">Начать правление</button>
     `;
@@ -373,6 +397,7 @@ export class App {
       seed: (Math.random() * 2 ** 31) | 0,
       rules,
     });
+    game.setSendRatio(this.preferredRatio);
     this.#attachGame(game);
     this.pendingRules = normalizeRules(rules);
     this.#enterGameScreen();
@@ -389,6 +414,8 @@ export class App {
     this.setTheatre(this.scenario.theatre ?? 'europe');
     this.selectedNation = game.state.nationId;
     this.selectedProvince = null;
+    this.preferredRatio = game.state.sendRatio;
+    this.#syncRatioButtons();
     this.colorSignature = '';
     this.#clearArmies();
     $('#log').innerHTML = '';
@@ -493,11 +520,10 @@ export class App {
     const place = theatre?.id === 'america' ? 'Новый Свет' : 'Европа';
     $('#end-eyebrow').textContent = victory ? `${place} ваш` : 'Держава пала';
     $('#end-title').textContent = victory ? 'Победа' : 'Поражение';
-    const rivalName = rival ? this.game?.state?.nations?.[rival]?.short : null;
     $('#end-text').textContent = victory
-      ? `Половина ${place === 'Европа' ? 'континента' : 'Нового Света'} признала вашу корону. Историки будут спорить о методах, но не о результате.`
-      : reason === 'rival'
-        ? `${rivalName ?? 'Соперник'} собрал(а) половину ${place === 'Европа' ? 'континента' : 'Нового Света'} раньше вас. В следующий раз бейте по слабейшему соседу, а не по сильнейшему.`
+      ? `Каждая провинция ${place === 'Европа' ? 'Европы' : 'Нового Света'} под вашей короной. Полное завоевание — единственный способ победить, и у вас это получилось.`
+      : reason === 'eliminated'
+        ? 'Последнюю провинцию пришлось отдать. В следующий раз держите резервы в глубине и не открывайте все фронты сразу.'
         : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
     const stats = game.state.stats;
     $('#end-stats').innerHTML = `
@@ -725,35 +751,58 @@ export class App {
     if (!$('#modal-rankings').classList.contains('hidden')) this.#renderRankings();
   }
 
+  #offerText(offer) {
+    const game = this.game;
+    const left = Math.max(0, Math.ceil(offer.expires - game.state.time));
+    const pact = offer.kind === 'pact';
+    return pact
+      ? `Пакт о ненападении: ${Math.round(BAL.pactTruce)} с без нападений. Решение за вами — ${left} с.`
+      : `Перемирие ${Math.round(BAL.peaceTruce)} с. Обе стороны теряют усталость. Решение за вами — ${left} с.`;
+  }
+
   #renderOffers() {
     const card = $('#offer-card');
     if (!card) return;
     const game = this.game;
     const offers = game?.state?.offers ?? [];
     if (!game || !offers.length || game.state.status !== 'playing') {
-      card.classList.add('hidden');
-      card.innerHTML = '';
+      if (this.offerSignature) {
+        card.classList.add('hidden');
+        card.innerHTML = '';
+        this.offerSignature = '';
+      }
       return;
     }
-    card.classList.remove('hidden');
-    card.innerHTML = offers
-      .map((offer) => {
-        const nation = game.state.nations[offer.from];
-        const left = Math.max(0, Math.ceil(offer.expires - game.state.time));
-        return `
+    const signature = offers.map((offer) => `${offer.id}:${offer.kind ?? 'peace'}`).join(',');
+    // Rebuilding the card under the pointer eats the click (mousedown and mouseup
+    // land on different nodes), so only tick the countdowns until the set changes.
+    if (signature !== this.offerSignature) {
+      card.innerHTML = offers
+        .map((offer) => {
+          const nation = game.state.nations[offer.from];
+          const pact = offer.kind === 'pact';
+          return `
           <div class="offer-row" data-offer="${offer.id}">
             <span class="offer-dot" style="--swatch:${nation?.color ?? '#888'}"></span>
             <div class="offer-text">
-              <b>${nation?.short ?? 'Противник'} предлагает мир</b>
-              <span>Перемирие ${Math.round(BAL.peaceTruce)} с. Обе стороны теряют усталость. Решение за вами — ${left} с.</span>
+              <b>${offerTitle(nation?.short ?? 'Противник', offer.kind ?? 'peace')}</b>
+              <span data-offer-text="${offer.id}">${this.#offerText(offer)}</span>
             </div>
             <div class="offer-actions">
-              <button class="btn small primary" data-answer="1">Принять</button>
-              <button class="btn small ghost" data-answer="0">Воевать</button>
+              <button class="btn small primary" data-answer="1">${pact ? 'Принять пакт' : 'Принять'}</button>
+              <button class="btn small ghost" data-answer="0">${pact ? 'Отклонить' : 'Воевать'}</button>
             </div>
           </div>`;
-      })
-      .join('');
+        })
+        .join('');
+      this.offerSignature = signature;
+    } else {
+      for (const offer of offers) {
+        const line = card.querySelector(`[data-offer-text="${offer.id}"]`);
+        if (line) line.textContent = this.#offerText(offer);
+      }
+    }
+    card.classList.remove('hidden');
   }
 
   #updateOrders() {
@@ -779,19 +828,34 @@ export class App {
     }
   }
 
+  /**
+   * On a short landscape screen the onboarding pill sits exactly where the
+   * province card opens: hide it while the card is up instead of overlapping.
+   */
+  #syncHint(panel = $('#province-panel')) {
+    const hint = $('#hint-bar');
+    if (!hint || !panel) return;
+    hint.classList.toggle('muted', !panel.classList.contains('hidden'));
+  }
+
   #renderProvincePanel() {
+    // Live numbers must not replace the button under the pointer mid-click.
+    if (this.pressing) return;
     const panel = $('#province-panel');
     if (!this.game || !this.selectedProvince) {
       panel.classList.add('hidden');
+      this.#syncHint(panel);
       return;
     }
     const game = this.game;
     const province = game.state.provinces[this.selectedProvince];
     if (!province) {
       panel.classList.add('hidden');
+      this.#syncHint(panel);
       return;
     }
     panel.classList.remove('hidden');
+    this.#syncHint(panel);
     const owner = province.owner ? game.state.nations[province.owner] : null;
     const isMine = province.owner === game.state.nationId;
     const max = game.maxGarrison(province.id);
@@ -1039,12 +1103,6 @@ export class App {
         options: Object.entries(NEUTRAL_STRENGTH).map(([value, cfg]) => ({ value, label: cfg.label })),
       },
       {
-        key: 'victoryShare',
-        title: 'Условие победы',
-        hint: 'Доля провинций Европы, которую нужно контролировать.',
-        options: VICTORY_SHARES.map((option) => ({ value: option.value, label: option.label })),
-      },
-      {
         key: 'startPaused',
         title: 'Старт на паузе',
         hint: 'Партия начнётся остановленной: сначала осмотритесь, потом включайте время. Только для новой партии.',
@@ -1057,6 +1115,24 @@ export class App {
     sfx.click();
     this.#renderRules();
     $('#modal-rules').classList.remove('hidden');
+    this.#syncModalScroll('#modal-rules');
+  }
+
+  /**
+   * Long modals fade their last line while there is more to read. The mask is
+   * driven from real geometry so a modal that fits shows no fade at all.
+   */
+  #syncModalScroll(id) {
+    const root = $(id);
+    const body = root?.querySelector('.modal-body');
+    if (!body) return;
+    body.scrollTop = 0;
+    const sync = () => {
+      const more = body.scrollHeight - body.clientHeight - body.scrollTop > 6;
+      body.classList.toggle('has-more', more);
+    };
+    body.__sync = sync;
+    sync();
   }
 
   #renderRules() {
@@ -1096,7 +1172,6 @@ export class App {
       this.game.setRules({ [key]: value });
       this.pendingRules = normalizeRules(this.game.state.rules);
       this.save();
-      if (key === 'victoryShare') this.#updateHud();
       this.#updatePauseSummary();
     } else {
       this.pendingRules = normalizeRules({ ...this.pendingRules, [key]: value });
@@ -1298,7 +1373,12 @@ export class App {
     $('#btn-howto').addEventListener('click', () => {
       sfx.click();
       $('#modal-howto').classList.remove('hidden');
+      this.#syncModalScroll('#modal-howto');
     });
+    for (const body of document.querySelectorAll('.modal-body')) {
+      body.addEventListener('scroll', () => body.__sync?.(), { passive: true });
+      new ResizeObserver(() => body.__sync?.()).observe(body);
+    }
     for (const button of document.querySelectorAll('[data-close]')) {
       button.addEventListener('click', () => {
         sfx.click();
@@ -1351,6 +1431,7 @@ export class App {
       sfx.click();
     });
 
+    $('#btn-pause-rankings').addEventListener('click', () => this.#openRankings());
     $('#btn-pause-rules').addEventListener('click', () => {
       this.rulesReturnToPause = true;
       $('#modal-pause').classList.add('hidden');
@@ -1395,10 +1476,9 @@ export class App {
     for (const button of $('#ratio-group').children) {
       button.addEventListener('click', () => {
         const ratio = Number(button.dataset.ratio);
+        this.preferredRatio = ratio;
         if (this.game) this.game.setSendRatio(ratio);
-        for (const other of $('#ratio-group').children) {
-          other.classList.toggle('active', other === button);
-        }
+        this.#syncRatioButtons();
         sfx.click();
       });
     }
@@ -1456,6 +1536,23 @@ export class App {
       this.showMenu();
     });
 
+    // A live UI must not rebuild itself between pointerdown and pointerup.
+    document.addEventListener('pointerdown', () => { this.pressing = true; }, true);
+    const release = () => {
+      if (!this.pressing) return;
+      this.pressing = false;
+      // Refresh after the click event has been dispatched: rebuilding the panel
+      // in pointerup would replace the button before its click handler runs.
+      setTimeout(() => {
+        if (this.screen !== 'game' || !this.game || this.pressing) return;
+        this.#updateHud();
+        if (this.selectedProvince) this.#renderProvincePanel();
+      }, 0);
+    };
+    document.addEventListener('pointerup', release, true);
+    document.addEventListener('pointercancel', release, true);
+    window.addEventListener('blur', release);
+
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.save();
     });
@@ -1498,10 +1595,17 @@ export class App {
     const index = steps.findIndex((v) => Math.abs(v - current) < 0.01);
     const next = steps[(index + 1) % steps.length];
     this.game.setSendRatio(next);
-    for (const button of $('#ratio-group').children) {
-      button.classList.toggle('active', Math.abs(Number(button.dataset.ratio) - next) < 0.01);
-    }
+    this.preferredRatio = next;
+    this.#syncRatioButtons();
     this.#toast(`В поход уйдёт ${Math.round(next * 100)}% гарнизона`, 'info');
+  }
+
+  /** Keeps the highlighted button equal to the ratio the game will actually use. */
+  #syncRatioButtons() {
+    const ratio = this.game?.state?.sendRatio ?? this.preferredRatio;
+    for (const button of $('#ratio-group').children) {
+      button.classList.toggle('active', Math.abs(Number(button.dataset.ratio) - ratio) < 0.01);
+    }
   }
 
   setSpeed(speed) {

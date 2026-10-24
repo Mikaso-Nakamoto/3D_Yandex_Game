@@ -1,13 +1,17 @@
 // Single place for tunable numbers. Values are in "game seconds" at speed x1.
 export const BAL = {
-  victoryShare: 0.5,
+  victoryShare: 1, // full conquest: every province of the theatre
 
   // Province economy
   incomeBase: 0.025,
   incomePop: 0.005,
   factoryIncome: 0.5,
-  manpowerBase: 0.035,
-  manpowerPop: 0.0011,
+  // Recruits per second, per province. Tuned against reinforceShare so that a
+  // ruined garrison refills at roughly the rate recruits arrive: with the old
+  // 0.035 + 0.0011·pop the demand was ~10× the supply, the pool sat at zero and
+  // a beaten army could never be rebuilt ("я копил силы, а уже проиграл").
+  manpowerBase: 0.12,
+  manpowerPop: 0.0114,
   factoryManpower: 0.3,
   manpowerCapBase: 150,
   manpowerCapPop: 4,
@@ -70,8 +74,15 @@ export const BAL = {
   exhaustionCalmAfter: 35, // seconds without battles before decay starts
   exhaustionIncome: 0.3, // income penalty at 100 % weariness
   peaceOfferAt: 55, // exhaustion level that makes an AI sue for peace
+  peaceTalksWindow: 150,
+  // A refused or ignored offer is not repeated at once: the same neighbour
+  // offering the same pact every few seconds turned the offer card into spam.
+  offerCooldown: 150,
+  offerCooldownAfterRefusal: 240, // after a refusal the same nation stays quiet longer
   peaceTruce: 150, // seconds of truce after a peace deal
   peaceRelief: 28, // exhaustion removed by a peace deal
+  pactTruce: 240, // a non-aggression pact lasts longer than a peace deal
+  pactRelief: 10, // ...but calms the rivals down less
 
   // Orders
   orderCooldown: 55,
@@ -82,6 +93,12 @@ export const BAL = {
   // Economy multipliers for AI
   aiSpendReserve: 45,
   aiThinkBase: 4.2,
+  // The AI starts cautious and winds up: at t=0 it acts on ~45 % of its usual
+  // aggression, reaching the full tempo after this many seconds. Without the
+  // ramp a 3-province neighbour swallowed five neutral provinces inside a
+  // minute while the player was still reading the tutorial.
+  aiOpeningRamp: 300,
+  aiOpeningTempo: 0.45,
 
   // Log
   logLimit: 50,

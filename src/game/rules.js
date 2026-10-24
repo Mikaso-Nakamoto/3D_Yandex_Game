@@ -6,7 +6,7 @@ export const DEFAULT_RULES = {
   aiPassive: false, // AI never launches attacks at all (sandbox)
   aiEconomy: 'normal', // weak | normal | strong
   neutrals: 'normal', // weak | normal | strong
-  victoryShare: 0.5, // share of provinces needed to win
+  victoryShare: 1, // kept for save compatibility; victory always needs the whole map
   startPaused: false,
 };
 
@@ -28,21 +28,15 @@ export const NEUTRAL_STRENGTH = {
   strong: { strength: 1.3, label: 'Сильные' },
 };
 
-export const VICTORY_SHARES = [
-  { value: 0.4, label: '40%' },
-  { value: 0.5, label: '50%' },
-  { value: 0.65, label: '65%' },
-];
-
 /** Merges partial rules with defaults and clamps unknown values. */
 export function normalizeRules(rules = {}) {
   const merged = { ...DEFAULT_RULES, ...(rules ?? {}) };
   if (!AI_STYLE[merged.aiStyle]) merged.aiStyle = DEFAULT_RULES.aiStyle;
   if (!AI_ECONOMY[merged.aiEconomy]) merged.aiEconomy = DEFAULT_RULES.aiEconomy;
   if (!NEUTRAL_STRENGTH[merged.neutrals]) merged.neutrals = DEFAULT_RULES.neutrals;
-  const share = Number(merged.victoryShare);
-  merged.victoryShare =
-    Number.isFinite(share) && share >= 0.1 && share <= 0.95 ? share : DEFAULT_RULES.victoryShare;
+  // Old saves could ask for 40/50/65 %: the rule is gone, so normalise them all
+  // to full conquest instead of silently letting a half-map win through.
+  merged.victoryShare = 1;
   merged.peaceUntilFirstWar = Boolean(merged.peaceUntilFirstWar);
   merged.aiPassive = Boolean(merged.aiPassive);
   merged.startPaused = Boolean(merged.startPaused);
@@ -55,6 +49,6 @@ export function describeRules(rules = {}) {
   const parts = [AI_STYLE[r.aiStyle].label.toLowerCase() + ' ИИ'];
   if (r.aiPassive) parts.push('без войн');
   else if (r.peaceUntilFirstWar) parts.push('мир до вашей войны');
-  parts.push(`победа ${Math.round(r.victoryShare * 100)}%`);
+  parts.push('победа — вся карта');
   return parts.join(' · ');
 }

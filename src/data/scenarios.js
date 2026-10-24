@@ -3,19 +3,21 @@ export const THEATRES = {
   europe: {
     id: 'europe',
     title: 'Европа',
+    short: 'Европа',
     blurb: 'Плотная карта: короткие границы, много соседей, быстрые войны.',
   },
   america: {
     id: 'america',
     title: 'Северная Америка',
+    short: 'Сев. Америка',
     blurb: 'Простор: огромные расстояния, редкие границы, морские пути вдоль берегов.',
   },
 };
 
-/** "Победа: <genitive> под вашей короной" reads correctly for every theatre. */
+/** "Победа: <phrase> под вашей короной" reads correctly for every theatre. */
 export const THEATRE_GENITIVE = {
-  europe: 'половина Европы',
-  america: 'половина Нового Света',
+  europe: 'вся Европа',
+  america: 'весь Новый Свет',
 };
 
 export const SCENARIOS = [
@@ -310,7 +312,7 @@ export const SCENARIOS = [
       {
         id: 'MOS',
         army: 1.2,
-        name: 'Великое княжество Московское', short: 'Московия', color: '#4f8a5b', capital: 'RU',
+        name: 'Русское государство', short: 'Русь', color: '#4f8a5b', capital: 'RU',
         provinces: ['RU'], ai: { aggression: 1.1, eco: 0.95 },
       },
       {
@@ -357,19 +359,21 @@ export const SCENARIOS = [
     monthsPerSecond: 0.3,
     difficulty: 'Средне',
     blurb:
-      'Молодая республика на востоке, британские земли на севере, испанские вице-королевства на юге и русская колония на краю света. Атлантика далеко, а соседи близко.',
+      'Молодая республика на востоке, британские земли на севере, испанские вице-королевства на юге и русские владения на северо-западе. Атлантика далеко, а соседи близко.',
     nations: [
       {
         id: 'USA',
         army: 1.1,
         name: 'Соединённые Штаты', short: 'США', color: '#3f6fb5', capital: 'NE',
-        provinces: ['NE', 'MW', 'SO', 'PL', 'WE'], ai: { aggression: 1.0, eco: 1.1 },
+        // The frontier west and Louisiana stay contested, otherwise the republic
+        // owns two thirds of the map before the first shot is fired.
+        provinces: ['NE', 'MW', 'SO'], ai: { aggression: 1.0, eco: 1.1 },
       },
       {
         id: 'BNA',
         army: 1.2,
         name: 'Британская Северная Америка', short: 'Британия', color: '#b04a4a', capital: 'CA',
-        provinces: ['CA', 'NW', 'GL'], ai: { aggression: 0.85, eco: 1.05 },
+        provinces: ['CA', 'GL'], army: 1.5, ai: { aggression: 0.85, eco: 1.05 },
       },
       {
         id: 'ESP',
@@ -381,17 +385,20 @@ export const SCENARIOS = [
         id: 'RUS',
         army: 1.0,
         name: 'Российско-американская компания', short: 'Русская Америка', color: '#4f8a5b', capital: 'AK',
-        provinces: ['AK'], ai: { aggression: 0.7, eco: 0.95 },
+        // Alaska alone fields 21 men and borders a much stronger colony, so the
+        // Oregon country stays with Russia too — otherwise the nation is a dead end.
+        provinces: ['AK', 'NW'], army: 1.4, ai: { aggression: 0.7, eco: 0.95 },
       },
       {
         id: 'HAI',
         army: 0.6,
         name: 'Государство Гаити', short: 'Гаити', color: '#8a6aa8', capital: 'HI',
-        provinces: ['HI'], ai: { aggression: 0.75, eco: 0.9 },
+        provinces: ['HI'], army: 1.1, ai: { aggression: 0.75, eco: 0.9 },
       },
     ],
     neutrals: [
-      { province: 'GL', garrison: 0.35, fort: 1 },
+      { province: 'PL', garrison: 0.8, fort: 0 },
+      { province: 'WE', garrison: 0.8, fort: 1 },
     ],
     balance: { aiAggression: 0.9, aiEco: 1.0, neutralStrength: 0.9 },
   },

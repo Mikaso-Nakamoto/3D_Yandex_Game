@@ -10,7 +10,7 @@
     <title>Короны Европы — стратегия завоевания</title>
     <meta
       name="description"
-      content="Короны Европы — браузерная стратегия в реальном времени: выберите эпоху и державу, захватите половину Европы."
+      content="Короны Европы — браузерная стратегия в реальном времени: выберите эпоху и державу и завоюйте всю карту."
     />
     <link
       rel="icon"
@@ -148,10 +148,11 @@
 
     <!-- Как играть -->
     <div id="modal-howto" class="modal hidden">
-      <div class="modal-card">
+      <div class="modal-card split">
         <button class="modal-close" data-close="modal-howto">✕</button>
         <div class="eyebrow">Правила</div>
         <h2>Как играть</h2>
+        <div class="modal-body">
         <div class="howto-grid">
           <div>
             <h3>1. Выберите театр, эпоху и державу</h3>
@@ -184,13 +185,14 @@
             <h3>5. Следите за духом и усталостью</h3>
             <p>
               Победы поднимают боевой дух, затяжная война копит усталость и режет
-              доход. Уставший противник предложит мир — можно принять перемирие
-              или воевать дальше.
+              доход. Уставший противник, с которым вы воюете, предложит мир;
+              сосед, с которым вы ещё не воевали, — пакт о ненападении.
             </p>
             <h3>6. Побеждайте</h3>
             <p>
-              Захватите половину провинций театра. Приказы, доктрина и перемирия
-              помогут переломить ход войны.
+              Победа только одна — взять все провинции театра. Половина карты
+              даёт лишь преимущество. Приказы, доктрина и перемирия помогут
+              переломить ход войны.
             </p>
           </div>
         </div>
@@ -201,7 +203,10 @@
           <span><kbd>Tab</kbd> доля войск, <kbd>R</kbd> обстановка</span>
           <span><kbd>Esc</kbd> меню</span>
         </div>
-        <button class="btn primary" data-close="modal-howto">Понятно</button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn primary" data-close="modal-howto">Понятно</button>
+        </div>
       </div>
     </div>
 
@@ -221,12 +226,14 @@
 
     <!-- Правила партии -->
     <div id="modal-rules" class="modal hidden">
-      <div class="modal-card wide">
+      <div class="modal-card wide split">
         <button class="modal-close" data-close="modal-rules">✕</button>
         <div class="eyebrow">Настройки</div>
         <h2>Правила партии</h2>
         <p class="modal-sub" id="rules-sub">Эти правила определяют, насколько агрессивно ведёт себя ИИ и как считается победа.</p>
-        <div class="rules-list" id="rules-list"></div>
+        <div class="modal-body">
+          <div class="rules-list" id="rules-list"></div>
+        </div>
         <div class="rules-foot">
           <button class="btn ghost" id="btn-rules-reset">Сбросить</button>
           <button class="btn primary" data-close="modal-rules">Готово</button>
@@ -240,6 +247,7 @@
         <div class="eyebrow">Партия</div>
         <h2>Пауза</h2>
         <button class="btn primary" id="btn-resume">Вернуться в игру</button>
+        <button class="btn ghost" id="btn-pause-rankings">Обстановка</button>
         <button class="btn ghost" id="btn-pause-rules">Правила партии</button>
         <button class="btn ghost" id="btn-restart">Начать заново</button>
         <button class="btn ghost" id="btn-menu">Выйти в меню</button>

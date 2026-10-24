@@ -480,6 +480,11 @@ body {
   color: var(--muted);
 }
 
+/* Two spellings of the theatre ship with every card; only one is ever shown. */
+.scenario-meta .th-short {
+  display: none;
+}
+
 .difficulty {
   display: flex;
   gap: 3px;
@@ -781,6 +786,19 @@ body {
   flex-direction: column;
   gap: 14px;
   min-height: 320px;
+  overflow: hidden;
+}
+
+/* Everything except the CTA scrolls: on a short landscape screen the button
+   must always stay visible instead of being cut off below the edge. */
+.detail-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .detail-empty {
@@ -1545,8 +1563,26 @@ body {
   pointer-events: none;
 }
 
+.log::before {
+  /* column-reverse clips the oldest line mid-sentence at the top edge; a soft
+     fade marks it as "history continues" instead of looking like a glitch. */
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 1px;
+  height: 22px;
+  border-radius: 12px 12px 0 0;
+  background: linear-gradient(180deg, rgba(9, 16, 27, 0.96), rgba(9, 16, 27, 0));
+  pointer-events: none;
+  z-index: 1;
+}
+
 .log-line {
   display: block;
+  /* A column-reverse flex parent sized the entries by their longest word, so a
+     one-sentence event wrapped into a seven-line tower 96 px wide. */
+  width: 100%;
   animation: log-in 0.2s ease-out;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -1658,8 +1694,10 @@ body {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(4, 8, 14, 0.72);
-  backdrop-filter: blur(8px);
+  background: rgba(4, 8, 14, 0.78);
+  /* No backdrop-filter: on several mobile GPUs (and in software rendering) the
+     blurred backdrop is composited over the dialog, making the card see-through
+     and the text unreadable. A plain darkening layer is stable everywhere. */
   animation: fade-in 0.16s ease-out;
 }
 
@@ -1909,6 +1947,7 @@ kbd {
   }
 
   .chip,
+  .chip.resource,
   .progress-wrap {
     height: 30px;
     padding: 0 9px;
@@ -2022,20 +2061,23 @@ kbd {
     transform: translateY(-50%);
     flex-direction: column;
     gap: 5px;
-    max-width: 96px;
+    max-width: 112px;
   }
 
   .order {
-    width: 78px;
-    padding: 7px 4px 6px;
+    /* «Форсированный» is 81 px at 9.5 px type: a 92 px card cut it mid-word. */
+    width: 100px;
+    padding: 7px 5px 6px;
     border-radius: 9px;
   }
 
   .order .o-name {
-    font-size: 9px;
+    font-size: 9.5px;
     line-height: 1.2;
-    word-break: break-word;
-    hyphens: auto;
+    /* «Форсированн-ый марш» looked like a typo: wrap on spaces only. */
+    word-break: normal;
+    overflow-wrap: break-word;
+    hyphens: none;
   }
 
   .order .o-cost {
@@ -2187,6 +2229,7 @@ kbd {
 
   .select-body {
     grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: stretch;
     overflow: hidden;
     flex: 1;
     min-height: 0;
@@ -2219,7 +2262,56 @@ kbd {
     padding: 10px;
     gap: 8px;
     min-height: 0;
-    overflow-y: auto;
+    /* The column is as tall as the body, not as tall as its content: otherwise
+       the «Начать правление» button was cut off below the screen edge. */
+    max-height: 100%;
+  }
+
+  .detail-scroll {
+    gap: 6px;
+  }
+
+  /* Four stat cards in one row instead of a 2×2 block: on a 390 px tall screen
+     the saved 38 px are the difference between scrolling and not scrolling. */
+  .detail-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .ds {
+    padding: 4px 6px;
+    gap: 0;
+  }
+
+  .ds .k {
+    font-size: 7.5px;
+    letter-spacing: 0.03em;
+  }
+
+  .ds .v {
+    font-size: 11px;
+  }
+
+  .detail-head {
+    gap: 8px;
+  }
+
+  .detail-head h3 {
+    font-size: 14px;
+  }
+
+  .detail-rules {
+    padding: 5px 8px;
+    font-size: 10px;
+    gap: 5px;
+  }
+
+  .rules-label {
+    font-size: 8px;
+  }
+
+  #btn-start {
+    min-height: 42px;
   }
 
   .detail-crest {
@@ -2947,5 +3039,506 @@ kbd {
 @media (max-height: 560px) and (orientation: landscape) {
   .defense-note {
     display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- menus that fit */
+
+/* The menu was 819 px tall on a 650 px laptop viewport: the brand was clipped at
+   the top and the buttons fell below the fold, so they looked broken. Let the
+   screen scroll, centre only when there is room, and leave space for the footer. */
+.menu-screen {
+  justify-content: flex-start;
+}
+
+.menu-wrap {
+  margin: auto 0;
+  padding-bottom: 52px;
+}
+
+/* On a 900 px-tall window the centred block plus that footer pad was 8 px
+   taller than the screen, so the page scrolled by a sliver. Trim the pad
+   before touching the layout itself. */
+@media (min-height: 861px) and (max-height: 960px) {
+  .menu-wrap {
+    padding-bottom: 24px;
+  }
+}
+
+@media (max-height: 820px) {
+  .menu-wrap {
+    gap: 16px;
+    padding: 10px 0 44px;
+  }
+
+  .brand-crown {
+    font-size: 22px;
+    margin-bottom: 2px;
+  }
+
+  .brand h1 {
+    font-size: clamp(30px, 4.2vw, 44px);
+  }
+
+  .tagline {
+    margin-top: 6px;
+    font-size: 11px;
+  }
+
+  .scenario-card {
+    padding: 14px 16px 12px;
+  }
+
+  .scenario-era {
+    font-size: 28px;
+  }
+
+  .scenario-title {
+    font-size: 18px;
+    margin: 6px 0 6px;
+  }
+
+  .scenario-desc {
+    font-size: 12px;
+    line-height: 1.4;
+    min-height: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .scenario-meta {
+    margin-top: 10px;
+    padding-top: 8px;
+  }
+
+  .menu-actions .btn {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+}
+
+@media (max-height: 640px) {
+  .scenario-desc {
+    -webkit-line-clamp: 2;
+  }
+}
+
+@media (max-height: 560px) {
+  .brand-crown,
+  .tagline {
+    display: none;
+  }
+
+  .scenario-desc {
+    -webkit-line-clamp: 1;
+  }
+}
+
+/* ---------------------------------------------------------------- scrollbars */
+
+/* Chrome/Edge/Safari */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(6, 12, 20, 0.35);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(217, 180, 90, 0.5), rgba(169, 130, 47, 0.45));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(240, 205, 120, 0.7), rgba(190, 148, 60, 0.65));
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox only: the standard properties would override the custom WebKit bar
+   in Chrome, so the gold rounded thumb above is kept for Blink/WebKit. */
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(217, 180, 90, 0.45) rgba(6, 12, 20, 0.35);
+  }
+}
+
+/* Keep the layout steady when a scrollbar appears (rules, rankings, pickers). */
+.modal-card,
+.modal-body,
+.nation-grid,
+.province-panel,
+.menu-screen {
+  scrollbar-gutter: stable;
+}
+
+/* Modals opened from the pause menu must paint above it: they sit earlier in
+   the DOM, and equal z-index made the button look dead. */
+#modal-rules,
+#modal-rankings {
+  z-index: 22;
+}
+
+/* Long modals (how to play, match rules) split into a fixed header, a
+   scrolling middle and a fixed action row: the primary button never hides
+   below the fold, and the styled scrollbar only runs along the middle. */
+.modal-card.split {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 18px;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Room for the scrollbar so it does not sit on the text. */
+  padding-right: 8px;
+  margin-right: -8px;
+}
+
+.modal-card.split > .eyebrow,
+.modal-card.split > h2,
+.modal-card.split > .modal-sub {
+  flex: 0 0 auto;
+}
+
+.modal-actions,
+.rules-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(140, 165, 200, 0.14);
+}
+
+/* «Сбросить» belongs to the far side of the row, «Готово» to the near one. */
+.rules-foot {
+  justify-content: space-between;
+}
+
+/* Phone held sideways (844×390 and similar): five cards stacked in three
+   columns pushed «Как играть» below the fold. One row of five keeps the whole
+   start screen — brand, scenarios, buttons — visible without scrolling. */
+@media (max-height: 460px) and (orientation: landscape) {
+  .menu-wrap {
+    gap: 10px;
+    padding: 6px 0 12px;
+  }
+
+  .brand-crown {
+    font-size: 18px;
+    margin-bottom: 0;
+  }
+
+  .brand h1 {
+    font-size: 26px;
+  }
+
+  .tagline {
+    display: none;
+  }
+
+  .scenario-list {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    max-width: none;
+  }
+
+  .scenario-card {
+    padding: 8px 9px;
+  }
+
+  .scenario-era {
+    font-size: 20px;
+  }
+
+  .scenario-title {
+    font-size: 12px;
+    margin: 2px 0 0;
+    -webkit-line-clamp: 2;
+  }
+
+  .scenario-desc,
+  .scenario-meta .difficulty {
+    display: none;
+  }
+
+  .scenario-meta {
+    margin-top: 4px;
+    padding-top: 4px;
+    font-size: 8.5px;
+    gap: 2px 6px;
+    flex-wrap: wrap;
+    line-height: 1.25;
+  }
+
+  .scenario-meta > span {
+    white-space: nowrap;
+  }
+
+  .scenario-meta .th-short {
+    display: none;
+  }
+
+  .menu-actions {
+    gap: 8px;
+  }
+
+  .menu-actions .btn {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+}
+
+/* Narrowest landscape phones (568 px wide): the long continent name no longer
+   fits beside the province count, so the abbreviated form takes over. */
+@media (max-width: 700px) and (max-height: 460px) and (orientation: landscape) {
+  .scenario-meta .th-long {
+    display: none;
+  }
+
+  .scenario-meta .th-short {
+    display: inline;
+  }
+
+  .scenario-meta {
+    font-size: 8px;
+  }
+}
+
+/* ---------------------------------------------------------------- short modals */
+
+/* On a landscape phone the modal is ~335 px tall: a 30 px heading plus 26 px
+   padding ate half of it. Tighten the chrome, keep the text readable, and let
+   the fade at the bottom signal that the text continues. */
+/* A painted gradient, not a mask: masked scroll layers mis-composited in some
+   Chromium builds and let the screen behind bleed through the dialog. */
+.modal-actions,
+.rules-foot {
+  position: relative;
+}
+
+.modal-card.split .modal-actions::before,
+.modal-card.split .rules-foot::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 28px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  background: linear-gradient(180deg, rgba(12, 20, 32, 0) 0%, rgba(12, 20, 32, 0.96) 78%);
+}
+
+.modal-body.has-more ~ .modal-actions::before,
+.modal-body.has-more ~ .rules-foot::before {
+  opacity: 1;
+}
+
+@media (max-width: 720px) {
+  .howto-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (max-height: 520px) {
+  .modal-card {
+    max-height: 94vh;
+  }
+
+  .modal-card.split {
+    padding: 14px 16px 12px;
+  }
+
+  .modal-card h2 {
+    font-size: 21px;
+    margin: 0 0 8px;
+  }
+
+  .modal-card.split > .eyebrow {
+    display: none;
+  }
+
+  .modal-card .modal-sub {
+    margin-bottom: 8px;
+    font-size: 11px;
+  }
+
+  .howto-grid {
+    gap: 0 18px;
+  }
+
+  .howto-grid h3 {
+    font-size: 11.5px;
+    margin-bottom: 3px;
+  }
+
+  .howto-grid p {
+    margin-bottom: 8px;
+    font-size: 11px;
+    line-height: 1.42;
+  }
+
+  .hotkeys {
+    gap: 8px;
+    padding: 8px 0;
+    margin-bottom: 6px;
+    font-size: 10px;
+  }
+
+  .modal-actions,
+  .rules-foot {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+
+  .modal-actions .btn,
+  .rules-foot .btn {
+    padding: 8px 16px;
+    font-size: 12px;
+  }
+
+  .modal-close {
+    top: 8px;
+    right: 10px;
+  }
+}
+
+/* ---------------------------------------------------------------- nation difficulty */
+
+/* The select screen says how hard a nation is before the player commits to it:
+   a one-province colony and a continental empire were listed as equals. */
+.tile-diff,
+.detail-diff {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.tile-diff {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+.detail-diff {
+  margin-left: auto;
+  align-self: flex-start;
+  font-size: 10px;
+  padding: 3px 8px;
+}
+
+.tile-diff[data-level='easy'],
+.detail-diff[data-level='easy'] {
+  color: #8fc98a;
+}
+
+.tile-diff[data-level='mid'],
+.detail-diff[data-level='mid'] {
+  color: var(--gold);
+}
+
+.tile-diff[data-level='hard'],
+.detail-diff[data-level='hard'] {
+  color: #d98a7f;
+}
+
+/* The onboarding pill yields to an open province card. */
+.hint-bar.muted {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* Very short landscape phones (667×375 and below): squeeze the nation card
+   until it fits without scrolling, so the CTA never hides content. */
+@media (max-height: 400px) {
+  .nation-detail {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .detail-scroll {
+    gap: 4px;
+  }
+
+  .detail-head {
+    gap: 6px;
+  }
+
+  .detail-crest {
+    width: 28px;
+    height: 28px;
+  }
+
+  .detail-head h3 {
+    font-size: 13px;
+  }
+
+  /* Values must stay on one line: «185.0 млн» wrapped into a two-line tower
+     in a four-column row on a 375 px tall screen. */
+  .ds .v {
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .ds .k {
+    font-size: 7px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail-doctrine {
+    gap: 4px;
+    padding-top: 0;
+  }
+
+  .doctrine {
+    padding: 4px 3px;
+  }
+
+  .doctrine .d-name {
+    font-size: 9.5px;
+  }
+
+  .detail-rules {
+    padding: 4px 7px;
+    font-size: 9px;
+  }
+}
+
+/* Touch targets on phones: 30 px rows are hard to hit with a thumb. */
+@media (max-height: 520px) {
+  .upg {
+    min-height: 36px;
+    padding: 6px 8px;
+  }
+
+  .segmented button {
+    min-height: 32px;
   }
 }
