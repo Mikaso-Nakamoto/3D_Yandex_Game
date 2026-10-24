@@ -1752,6 +1752,10 @@ export class Game {
       seed: save.rng ?? 1,
     });
     game.state = save.state;
+    // Saves written before standing orders existed must still load; the field is
+    // simply empty for them.
+    game.state.autos = Array.isArray(game.state.autos) ? game.state.autos : [];
+    game.state.nextAutoId = game.state.nextAutoId ?? 1;
     game.state.rules = normalizeRules(save.state.rules ?? {});
     game.rules = game.state.rules;
     game.rng.s = save.rng >>> 0;
