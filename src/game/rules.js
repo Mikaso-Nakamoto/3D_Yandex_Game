@@ -10,10 +10,12 @@ export const DEFAULT_RULES = {
   startPaused: false,
 };
 
+// `label` is the word next to the selector («Спокойная»), `short` the same word
+// in the masculine, because the summary reads «… ИИ» — «обычная ИИ» was wrong.
 export const AI_STYLE = {
-  calm: { aggression: 0.5, label: 'Спокойная' },
-  normal: { aggression: 1, label: 'Обычная' },
-  hard: { aggression: 1.45, label: 'Жёсткая' },
+  calm: { aggression: 0.5, label: 'Спокойная', short: 'Спокойный' },
+  normal: { aggression: 1, label: 'Обычная', short: 'Обычный' },
+  hard: { aggression: 1.45, label: 'Жёсткая', short: 'Жёсткий' },
 };
 
 export const AI_ECONOMY = {
@@ -61,7 +63,7 @@ export function ruleOptionMatches(rules, key, rawOption) {
 /** Short human summary used on the nation screen and in the pause menu. */
 export function describeRules(rules = {}) {
   const r = normalizeRules(rules);
-  const parts = [AI_STYLE[r.aiStyle].label.toLowerCase() + ' ИИ'];
+  const parts = [AI_STYLE[r.aiStyle].short + ' ИИ'];
   if (r.aiPassive) parts.push('без войн');
   else if (r.peaceUntilFirstWar) parts.push('мир до вашей войны');
   parts.push('победа — вся карта');

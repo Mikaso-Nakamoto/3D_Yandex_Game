@@ -1375,6 +1375,9 @@ export class App {
     const income = (BAL.incomeBase + province.pop * BAL.incomePop) * (1 + province.factory * BAL.factoryIncome);
     const doctrineIncome = 1 + (game.player.doctrine === 'coin' ? 0.3 : 0);
     const recruits = (BAL.manpowerBase + province.pop * BAL.manpowerPop) * (1 + province.factory * BAL.factoryManpower);
+    // The same forecast the rows show, kept here so the «В поход» button can
+    // name the province the column starts from.
+    const odds = isMine ? null : game.bestAttackOdds(province.id);
 
     const upgrades = Object.values(UPGRADES)
       .map((upgrade) => {
@@ -1458,7 +1461,6 @@ export class App {
         ${
           !isMine
             ? (() => {
-                const odds = game.bestAttackOdds(province.id);
                 if (!odds) {
                   return '<div class="pp-row"><span>Штурм</span><b class="muted">нет соседней своей провинции</b></div>';
                 }
@@ -1496,6 +1498,16 @@ export class App {
         <div class="pp-row"><span>Крепость</span><b>${province.fort > 0 ? `уровень ${province.fort} из ${BAL.maxLevel}` : 'нет'}</b></div>
       </div>
 
+      ${
+        !isMine && odds
+          ? `<button type="button" class="btn primary wide pp-attack" data-attack="${odds.from}">
+              В поход: ${fmt(odds.troops)} чел.
+              <span class="pp-attack-sub">Откуда: «${game.provinceName(odds.from)}» · ${Math.round(
+                game.state.sendRatio * 100,
+              )}% гарнизона</span>
+            </button>`
+          : ''
+      }
       ${isMine ? this.#autoInline(province.id) : ''}
       ${isMine ? this.#armiesBlock(province.id) : ''}
       ${isMine ? this.#passageInline() : ''}
@@ -2693,6 +2705,14 @@ export class App {
       if (pactButton && this.game) {
         if (pactButton.disabled) return;
         this.#askPact(pactButton.dataset.pact);
+        return;
+      }
+      const attackButton = event.target.closest('[data-attack]');
+      if (attackButton && this.game) {
+        if (attackButton.disabled) return;
+        // The button and a drag land in the same place, so the pact warning,
+        // the route planner and the sea toll all behave exactly the same.
+        this.#dragDrop(attackButton.dataset.attack, this.selectedProvince);
         return;
       }
       const recallButton = event.target.closest('[data-recall]');
