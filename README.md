@@ -16,12 +16,13 @@ npm install
 npm run dev      # http://localhost:5173
 npm run build    # dist/ — статика для Яндекс Игр
 npm run preview  # предпросмотр сборки
-npm test         # 112 тестов: карта, правила, бой, ИИ, сохранения
+npm test         # 114 тестов: карта, правила, бой, ИИ, сохранения
 ```
 
 Пересобрать карту из исходных геоданных:
 
 ```bash
+node tools/build-admin1.mjs     # Natural Earth 10m admin-1 -> src/data/admin1.json (нужен файл в .cache/)
 npm run geo      # tools/build-map.mjs -> src/data/map.json + map-america.json
 node tools/build-atlantic.mjs   # map.json + map-america.json -> map-atlantic.json
 node tools/build-world.mjs      # три источника -> map-world.json

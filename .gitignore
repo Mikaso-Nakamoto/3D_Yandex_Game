@@ -3,3 +3,6 @@ dist
 .DS_Store
 *.local
 *.log
+
+# Natural Earth sources downloaded by tools/build-admin1.mjs (63 MB, not needed in git)
+.cache/

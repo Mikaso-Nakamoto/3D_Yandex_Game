@@ -4,7 +4,7 @@ import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
 import { SCENARIOS, DOCTRINES, THEATRES, getScenario, hasScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
-import { NEUTRAL_COLOR } from '../data/palette.js';
+import { assignNeutralColors } from '../data/neutral.js';
 import {
   DEFAULT_RULES,
   AI_STYLE,
@@ -293,11 +293,48 @@ export class App {
 
   #previewColors(scenario) {
     const colors = {};
-    for (const province of this.map.provinces) colors[province.id] = NEUTRAL_COLOR;
+    for (const [id, color] of this.#neutralShades()) colors[id] = color;
     for (const nation of scenario.nations) {
       for (const provinceId of nation.provinces) colors[provinceId] = nation.color;
     }
     return colors;
+  }
+
+  /**
+   * One muted colour per unowned province, so the map reads as a hundred
+   * countries rather than one grey «neutral territory». Cached per theatre:
+   * the assignment is a graph colouring and does not change while playing.
+   */
+  #neutralShades() {
+    if (!this.neutralShades || this.neutralShadesMap !== this.map) {
+      this.neutralShades = assignNeutralColors(this.map.provinces);
+      this.neutralShadesMap = this.map;
+    }
+    return this.neutralShades;
+  }
+
+  /**
+   * Whose country a province is. For land nobody has taken the map prints the
+   * country it belongs to — «Монголия», «Китай» — instead of the faceless
+   * «нейтральная территория» that used to cover half the planet.
+   */
+  #countryName(provinceId) {
+    const province = this.mapById[provinceId];
+    return province?.country ?? province?.nameRu ?? this.mapById[provinceId]?.name ?? '';
+  }
+
+  /** Subtitle for a province nobody owns: country first, never «нейтральная». */
+  #unownedLabel(provinceId) {
+    const province = this.mapById[provinceId];
+    const country = this.#countryName(provinceId);
+    const name = province?.nameRu ?? province?.name ?? '';
+    return country && country !== name ? `${country} · независимая` : 'независимая страна';
+  }
+
+  /** Colour of a province right now: its owner's colour or its own shade. */
+  #provinceColor(province) {
+    if (province.owner) return this.game.state.nations[province.owner].color;
+    return this.#neutralShades().get(province.id) ?? '#4a5259';
   }
 
   #nationPreview(nation) {
@@ -960,7 +997,7 @@ export class App {
     }
     this.#tooltip(provinceId, {
       title: game.provinceName(provinceId),
-      owner: owner ? owner.name : 'Нейтральная территория',
+      owner: owner ? owner.name : this.#unownedLabel(provinceId),
       lines,
       warn,
     });
@@ -983,9 +1020,12 @@ export class App {
       return;
     }
     const pos = this.world.projectProvince(provinceId);
+    // «Монголия / Монголия» is noise: the country line only appears when it
+    // says something the title does not.
+    const showOwner = content.owner && content.owner !== content.title;
     el.innerHTML = `
       <span class="tt-title">${content.title}</span>
-      <span class="tt-owner">${content.owner}</span>
+      ${showOwner ? `<span class="tt-owner">${content.owner}</span>` : ''}
       <span class="tt-lines">${content.lines.map((line) => `<b>${line}</b>`).join('')}</span>
       ${content.warn ? `<span class="tt-warn">${content.warn}</span>` : ''}`;
     el.classList.add('tt');
@@ -1197,11 +1237,11 @@ export class App {
 
     panel.innerHTML = `
       <div class="pp-head">
-        <span class="pp-swatch" style="--swatch:${owner?.color ?? '#7c8794'}"></span>
+        <span class="pp-swatch" style="--swatch:${owner?.color ?? this.#provinceColor(province)}"></span>
         <div class="pp-title">
           <h3 class="pp-name">${game.provinceName(province.id)}</h3>
           <div class="pp-owner">
-            ${owner ? owner.name : 'Нейтральная территория'}
+            ${owner ? owner.name : this.#unownedLabel(province.id)}
             ${isMine ? '<span class="pp-badge">ваша</span>' : ''}
           </div>
         </div>
@@ -1943,11 +1983,7 @@ export class App {
     if (!force && signature === this.colorSignature) return;
     this.colorSignature = signature;
     const colors = {};
-    for (const province of Object.values(provinces)) {
-      colors[province.id] = province.owner
-        ? this.game.state.nations[province.owner].color
-        : NEUTRAL_COLOR;
-    }
+    for (const province of Object.values(provinces)) colors[province.id] = this.#provinceColor(province);
     this.world.setOwnership(colors);
   }
 

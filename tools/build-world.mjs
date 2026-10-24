@@ -15,6 +15,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { feature, neighbors } from 'topojson-client';
 import { WORLD } from '../src/data/provinces-world.js';
+import { loadAdmin1, admin1Cells } from './admin1-cells.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -113,6 +114,121 @@ function unwrap(ring) {
   return out;
 }
 
+// Countries that are cut into several provinces along their real regional
+// borders instead of straight bisectors. Unit names come from the Natural Earth
+// admin-1 table (src/data/admin1.json); every unit of the country belongs to
+// exactly one group, so the country stays whole.
+const ADMIN_GROUPS = {
+  // China: eight provinces of the 1939 map.
+  CN: {
+    XIN: ['Xinjiang'],
+    TIB: ['Xizang', 'Qinghai'],
+    NMG: ['Inner Mongol'],
+    MAN: ['Heilongjiang', 'Jilin', 'Liaoning'],
+    NCH: ['Beijing', 'Tianjin', 'Hebei', 'Shanxi', 'Shandong', 'Henan', 'Shaanxi'],
+    SIC: ['Sichuan', 'Chongqing', 'Yunnan', 'Guizhou', 'Gansu', 'Ningxia'],
+    SCH: [
+      'Anhui', 'Fujian', 'Guangdong', 'Guangxi', 'Hainan', 'Hubei', 'Hunan',
+      'Jiangsu', 'Jiangxi', 'Shanghai', 'Zhejiang', 'Paracel Islands',
+    ],
+  },
+  // Russia east of the Europe theatre edge: the seven Siberian provinces.
+  RU: {
+    SIB: ['Tyumen\'', 'Sverdlovsk', 'Chelyabinsk', 'Kurgan', 'Omsk', 'Khanty-Mansiy', 'Yamal-Nenets'],
+    CEN: ['Novosibirsk', 'Tomsk', 'Kemerovo', 'Altay', 'Gorno-Altay', 'Krasnoyarsk', 'Khakass', 'Tuva'],
+    BAI: ['Irkutsk', 'Buryat', 'Chita'],
+    YAK: ['Sakha (Yakutia)'],
+    FAR: ['Khabarovsk', 'Primor\'ye', 'Amur', 'Yevrey', 'Sakhalin', 'Maga Buryatdan'],
+    KAM: ['Kamchatka'],
+    CHU: ['Chukchi Autonomous Okrug'],
+  },
+};
+
+// Natural Earth keeps the numeric country code in the 110m features, while the
+// admin-1 table is keyed by the two-letter code.
+const ISO_A2 = { 156: 'CN', 643: 'RU', 840: 'US', 124: 'CA' };
+
+/** Mean longitude of a set of rings, weighted by ring area. */
+function meanLongitude(rings) {
+  let sum = 0;
+  let total = 0;
+  for (const ring of rings) {
+    const area = ringArea(ring);
+    const lon = ring.reduce((acc, point) => acc + point[0], 0) / ring.length;
+    sum += lon * area;
+    total += area;
+  }
+  return total > 0 ? sum / total : 0;
+}
+
+const unwrapRing = (ring) => unwrap(ring);
+
+/** Shifts a ring by whole turns so it sits next to the country reference. */
+function shiftRing(ring, reference) {
+  const mean = ring.reduce((acc, point) => acc + point[0], 0) / ring.length;
+  const turns = Math.round((reference - mean) / 360);
+  return turns === 0 ? ring : ring.map(([lon, lat]) => [lon + turns * 360, lat]);
+}
+
+/**
+ * Rings of one country drawn from its real regions. Returns null when there is
+ * nothing to use, so the caller falls back to the bisector split.
+ */
+function admin1Rings(iso, defs, features, admin1) {
+  const code = ISO_A2[iso];
+  const groups = ADMIN_GROUPS[code];
+  const units = admin1[code];
+  if (!groups || !units?.length) return null;
+
+  const lonClips = code === 'RU' ? [([lon]) => 50 - lon] : [];
+  const countryRings = [];
+  for (const feature of features) {
+    const polygons = feature.geometry.type === 'Polygon'
+      ? [feature.geometry.coordinates]
+      : feature.geometry.coordinates;
+    for (const poly of polygons) {
+      for (const raw of poly) {
+        let ring = unwrapRing(raw);
+        for (const clip of lonClips) ring = clipHalfPlane(ring, clip);
+        if (ring.length >= 3) countryRings.push(ring);
+      }
+    }
+  }
+  if (!countryRings.length) return null;
+  const reference = meanLongitude(countryRings);
+
+  const prepared = units.map((unit) => ({
+    name: unit.name,
+    rings: unit.rings.map((ring) => shiftRing(unwrapRing(ring), reference)),
+  }));
+
+  const cells = admin1Cells({
+    units: prepared,
+    groups,
+    project: (lon, lat) => project(lon, lat),
+    tolerance: 0.01,
+    fallback: defs.map((def) => ({ id: def.id, lon: def.seed[0], lat: def.seed[1] })),
+  });
+  if (!cells.size) return null;
+
+  const out = new Map();
+  for (const [id, rings] of cells) {
+    if (!defs.some((def) => def.id === id)) continue;
+    const clipped = [];
+    for (const ring of rings) {
+      // Russia is only half on this map: west of the Europe edge belongs to the
+      // European provinces, so the Siberian cells are cut at the same meridian.
+      let cell = ring;
+      if (code === 'RU') cell = clipHalfPlane(cell, ([x]) => 50 * lonScale - x);
+      cell = clipHalfPlane(cell, ([, z]) => -BOUNDS.latMax - z);
+      cell = clipHalfPlane(cell, ([, z]) => z + BOUNDS.latMin);
+      if (cell.length >= 3) clipped.push(cell.map(([x, z]) => [round(x, 3), round(z, 3)]));
+    }
+    if (clipped.length) out.set(id, clipped);
+  }
+  return out;
+}
+
 const provinces = new Map();
 const byId = () => provinces;
 
@@ -134,6 +250,9 @@ function importMap(map, unproject, rename = {}) {
       id,
       name: province.name,
       nameRu: province.nameRu,
+      // «Чья это страна» — for a province nobody owns yet the map must be able
+      // to print the country name, not «neutral territory».
+      country: province.country ?? province.nameRu,
       pop: province.pop,
       rings: [main],
       ...(rest.length || islands.length ? { islands: [...rest, ...islands] } : {}),
@@ -152,6 +271,17 @@ importMap(america, unprojectAmerica, { PL: 'LO' });
 const topo = JSON.parse(readFileSync(resolve(root, 'node_modules/world-atlas/countries-110m.json'), 'utf8'));
 const geo = feature(topo, topo.objects.countries);
 const adj = neighbors(topo.objects.countries.geometries);
+
+const admin1Table = loadAdmin1(root);
+
+// Countries on this map that are cut into several provinces: an unowned
+// province of such a country still has to name the country it belongs to.
+const COUNTRY_NAMES_RU = {
+  156: 'Китай',
+  643: 'Россия',
+  124: 'Канада',
+  840: 'США',
+};
 
 const byIso = new Map();
 for (const def of WORLD.provinces) {
@@ -181,6 +311,7 @@ for (const [iso, defs] of byIso) {
       id: def.id,
       name: def.nameRu,
       nameRu: def.nameRu,
+      country: COUNTRY_NAMES_RU[iso] ?? def.nameRu,
       pop: def.pop,
       rings: [],
       centroid: [0, 0],
@@ -188,6 +319,17 @@ for (const [iso, defs] of byIso) {
       neighbors: [],
       source: iso,
     });
+  }
+  const real = admin1Rings(iso, defs, features.map((entry) => entry.f), admin1Table);
+  if (real) {
+    for (const def of defs) {
+      const rings = real.get(def.id);
+      if (!rings?.length) continue;
+      created.get(def.id).rings.push(...rings);
+      created.get(def.id).fromAdmin1 = true;
+    }
+    if (!featureProvince.has(features[0].i)) featureProvince.set(features[0].i, defs.map((d) => d.id));
+    continue;
   }
   for (const { f, i } of features) {
     const polygons = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;

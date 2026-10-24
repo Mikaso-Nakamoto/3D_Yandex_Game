@@ -8,6 +8,7 @@ import { feature, neighbors } from 'topojson-client';
 import { COUNTRIES, MERGE_INTO, SEA_LINKS, EXCLAVES, SPLITS } from '../src/data/countries.js';
 import polygonClipping from 'polygon-clipping';
 import { AMERICA } from '../src/data/provinces-america.js';
+import { loadAdmin1, admin1Cells } from './admin1-cells.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -170,6 +171,7 @@ function promoteExclaves(provinces) {
       id: def.id,
       name: def.name,
       nameRu: def.nameRu,
+      country: host.country ?? def.nameRu,
       pop: def.pop,
       rings: [ring],
       islands: [],
@@ -267,6 +269,8 @@ function splitProvinces(provinces, projector) {
       id: def.id,
       name: def.name,
       nameRu: def.nameRu,
+      // Crimea is its own province but still a piece of one country.
+      country: def.country ?? def.nameRu,
       pop: def.pop,
       rings: [main],
       islands: islets.filter((ring) => ringArea(ring) >= 0.01),
@@ -343,6 +347,9 @@ function buildEurope(topo) {
       id: c.id,
       name: c.name,
       nameRu: c.nameRu,
+      // «Чья это страна» — нужна, чтобы карточка невладеемой провинции
+      // называла страну, а не «нейтральную территорию».
+      country: c.nameRu,
       pop: c.pop,
       rings: [],
       centroid: [0, 0],
@@ -482,13 +489,28 @@ function buildAmerica(topo) {
     bySource.get(name).push(f);
   }
 
+  // Russian names of the countries the American theatre is cut from: an
+  // unowned province must be able to say whose country it is.
+  const COUNTRY_NAMES = {
+    'United States of America': 'США',
+    Canada: 'Канада',
+    Mexico: 'Мексика',
+    Cuba: 'Куба',
+    Haiti: 'Гаити',
+    'Dominican Rep.': 'Доминикана',
+    Greenland: 'Гренландия',
+  };
+
   const provinces = new Map();
   const sourceOf = new Map();
   for (const def of defs) {
+    const sources = Array.isArray(def.source) ? def.source : [def.source];
+    const country = COUNTRY_NAMES[sources[0]] ?? def.nameRu;
     provinces.set(def.id, {
       id: def.id,
       name: def.name,
       nameRu: def.nameRu,
+      country,
       pop: def.pop,
       rings: [],
       centroid: [0, 0],
@@ -516,8 +538,76 @@ function buildAmerica(topo) {
   const insideBounds = (p) =>
     p[0] >= boundsBox.xMin && p[0] <= boundsBox.xMax && p[1] >= boundsBox.zMin && p[1] <= boundsBox.zMax;
 
+  // Countries whose regions are drawn along real state/province borders
+  // instead of straight bisectors. Units come from Natural Earth admin-1
+  // (src/data/admin1.json, built by tools/build-admin1.mjs).
+  const ADMIN1_GROUPS = {
+    'United States of America': {
+      AK: ['Alaska'],
+      NE: [
+        'Connecticut', 'Maine', 'Massachusetts', 'New Hampshire', 'Rhode Island', 'Vermont',
+        'New York', 'New Jersey', 'Pennsylvania', 'Delaware', 'Maryland', 'District of Columbia',
+      ],
+      MW: [
+        'Ohio', 'Indiana', 'Illinois', 'Michigan', 'Wisconsin', 'Minnesota', 'Iowa',
+        'Missouri', 'Kansas', 'Nebraska', 'North Dakota', 'South Dakota',
+      ],
+      SO: [
+        'Virginia', 'West Virginia', 'North Carolina', 'South Carolina', 'Georgia', 'Kentucky',
+        'Tennessee', 'Alabama', 'Mississippi', 'Arkansas', 'Oklahoma', 'Texas',
+      ],
+      FL: ['Florida'],
+      PL: ['Louisiana'],
+      WE: [
+        'Montana', 'Wyoming', 'Colorado', 'New Mexico', 'Arizona', 'Utah', 'Nevada', 'Idaho',
+        'Washington', 'Oregon', 'California',
+      ],
+    },
+    Canada: {
+      CA: [
+        'Ontario', 'Québec', 'New Brunswick', 'Nova Scotia', 'Prince Edward Island',
+        'Newfoundland and Labrador',
+      ],
+      NW: [
+        'Manitoba', 'Saskatchewan', 'Alberta', 'British Columbia', 'Yukon',
+        'Northwest Territories', 'Nunavut',
+      ],
+    },
+  };
+  const CODE_BY_SOURCE = { 'United States of America': 'US', Canada: 'CA' };
+  const admin1Table = loadAdmin1(root);
+
   const missing = [];
   for (const [countryKey, group] of byCountry) {
+    const realCode = CODE_BY_SOURCE[countryKey];
+    const realGroups = ADMIN1_GROUPS[countryKey];
+    const realUnits = realCode ? admin1Table[realCode] : null;
+    if (realUnits?.length && realGroups) {
+      const cells = admin1Cells({
+        units: realUnits,
+        groups: realGroups,
+        project: (lon, lat) => project(normalizeLongitude(lon, bounds.lonMin), lat),
+        tolerance: 0.01,
+        fallback: group.map((def) => ({ id: def.id, lon: def.seed[0], lat: def.seed[1] })),
+      });
+      if (cells.size) {
+        for (const [id, rings] of cells) {
+          const province = provinces.get(id);
+          if (!province) continue;
+          for (const ring of rings) {
+            let cell = ring;
+            cell = clipHalfPlane(cell, ([x]) => boundsBox.xMin - x);
+            cell = clipHalfPlane(cell, ([x]) => x - boundsBox.xMax);
+            cell = clipHalfPlane(cell, ([, z]) => boundsBox.zMin - z);
+            cell = clipHalfPlane(cell, ([, z]) => z - boundsBox.zMax);
+            if (cell.length < 3) continue;
+            if (ringArea(cell) < 0.02) continue;
+            province.rings.push(cell.map(([x, z]) => [round(x, 3), round(z, 3)]));
+          }
+        }
+        continue;
+      }
+    }
     const sources = countryKey.split('|');
     const seeds = group.map((def) => {
       const [x, z] = project(def.seed[0], def.seed[1]);

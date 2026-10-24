@@ -81,6 +81,7 @@ export const SPLITS = [
     from: 'UA',
     name: 'Crimea',
     nameRu: 'Крым',
+    country: 'Украина',
     pop: 1.6,
     // Clockwise from the Perekop isthmus: south along the west coast, east along
     // the southern shore, up the Kerch peninsula, then back west along the

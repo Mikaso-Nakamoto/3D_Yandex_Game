@@ -1558,7 +1558,7 @@ export class Game {
         this.#log(
           previousOwner
             ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`
-            : `${this.provinceName(target.id)}: нейтральная → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`,
+            : `${this.provinceName(target.id)}: независимая → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})`,
           previousOwner === s.nationId ? 'bad' : attacker.isPlayer ? 'good' : 'war',
         );
       }

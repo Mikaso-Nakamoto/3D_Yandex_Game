@@ -6,6 +6,8 @@ import { SCENARIOS } from '../src/data/scenarios.js';
 import { normalizeRules, DEFAULT_RULES, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH, ruleOptionMatches } from '../src/game/rules.js';
 import { BAL } from '../src/game/balance.js';
 import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
+import { NATION_COLORS, deltaE } from '../src/data/palette.js';
+import { NEUTRAL_SHADES, assignNeutralColors } from '../src/data/neutral.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const atlanticMap = JSON.parse(readFileSync(new URL('../src/data/map-atlantic.json', import.meta.url), 'utf8'));
@@ -1606,6 +1608,76 @@ test('Siberia reaches Alaska across the Bering strait, not through Europe', () =
   const siberian = Object.values(game.state.provinces)
     .filter((p) => p.owner === 'SOV' && ['SIB', 'CEN', 'BAI', 'YAK', 'FAR', 'KAM', 'CHU'].includes(p.id));
   assert.equal(siberian.length, 7, 'all seven Siberian provinces belong to the USSR');
+});
+
+test('big countries are cut along their real regions, not by a ruler', () => {
+  // The complaint that started this: «поделил как под линейку». A straight cut
+  // shows up as a long edge that is exactly straight; real state borders wander.
+  const straightShare = (province) => {
+    const ring = province.rings[0];
+    let straight = 0;
+    let total = 0;
+    for (let i = 0; i < ring.length; i += 1) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const c = ring[(i + 2) % ring.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      total += len;
+      const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+      if (len > 0.6 && Math.abs(cross) < 1e-6) straight += len;
+    }
+    return total > 0 ? straight / total : 0;
+  };
+  for (const theatre of [worldMap, atlanticMap, map]) {
+    const byId = Object.fromEntries(theatre.provinces.map((p) => [p.id, p]));
+    const checks = [];
+    for (const id of ['NCH', 'SIC', 'TIB', 'SIB', 'YAK', 'NE', 'MW', 'SO']) {
+      if (byId[id]) checks.push([id, byId[id]]);
+    }
+    for (const [id, province] of checks) {
+      assert.ok(province.rings[0].length >= 20, `${theatre.theatre}/${id}: слишком грубый контур`);
+      assert.ok(straightShare(province) < 0.3, `${theatre.theatre}/${id}: граница проведена по линейке`);
+    }
+  }
+  // Every country that is split keeps its unit count: China's seven regions
+  // cover the whole country, and its pieces meet each other.
+  const china = ['XIN', 'TIB', 'NMG', 'MAN', 'NCH', 'SIC', 'SCH'];
+  const byId = Object.fromEntries(worldMap.provinces.map((p) => [p.id, p]));
+  for (const id of china) {
+    assert.ok(byId[id].neighbors.some((n) => china.includes(n)), `${id} не граничит с остальным Китаем`);
+  }
+});
+
+test('unowned land keeps its own shade and its country name', () => {
+  const colors = assignNeutralColors(worldMap.provinces);
+  assert.equal(colors.size, worldMap.provinces.length, 'у каждой провинции есть свой оттенок');
+  assert.ok(new Set(colors.values()).size >= NEUTRAL_SHADES.length, 'все оттенки в работе');
+  // Neighbours never share a shade, otherwise the border disappears.
+  for (const province of worldMap.provinces) {
+    for (const neighbour of province.neighbors) {
+      assert.notEqual(
+        colors.get(province.id),
+        colors.get(neighbour),
+        `${province.id} и ${neighbour} одного цвета`,
+      );
+    }
+  }
+  // And the shade is quiet: far enough from every nation colour to read as
+  // background, far enough from each other to read as separate countries.
+  for (const shade of NEUTRAL_SHADES) {
+    for (const [id, color] of Object.entries(NATION_COLORS)) {
+      assert.ok(deltaE(shade, color) >= 14, `оттенок ${shade} путается с ${id}`);
+    }
+  }
+  // Unowned provinces name their country instead of «нейтральная территория».
+  const byId = Object.fromEntries(worldMap.provinces.map((p) => [p.id, p]));
+  assert.equal(byId.SIB.country, 'Россия');
+  assert.equal(byId.SIC.country, 'Китай');
+  assert.equal(byId.NE.country, 'США');
+  assert.equal(byId.MNG.country, 'Монголия');
+  for (const province of worldMap.provinces) {
+    assert.ok(province.country, `${province.id} без страны`);
+  }
 });
 
 test('the world scenario is playable from the first frame', () => {
