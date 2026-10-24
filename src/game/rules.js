@@ -43,6 +43,21 @@ export function normalizeRules(rules = {}) {
   return merged;
 }
 
+/**
+ * Does a `<button data-value="...">` match the stored value of a rule?
+ *
+ * Rule values are a mix of strings («normal»), booleans and numbers, while every
+ * `data-value` attribute is a string. Comparing them with `===` after a `Number()`
+ * cast made string rules (`aiStyle`, `aiEconomy`, `neutrals`) compare against NaN,
+ * so the highlighted segment of the settings control vanished on the first click.
+ * One helper for both the initial paint and the in-place update keeps them equal.
+ */
+export function ruleOptionMatches(rules, key, rawOption) {
+  const value = rules?.[key];
+  if (value === undefined) return false;
+  return String(value) === String(rawOption);
+}
+
 /** Short human summary used on the nation screen and in the pause menu. */
 export function describeRules(rules = {}) {
   const r = normalizeRules(rules);

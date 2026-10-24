@@ -16,13 +16,15 @@ npm install
 npm run dev      # http://localhost:5173
 npm run build    # dist/ — статика для Яндекс Игр
 npm run preview  # предпросмотр сборки
-npm test         # 59 тестов симуляции
+npm test         # 112 тестов: карта, правила, бой, ИИ, сохранения
 ```
 
 Пересобрать карту из исходных геоданных:
 
 ```bash
 npm run geo      # tools/build-map.mjs -> src/data/map.json + map-america.json
+node tools/build-atlantic.mjs   # map.json + map-america.json -> map-atlantic.json
+node tools/build-world.mjs      # три источника -> map-world.json
 ```
 
 ## Что внутри
@@ -32,7 +34,7 @@ npm run geo      # tools/build-map.mjs -> src/data/map.json + map-america.json
 | `src/game/` | чистая симуляция (экономика, армии, бой, ИИ), без DOM |
 | `src/render/` | three.js: экструзия провинций, камера, пикинг, подписи |
 | `src/ui/` | экраны меню и партии, HUD, журнал |
-| `src/data/` | сценарии (4 эпохи, 2 театра), списки провинций, сгенерированные карты |
+| `src/data/` | сценарии (4 эпохи, 3 театра), списки провинций, сгенерированные карты |
 | `src/platform/` | Yandex Games SDK: ready, сохранения, реклама |
 | `tools/` | пайплайн геоданных |
 | `docs/clean-room/` | спецификация, отличия от референса, журнал происхождения |
@@ -59,8 +61,9 @@ npm run geo      # tools/build-map.mjs -> src/data/map.json + map-america.json
 
 | Театр | Провинций | Эпохи | Особенность |
 |---|---|---|---|
-| Европа | 41 | 1815, 1939, 1444 | плотные границы, короткие марши |
-| Северная Америка | 13 | 1815, 1861 | огромные расстояния, морские пути, колониальные державы |
+| Европа | 43 | 1815, 1939, 1444 | плотные границы, короткие марши |
+| Европа и Северная Америка | 56 | 1815, 1939, 1444, 1861 | два берега Атлантики, морские пути |
+| Весь мир | 196 | 1939 | карта-цилиндр: листается без края, Сибирь достаёт до Аляски |
 
 Театр выбирается вместе со сценарием: у каждого сценария своя карта, и игра
 не запустится с чужой.
@@ -128,4 +131,4 @@ npm run geo      # tools/build-map.mjs -> src/data/map.json + map-america.json
 ## Лицензии
 
 Код — MIT (см. `LICENSE`). Геоданные — Natural Earth, public domain.
-`three.js` — MIT, `topojson-client` — ISC.
+`three.js` — MIT, `topojson-client` — ISC, `polygon-clipping` — MIT (нужен только сборке карт).

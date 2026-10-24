@@ -27,7 +27,12 @@ const america = read('src/data/map-america.json');
 const BOUNDS = { lonMin: -170, lonMax: 50, latMin: 12, latMax: 72 };
 const lonMid = (BOUNDS.lonMin + BOUNDS.lonMax) / 2; // -60
 const latMid = (BOUNDS.latMin + BOUNDS.latMax) / 2; // 42
-const lonScale = Math.cos((latMid * Math.PI) / 180);
+// Match the European map exactly. It uses a constant cos(53°) longitude scale,
+// while cos(42°) stretched every European country by 23 % horizontally — the
+// same Germany was visibly fatter on the Atlantic map. Sharing the scale means
+// a country has the same shape and width on both maps; only the sea between
+// them is wider.
+const lonScale = europe.projection.lonScale;
 
 const round = (v, p = 3) => {
   const k = 10 ** p;
@@ -43,7 +48,9 @@ const project = ([lon, lat]) => [round((lon - lonMid) * lonScale), round(latMid 
 // comfortable target. The map is a game board, so the American landmass is
 // compressed toward the Atlantic coast (longitude) and, south of latitude 42°,
 // toward that parallel — the Arctic keeps its true place next to Scandinavia.
-const SCALE = { x: 0.62, z: 0.62 };
+// The *absolute* width of America is what was tuned for gameplay, so its
+// compression factor is recomputed when the base longitude scale changes.
+const SCALE = { x: 0.62 * (Math.cos((42 * Math.PI) / 180) / lonScale), z: 0.62 };
 const PIVOT = project([-50, 42]);
 const scalePoint = ([x, z]) => [
   round(PIVOT[0] + (x - PIVOT[0]) * SCALE.x),

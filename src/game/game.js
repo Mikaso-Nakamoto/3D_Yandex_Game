@@ -181,7 +181,15 @@ export class Game {
     const pa = this.byId[a]?.centroid;
     const pb = this.byId[b]?.centroid;
     if (!pa || !pb) return 3;
-    return Math.hypot(pa[0] - pb[0], pa[1] - pb[1]);
+    let dx = pa[0] - pb[0];
+    // The world map is a cylinder: Chukotka and Alaska are two units apart
+    // across the date line, not a whole planet apart the other way round.
+    const period = this.map?.wrap?.period;
+    if (period) {
+      dx = Math.abs(dx) % period;
+      if (dx > period / 2) dx = period - dx;
+    }
+    return Math.hypot(dx, pa[1] - pb[1]);
   }
 
   maxGarrison(provinceId) {

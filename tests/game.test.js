@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/game/game.js';
 import { SCENARIOS } from '../src/data/scenarios.js';
-import { normalizeRules, DEFAULT_RULES } from '../src/game/rules.js';
+import { normalizeRules, DEFAULT_RULES, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH, ruleOptionMatches } from '../src/game/rules.js';
 import { BAL } from '../src/game/balance.js';
 import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const atlanticMap = JSON.parse(readFileSync(new URL('../src/data/map-atlantic.json', import.meta.url), 'utf8'));
-const MAPS = { europe: map, atlantic: atlanticMap };
+const worldMap = JSON.parse(readFileSync(new URL('../src/data/map-world.json', import.meta.url), 'utf8'));
+const MAPS = { europe: map, atlantic: atlanticMap, world: worldMap };
 const mapFor = (scenario) => MAPS[scenario.theatre ?? 'europe'];
 const makeGame = (opts = {}) => {
   const { ai = false, ...rest } = opts;
@@ -19,8 +20,31 @@ const makeGame = (opts = {}) => {
   return game;
 };
 
+test('AI aggressiveness setting really changes how the world is carved up', () => {
+  // The setting existed but only nudged the thinking interval, which no player
+  // can feel. It now also changes the chance of a push and the odds a nation
+  // accepts — so two matches with the same seed must diverge.
+  const captures = (aiStyle, seed) => {
+    const game = new Game({ scenarioId: 'concert', nationId: 'FRA', doctrineId: 'coin', map, seed, rules: { aiStyle } });
+    let count = 0;
+    game.on((type) => {
+      if (type === 'capture') count += 1;
+    });
+    for (let i = 0; i < 900; i += 1) game.update(0.5);
+    return count;
+  };
+  for (const seed of [7, 42, 99]) {
+    const calm = captures('calm', seed);
+    const normal = captures('normal', seed);
+    const hard = captures('hard', seed);
+    assert.ok(calm < normal, `seed ${seed}: спокойный ИИ должен воевать реже (${calm} vs ${normal})`);
+    assert.ok(normal < hard, `seed ${seed}: жёсткий ИИ должен воевать чаще (${normal} vs ${hard})`);
+    assert.ok(hard >= calm * 1.5, `seed ${seed}: разница должна быть заметной (${calm} → ${hard})`);
+  }
+});
+
 test('map has every province wired to at least one neighbour', () => {
-  assert.equal(map.provinces.length, 42);
+  assert.equal(map.provinces.length, 43);
   for (const province of map.provinces) {
     assert.ok(province.neighbors.length > 0, `${province.id} is isolated`);
     for (const neighbour of province.neighbors) {
@@ -552,7 +576,7 @@ test('the war tax order repays its price for a mid-size nation', () => {
 test('the atlantic theatre is fully wired: two continents, borders, sea routes', () => {
   const ids = new Set(atlanticMap.provinces.map((p) => p.id));
   assert.equal(atlanticMap.theatre, 'atlantic');
-  assert.equal(atlanticMap.provinces.length, 55);
+  assert.equal(atlanticMap.provinces.length, 56);
   for (const province of atlanticMap.provinces) {
     assert.ok(province.rings.length > 0, `${province.id} has no shape`);
     assert.ok(province.pop > 0, `${province.id} has no population`);
@@ -1202,7 +1226,7 @@ test('Kaliningrad is its own province, reachable from land and worth garrisoning
   const ru = map.provinces.find((p) => p.id === 'RU');
   assert.ok(!ru.islands.some((ring) => ring.some(([x, z]) => x > 4.2 && x < 6.7 && z > -2.5 && z < -1)), 'exclave ring left in RU');
   assert.ok(!ru.neighbors.includes('PL') && !ru.neighbors.includes('LT'), `RU still borders ${ru.neighbors}`);
-  for (const scenario of SCENARIOS.filter((s) => s.theatre !== 'atlantic')) {
+  for (const scenario of SCENARIOS.filter((s) => s.theatre === 'europe')) {
     const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map, seed: 3 });
     const province = game.state.provinces.KGD;
     assert.ok(province, `${scenario.id} has no KGD`);
@@ -1435,6 +1459,33 @@ test('auto orders can be removed, and are capped per province', () => {
   assert.equal(game.autoOrdersFrom(from).length, 2);
 });
 
+test('a European country has the same size on both maps', () => {
+  // The Atlantic map used to project longitude at cos(42°) while the European
+  // map uses cos(53°): Germany was 23 % fatter on one map than on the other,
+  // which read as «the scale is wrong». Both must keep one scale.
+  const byId = Object.fromEntries(atlanticMap.provinces.map((p) => [p.id, p]));
+  const width = (p) => {
+    const xs = p.rings[0].map(([x]) => x);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  const height = (p) => {
+    const zs = p.rings[0].map(([, z]) => z);
+    return Math.max(...zs) - Math.min(...zs);
+  };
+  for (const province of map.provinces) {
+    const twin = byId[province.id];
+    if (!twin) continue; // Kaliningrad and other Atlantic-only ids
+    assert.ok(
+      Math.abs(width(twin) - width(province)) < 0.15,
+      `${province.id}: ширина ${width(twin).toFixed(2)} против ${width(province).toFixed(2)}`,
+    );
+    assert.ok(
+      Math.abs(height(twin) - height(province)) < 0.15,
+      `${province.id}: высота ${height(twin).toFixed(2)} против ${height(province).toFixed(2)}`,
+    );
+  }
+});
+
 test('the Atlantic map is no longer twice the size of Europe', () => {
   assert.ok(atlanticMap.width < 140, `width ${atlanticMap.width}`);
   assert.ok(atlanticMap.width / atlanticMap.height > 2.2, 'the theatre stays a wide Atlantic map');
@@ -1443,4 +1494,131 @@ test('the Atlantic map is no longer twice the size of Europe', () => {
   const europe = atlanticMap.provinces.filter((p) => p.centroid[0] > 20);
   assert.ok(europe.length > 30, 'Europe keeps its provinces');
   assert.ok(Math.max(...xs) < 12, 'America stays on its side of the ocean');
+});
+
+test('the selected settings segment stays highlighted for string and boolean rules', () => {
+  const rules = normalizeRules({ aiStyle: 'hard', aiEconomy: 'weak', neutrals: 'strong', startPaused: true, aiPassive: true });
+  // Every option of a string rule: exactly the stored one matches.
+  for (const [group, options] of [['aiStyle', AI_STYLE], ['aiEconomy', AI_ECONOMY], ['neutrals', NEUTRAL_STRENGTH]]) {
+    const matched = Object.keys(options).filter((key) => ruleOptionMatches(rules, group, key));
+    assert.deepEqual(matched, [rules[group]], `${group} highlights exactly its stored option`);
+  }
+  // Booleans arrive as data-value="true"/"false" strings from the DOM.
+  assert.equal(ruleOptionMatches(rules, 'startPaused', 'true'), true);
+  assert.equal(ruleOptionMatches(rules, 'startPaused', true), true);
+  assert.equal(ruleOptionMatches(rules, 'aiPassive', 'true'), true);
+  assert.equal(ruleOptionMatches(rules, 'aiPassive', 'false'), false);
+  assert.equal(ruleOptionMatches(rules, 'startPaused', 'false'), false);
+  assert.equal(ruleOptionMatches({ startPaused: false }, 'startPaused', 'false'), true);
+  // The old implementation compared through Number(), which is NaN for every
+  // string option, so a click wiped the highlight. Guard against that returning.
+  assert.equal(ruleOptionMatches({ aiStyle: 'hard' }, 'aiStyle', 'hard'), true);
+  assert.equal(ruleOptionMatches({ aiStyle: 'hard' }, 'aiStyle', 'calm'), false);
+  assert.equal(ruleOptionMatches({}, 'aiStyle', 'normal'), false);
+});
+
+test('Crimea is a separate province on both maps, and nobody paints over it', () => {
+  const pointInRing = ([x, z], ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      const [xi, zi] = ring[i];
+      const [xj, zj] = ring[j];
+      if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  for (const source of [map, atlanticMap]) {
+    const byId = Object.fromEntries(source.provinces.map((p) => [p.id, p]));
+    const crimea = byId.KRYM;
+    assert.ok(crimea, `${source.theatre}: Крым есть на карте`);
+    assert.ok(crimea.area > 1, `${source.theatre}: Крым не меньше пары юнитов площади`);
+    for (const id of ['UA', 'RU', 'TR']) {
+      assert.ok(crimea.neighbors.includes(id), `${source.theatre}: Крым граничит с ${id}`);
+      assert.ok(byId[id].neighbors.includes('KRYM'), `${source.theatre}: ${id} граничит с Крымом`);
+    }
+    // The peninsula hangs south of the Ukrainian mainland.
+    assert.ok(crimea.centroid[1] > byId.UA.centroid[1], `${source.theatre}: Крым южнее Украины`);
+    // Exactly one province may own a point: no country may be drawn on top of it.
+    const [cx, cz] = crimea.centroid;
+    const covering = source.provinces.filter(
+      (p) => p.id !== 'KRYM' && p.rings.some((ring) => pointInRing([cx, cz], ring)),
+    );
+    assert.deepEqual(covering.map((p) => p.id), [], `${source.theatre}: под Крымом нет чужой земли`);
+  }
+  // 1815 and 1939: whoever owns Ukraine also owns the peninsula.
+  const concert = SCENARIOS.find((s) => s.id === 'concert');
+  const russia = concert.nations.find((n) => n.id === 'RUS');
+  assert.ok(russia.provinces.includes('KRYM'), 'в 1815 Крым за Российской империей');
+  const eve = SCENARIOS.find((s) => s.id === 'eve1939');
+  const sssr = eve.nations.find((n) => n.id === 'SOV');
+  assert.ok(sssr.provinces.includes('KRYM'), 'в 1939 Крым за СССР');
+});
+
+test('the world map is a closed cylinder with no orphan province', () => {
+  assert.ok(worldMap.wrap, 'the world map declares its wrap period');
+  assert.equal(worldMap.wrap.period, Math.round(360 * worldMap.projection.lonScale * 10000) / 10000);
+  assert.ok(worldMap.provinces.length >= 150, 'the world is big');
+  for (const province of worldMap.provinces) {
+    assert.ok(province.neighbors.length > 0, `${province.id} is isolated`);
+    for (const neighbour of province.neighbors) {
+      assert.ok(worldMap.provinces.some((p) => p.id === neighbour), `${province.id} -> unknown ${neighbour}`);
+    }
+    assert.ok(province.area > 0.01, `${province.id} has no land`);
+  }
+  // Europe must not be stretched by the move to the world frame: Germany has
+  // the same width here as on the Europe-only map.
+  const width = (source, id) => {
+    const province = source.provinces.find((p) => p.id === id);
+    const xs = province.rings[0].map(([x]) => x);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  assert.ok(Math.abs(width(worldMap, 'DE') - width(map, 'DE')) < 0.15, 'Germany changed width on the world map');
+  const byId = Object.fromEntries(worldMap.provinces.map((p) => [p.id, p]));
+  for (const id of ['KRYM', 'KGD', 'SIB', 'YAK', 'CHU']) assert.ok(byId[id], `${id} is on the world map`);
+  // China is cut into regions, and each of them is real land with neighbours.
+  const china = ['XIN', 'TIB', 'NMG', 'MAN', 'NCH', 'SIC', 'SCH'];
+  for (const id of china) {
+    const province = byId[id];
+    assert.ok(province, `${id} (Китай) есть на карте`);
+    assert.ok(province.area > 1, `${id} слишком мал`);
+    assert.ok(province.neighbors.length > 0, `${id} ни с кем не граничит`);
+  }
+  assert.ok(byId.TWN, 'Тайвань есть на карте');
+  const world = SCENARIOS.find((s) => s.id === 'world1939');
+  const chinaNation = world.nations.find((n) => n.id === 'CHN');
+  assert.ok(chinaNation, 'в мировом сценарии есть Китай');
+  assert.deepEqual([...chinaNation.provinces].sort(), [...china].sort());
+});
+
+test('Siberia reaches Alaska across the Bering strait, not through Europe', () => {
+  const game = new Game({ scenarioId: 'world1939', nationId: 'SOV', map: worldMap, seed: 11 });
+  const chukotka = game.byId.CHU;
+  assert.ok(chukotka.neighbors.includes('AK'), `CHU borders ${chukotka.neighbors}`);
+  // The straight line distance must use the short way around the cylinder.
+  const straight = game.distance('CHU', 'AK');
+  assert.ok(straight < 24, `Bering distance ${straight.toFixed(1)} is a trip around the world`);
+  const throughSiberia = game.distance('CHU', 'RU');
+  assert.ok(straight < throughSiberia * 4, 'the strait is closer than Moscow');
+  assert.ok(game.isSeaRoute('CHU', 'AK'), 'the strait is a sea crossing');
+  const time = game.travelTime('CHU', 'AK');
+  assert.ok(time > 0 && time <= BAL.maxTravel, `Bering crossing takes ${time}s`);
+  // And the USSR really is more than one province.
+  const siberian = Object.values(game.state.provinces)
+    .filter((p) => p.owner === 'SOV' && ['SIB', 'CEN', 'BAI', 'YAK', 'FAR', 'KAM', 'CHU'].includes(p.id));
+  assert.equal(siberian.length, 7, 'all seven Siberian provinces belong to the USSR');
+});
+
+test('the world scenario is playable from the first frame', () => {
+  const scenario = SCENARIOS.find((s) => s.id === 'world1939');
+  assert.ok(scenario, 'world1939 exists');
+  const game = new Game({ scenarioId: 'world1939', nationId: 'GER', map: worldMap, seed: 3 });
+  for (const nation of scenario.nations) {
+    assert.ok(game.state.nations[nation.id], `${nation.id} missing`);
+  }
+  // Every great power owns something and the map keeps neutral land to conquer.
+  const owned = Object.values(game.state.provinces).filter((p) => p.owner).length;
+  const total = Object.keys(game.state.provinces).length;
+  assert.ok(owned > total * 0.28 && owned < total, `${owned}/${total} owned`);
+  const neutrals = Object.values(game.state.provinces).filter((p) => !p.owner && p.garrison > 0).length;
+  assert.ok(neutrals > 20, `only ${neutrals} neutral provinces`);
 });

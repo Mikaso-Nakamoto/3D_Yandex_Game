@@ -68,6 +68,39 @@ export const EXCLAVES = [
   },
 ];
 
+/**
+ * Pieces of a country that the dataset draws as one landmass but that the game
+ * wants as their own province (the peninsula of Crimea). Unlike an exclave these
+ * are not islands, so the shape has to be cut out of the host by a polygon:
+ * `shape` is a closed-ish lon/lat outline drawn in the same stylised detail as
+ * the rest of the dataset, and the host keeps whatever lies outside it.
+ */
+export const SPLITS = [
+  {
+    id: 'KRYM',
+    from: 'UA',
+    name: 'Crimea',
+    nameRu: 'Крым',
+    pop: 1.6,
+    // Clockwise from the Perekop isthmus: south along the west coast, east along
+    // the southern shore, up the Kerch peninsula, then back west along the
+    // Syvash. The northern edge sits just above the lagoon so the whole
+    // peninsula is one clickable province.
+    shape: [
+      [33.58, 46.16], [33.50, 45.98], [33.28, 45.76], [33.02, 45.52],
+      [32.72, 45.39], [32.48, 45.34], [32.50, 45.18], [32.74, 44.99],
+      [33.10, 44.83], [33.40, 44.71], [33.55, 44.58], [33.88, 44.50],
+      [34.18, 44.44], [34.52, 44.40], [34.84, 44.52], [35.06, 44.68],
+      [35.32, 44.90], [35.62, 45.04], [35.94, 45.11], [36.24, 45.21],
+      [36.56, 45.34], [36.64, 45.45], [36.36, 45.51], [36.04, 45.57],
+      [35.74, 45.67], [35.44, 45.82], [35.14, 45.97], [34.92, 46.14],
+      [34.56, 46.22], [34.16, 46.24], [33.86, 46.22],
+    ],
+    borders: [],
+    seaLinks: [['KRYM', 'TR'], ['KRYM', 'RU']],
+  },
+];
+
 // Strait crossings / sea routes. Land borders are derived from TopoJSON topology.
 export const SEA_LINKS = [
   ['GB', 'FR'],

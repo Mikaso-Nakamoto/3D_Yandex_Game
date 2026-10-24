@@ -183,6 +183,66 @@ export const FOCUS_CHAINS = {
       { name: 'Континентальный перевес', target: 'NE', gold: 140, morale: 4 },
     ],
   },
+  // The world theatre: ambitions of the great powers, each one naming a region
+  // that exists on the cylinder. China gets its own chain so a Chinese campaign
+  // opens with a plan that makes sense from Nanjing instead of a random border.
+  world1939: {
+    CHN: [
+      { name: 'Воссоединение Монголии', target: 'MNG', gold: 90, morale: 3 },
+      { name: 'Возвращение Кореи', target: 'KOR', gold: 130, morale: 4 },
+      { name: 'Южные ворота', target: 'VNM', gold: 120, morale: 3 },
+    ],
+    GER: [
+      { name: 'Польский коридор', target: 'PL', gold: 110, morale: 3 },
+      { name: 'Ключ к Ла-Маншу', target: 'BE', gold: 130, morale: 4 },
+      { name: 'Хлеб Украины', target: 'UA', gold: 170, morale: 4 },
+    ],
+    SOV: [
+      { name: 'Балтийский щит', target: 'LV', gold: 100, morale: 3 },
+      { name: 'Южный рубеж', target: 'IRN', gold: 130, morale: 3 },
+      { name: 'Проливы', target: 'TR', gold: 160, morale: 4 },
+    ],
+    USA: [
+      { name: 'Карибский щит', target: 'CU', gold: 100, morale: 3 },
+      { name: 'Южная граница', target: 'MX', gold: 120, morale: 3 },
+      { name: 'Тихоокеанские рубежи', target: 'PHL', gold: 160, morale: 4 },
+    ],
+    GBR: [
+      { name: 'Средиземноморские ворота', target: 'GR', gold: 110, morale: 3 },
+      { name: 'Нефтяной путь', target: 'IRN', gold: 140, morale: 3 },
+      { name: 'Ближневосточный плацдарм', target: 'SAU', gold: 150, morale: 4 },
+    ],
+    FRA: [
+      { name: 'Рейнская граница', target: 'BE', gold: 110, morale: 3 },
+      { name: 'Иберийский сосед', target: 'ES', gold: 130, morale: 3 },
+      { name: 'Восточное Средиземноморье', target: 'TR', gold: 150, morale: 4 },
+    ],
+    ITA: [
+      { name: 'Адриатический берег', target: 'AL', gold: 90, morale: 3 },
+      { name: 'Эгейские острова', target: 'GR', gold: 120, morale: 4 },
+      { name: 'Суэцкий путь', target: 'EGY', gold: 160, morale: 4 },
+    ],
+    JPN: [
+      { name: 'Маньчжурский плацдарм', target: 'MAN', gold: 120, morale: 4 },
+      { name: 'Филиппины', target: 'PHL', gold: 140, morale: 4 },
+      { name: 'Южные моря', target: 'IDN', gold: 170, morale: 5 },
+    ],
+    POL: [
+      { name: 'Силезский рубеж', target: 'CZ', gold: 90, morale: 3 },
+      { name: 'Балтийское побережье', target: 'LT', gold: 110, morale: 3 },
+      { name: 'Восточные земли', target: 'UA', gold: 140, morale: 4 },
+    ],
+    TUR: [
+      { name: 'Балканский рубеж', target: 'BG', gold: 100, morale: 3 },
+      { name: 'Кавказский сосед', target: 'ARM', gold: 130, morale: 3 },
+      { name: 'Сирийская граница', target: 'SYR', gold: 140, morale: 4 },
+    ],
+    BNA: [
+      { name: 'Лаврентийский щит', target: 'GL', gold: 90, morale: 3 },
+      { name: 'Западные прерии', target: 'WE', gold: 120, morale: 3 },
+      { name: 'Северный путь', target: 'AK', gold: 140, morale: 4 },
+    ],
+  },
 };
 
 // Fallback: three nearest foreign provinces around the capital. This keeps the

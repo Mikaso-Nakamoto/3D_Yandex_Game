@@ -1,5 +1,21 @@
 import { BAL } from './balance.js';
 
+/**
+ * How the chosen AI style shapes a single decision. Tempo (in game.js) decides
+ * how often a nation thinks; these two numbers decide what it dares to do when
+ * it does — otherwise «жёсткая» and «спокойная» would only differ in the number
+ * of identical decisions per minute, which a player cannot feel.
+ */
+const STYLE = {
+  calm: { chance: 0.72, margin: 1.85 },
+  normal: { chance: 1, margin: 1.5 },
+  hard: { chance: 1.32, margin: 1.16 },
+};
+
+function styleOf(game) {
+  return STYLE[game.state.rules?.aiStyle] ?? STYLE.normal;
+}
+
 export function assignDoctrine(nation, rng) {
   const aggression = nation.ai?.aggression ?? 0.9;
   if (aggression >= 1.05) return rng.chance(0.7) ? 'sword' : 'coin';
@@ -148,7 +164,8 @@ function attack(game, nation, owned) {
   // behind before the first minute is over.
   const ramp = Math.min(1, state.time / (BAL.aiOpeningRamp || 300));
   const tempo = (BAL.aiOpeningTempo ?? 0.45) + (1 - BAL.aiOpeningTempo) * ramp;
-  if (!game.rng.chance(0.55 * tempo * (1 - nation.exhaustion / 160))) return false;
+  const style = styleOf(game);
+  if (!game.rng.chance(0.55 * tempo * style.chance * (1 - nation.exhaustion / 160))) return false;
 
   let best = null;
   for (const p of owned) {
@@ -163,7 +180,7 @@ function attack(game, nation, owned) {
       const def = game.projectedDefense(nid, game.travelTime(p.id, nid, nation.id));
       // A tired nation only presses an attack it cannot lose; otherwise it
       // shores up its own line instead of opening yet another front.
-      const margin = nation.exhaustion > BAL.warWearyAt ? BAL.warWearyMargin : 1.5;
+      const margin = nation.exhaustion > BAL.warWearyAt ? BAL.warWearyMargin : style.margin;
       if (atk < def * margin) continue;
 
       let score = def;

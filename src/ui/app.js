@@ -4,6 +4,7 @@ import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
 import { SCENARIOS, DOCTRINES, THEATRES, getScenario, hasScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
+import { NEUTRAL_COLOR } from '../data/palette.js';
 import {
   DEFAULT_RULES,
   AI_STYLE,
@@ -11,6 +12,7 @@ import {
   NEUTRAL_STRENGTH,
   normalizeRules,
   describeRules,
+  ruleOptionMatches,
 } from '../game/rules.js';
 import { platform } from '../platform/yandex.js';
 import { sfx } from '../audio.js';
@@ -204,6 +206,10 @@ export class App {
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-selected', String(active));
     }
+    // The background has to follow the switch: the menu used to keep showing
+    // the European map while offering the Atlantic scenarios.
+    this.setTheatre(this.mapMode);
+    this.#frameMenuBackdrop();
     this.#buildMenu();
   }
 
@@ -221,11 +227,44 @@ export class App {
     this.world.setSelected(null);
     this.world.setAccent([]);
     this.world.setValidTargets([]);
-    this.world.resetView();
-    this.world.setAutoPan(true);
-    this.world.setOwnership(this.#previewColors(this.scenario ?? getScenario('concert')));
+    this.setTheatre(this.mapMode);
+    this.#frameMenuBackdrop();
     $('#province-panel').classList.add('hidden');
     platform.gameplayStop();
+  }
+
+  /**
+   * The menu backdrop: the countries of the chosen theatre, at the same
+   * apparent scale on both maps. Fitting the whole Atlantic file instead made
+   * Europe shrink by half the moment the player flipped the switch.
+   */
+  #frameMenuBackdrop() {
+    const scenario = this.scenario?.theatre === this.mapMode
+      ? this.scenario
+      : SCENARIOS.find((s) => (s.theatre ?? 'europe') === this.mapMode) ?? getScenario('concert');
+    this.world.setOwnership(this.#previewColors(scenario));
+    this.world.resetView();
+    this.world.focusNation(this.#scenarioFocus(scenario), 0.9, { dense: true });
+    this.world.setAutoPan(true);
+  }
+
+  /**
+   * The provinces a scenario is really about. European scenarios with colonies
+   * are centred on Europe; the American Civil War is centred on America. The
+   * scenario says so itself (`focus`), so the rule is not guessed from counts.
+   */
+  #scenarioFocus(scenario) {
+    const playable = scenario.nations.flatMap((n) => n.provinces).filter((id) => this.mapById[id]);
+    const american = (id) => (this.mapById[id]?.centroid[0] ?? 0) < 0;
+    if (scenario.focus === 'america') {
+      const inAmerica = playable.filter(american);
+      if (inAmerica.length) return inAmerica;
+    }
+    if (scenario.focus === 'europe') {
+      const inEurope = playable.filter((id) => !american(id));
+      if (inEurope.length) return inEurope;
+    }
+    return playable;
   }
 
   openNationSelect(scenarioId) {
@@ -243,14 +282,18 @@ export class App {
     this.world.setAccent([]);
     this.world.resetView();
     this.world.setAutoPan(false);
-    this.world.zoomTarget = 1;
     this.world.setOwnership(this.#previewColors(this.scenario));
+    // Frame the countries of this scenario, not the whole map file: on the
+    // Atlantic theatre the file is nearly three times wider, so «fit the map»
+    // made Europe twice as small as on the Europe theatre. Scenarios that are
+    // about America (the Civil War) are framed on America.
+    this.world.focusNation(this.#scenarioFocus(this.scenario), 0.9, { dense: true });
     this.#renderNations();
   }
 
   #previewColors(scenario) {
     const colors = {};
-    for (const province of this.map.provinces) colors[province.id] = '#59626e';
+    for (const province of this.map.provinces) colors[province.id] = NEUTRAL_COLOR;
     for (const nation of scenario.nations) {
       for (const provinceId of nation.provinces) colors[provinceId] = nation.color;
     }
@@ -402,7 +445,9 @@ export class App {
       item.setAttribute('aria-selected', String(item.dataset.nation === id));
     }
     this.world.setAccent(nation.provinces);
-    if (focus) this.world.focusOn(nation.capital);
+    // Picking from the list flies to that country: the picker shows the whole
+    // theatre, so «where is it» must be answered immediately.
+    if (focus) this.world.focusNation(nation.provinces, 0.5, { anchor: nation.capital });
     this.#renderNationDetail();
   }
 
@@ -501,32 +546,52 @@ export class App {
     });
   }
 
+  /**
+   * Pixels taken by the HUD. The camera fits the map into what is left, so a
+   * province is never buried under the order buttons on the right.
+   */
+  #syncSafeArea() {
+    if (!this.world) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const bar = $('#orders-bar');
+    const barRect = bar?.getBoundingClientRect();
+    const usable = barRect && barRect.width > 0 && barRect.height > 0;
+    // The order buttons are a row at the bottom on a desktop and a column on
+    // the right on a phone; the map must stay out of whichever it is.
+    const column = usable && barRect.right > vw * 0.82 && barRect.height > barRect.width * 0.7;
+    const right = column ? Math.max(0, Math.round(vw - barRect.left)) : 0;
+    const hud = document.querySelector('.hud-top')?.getBoundingClientRect();
+    const foot = document.querySelector('.hud-bottom')?.getBoundingClientRect();
+    const footTop = usable && !column ? Math.min(vh, barRect.top) : vh;
+    const footInset = foot && foot.height > 0 ? vh - foot.top : vh;
+    this.world.setSafeArea({
+      top: hud && hud.height > 0 ? Math.round(hud.bottom) : 0,
+      right,
+      bottom: Math.max(0, Math.round(vh - Math.min(footTop, footInset))),
+    });
+  }
+
   #enterGameScreen() {
     this.#setScreen('game');
+    // The HUD is on screen now, so the camera has to know how much room is
+    // left *before* it frames the realm.
+    this.#syncSafeArea();
     this.world.setSelected(null);
     this.world.setAccent([]);
     this.world.setValidTargets([]);
     this.world.resetView();
     this.world.setAutoPan(false);
     this.world.zoomTarget = 1;
-    // On the wide Atlantic map the realm is a small patch: centre the camera on
-    // the *middle* of the player's lands (Britain's Canada is far from London)
-    // instead of showing two continents at once.
-    if (this.map.width > 80 && this.game) {
-      const own = Object.values(this.game.state.provinces)
-        .filter((p) => p.owner === this.game.state.nationId)
-        .map((p) => this.mapById[p.id]?.centroid)
-        .filter(Boolean);
-      if (own.length) {
-        const cx = own.reduce((sum, c) => sum + c[0], 0) / own.length;
-        const cz = own.reduce((sum, c) => sum + c[1], 0) / own.length;
-        this.world.panTarget.x = cx;
-        this.world.panTarget.z = cz;
-        // A spread-out empire needs a wider view than a compact one.
-        const spread = Math.max(...own.map((c) => Math.hypot(c[0] - cx, c[1] - cz)));
-        this.world.zoomTarget = spread > 30 ? 1.1 : 1.55;
-      }
+    // Open on the player's own lands: centre on their middle (Britain's Canada
+    // is far from London) and zoom so the realm is readable on any screen.
+    if (this.game) {
+      const own = Object.entries(this.game.state.provinces)
+        .filter(([, p]) => p.owner === this.game.state.nationId)
+        .map(([id]) => id);
+      this.world.focusNation(own, 0.5, { anchor: this.game.player.capital });
     }
+    requestAnimationFrame(() => this.#syncSafeArea());
     this.labels.setVisible(this.settings.labels);
     this.#syncColors(true);
     this.#updateHud();
@@ -1224,6 +1289,7 @@ export class App {
         <div class="pp-row"><span>Крепость</span><b>${province.fort > 0 ? `уровень ${province.fort} из ${BAL.maxLevel}` : 'нет'}</b></div>
       </div>
 
+      ${isMine ? this.#autoInline(province.id) : ''}
       ${!isMine && owner ? this.#diploBlock(owner) : ''}
       ${
         isMine
@@ -1310,11 +1376,30 @@ export class App {
     return { when: Math.round(norm * 0.8), keep: Math.round(norm * 0.5) };
   }
 
+  /**
+   * One-line entry to the standing orders, shown high in the card (right under
+   * the garrison numbers) so the mechanic is visible without scrolling — the
+   * full block lived below three upgrade rows and never made it into the first
+   * screenful on a landscape phone.
+   */
+  #autoInline(provinceId) {
+    const game = this.game;
+    if (!game) return '';
+    if (this.autoFrom === provinceId) return '';
+    if (game.autoOrdersFrom(provinceId).length) return '';
+    return `
+      <div class="pp-section pp-section-inline">
+        <span>Автоотправка</span>
+        <button class="pp-mini" data-auto-add="${provinceId}" title="Когда гарнизон вырастет, войска уйдут сами">+ приказ</button>
+      </div>`;
+  }
+
   #autoBlock(provinceId) {
     const game = this.game;
     if (!game) return '';
     const orders = game.autoOrdersFrom(provinceId);
     const picking = this.autoFrom === provinceId;
+    if (!orders.length && !picking) return '';
     const rows = orders
       .map((order) => {
         const target = game.provinceName(order.to);
@@ -1574,7 +1659,9 @@ export class App {
       {
         key: 'aiStyle',
         title: 'Агрессивность ИИ',
-        hint: 'Как часто державы решаются нападать друг на друга.',
+        // The player must know what the switch actually does: it changes both
+        // the tempo of AI decisions and the odds those decisions accept.
+        hint: 'Спокойный ИИ думает реже и идёт в бой только с явным перевесом. Жёсткий думает чаще и нападает даже при почти равных силах — карта делится быстрее, а соседи наглее.',
         options: Object.entries(AI_STYLE).map(([value, cfg]) => ({ value, label: cfg.label })),
       },
       {
@@ -1653,7 +1740,7 @@ export class App {
               .map(
                 (option) => `
                 <button type="button" data-value="${String(option.value)}"
-                  class="${rules[group.key] === option.value ? 'active' : ''}">${option.label}</button>`,
+                  class="${ruleOptionMatches(rules, group.key, option.value) ? 'active' : ''}">${option.label}</button>`,
               )
               .join('')}
           </div>
@@ -1688,9 +1775,7 @@ export class App {
     const group = document.querySelector(`.rules-seg[data-key="${key}"]`);
     if (!group) return;
     for (const button of group.querySelectorAll('button[data-value]')) {
-      const raw = button.dataset.value;
-      const value = raw === 'true' ? true : raw === 'false' ? false : Number(raw);
-      button.classList.toggle('active', rules[key] === value);
+      button.classList.toggle('active', ruleOptionMatches(rules, key, button.dataset.value));
     }
   }
 
@@ -1861,7 +1946,7 @@ export class App {
     for (const province of Object.values(provinces)) {
       colors[province.id] = province.owner
         ? this.game.state.nations[province.owner].color
-        : '#59626e';
+        : NEUTRAL_COLOR;
     }
     this.world.setOwnership(colors);
   }
@@ -2226,7 +2311,10 @@ export class App {
       if (document.hidden) this.save();
     });
     window.addEventListener('beforeunload', () => this.save());
-    window.addEventListener('resize', () => this.arrowLayer.resize());
+    window.addEventListener('resize', () => {
+      this.arrowLayer.resize();
+      this.#syncSafeArea();
+    });
   }
 
   #bindKeyboard() {

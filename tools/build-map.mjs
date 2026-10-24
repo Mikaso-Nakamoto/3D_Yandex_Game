@@ -5,7 +5,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { feature, neighbors } from 'topojson-client';
-import { COUNTRIES, MERGE_INTO, SEA_LINKS, EXCLAVES } from '../src/data/countries.js';
+import { COUNTRIES, MERGE_INTO, SEA_LINKS, EXCLAVES, SPLITS } from '../src/data/countries.js';
+import polygonClipping from 'polygon-clipping';
 import { AMERICA } from '../src/data/provinces-america.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -190,6 +191,122 @@ function promoteExclaves(provinces) {
   }
 }
 
+/**
+ * Cuts a hand-drawn shape (Crimea) out of every country that covers it and
+ * registers the shape as a province of its own.
+ *
+ * The outline is drawn by hand because the 110m dataset is too coarse here: it
+ * turns Crimea into a small hook with no southern coast, and *both* Russia and
+ * Ukraine claim the peninsula in the topology, so a naive cut leaves Russia
+ * painting over the new province. Every province under the outline is trimmed by
+ * one boolean pass, which keeps all borders identical and opens no sliver of sea.
+ */
+function splitProvinces(provinces, projector) {
+  const { intersection, difference, union } = polygonClipping;
+  const closeRing = (ring) => {
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    return first[0] === last[0] && first[1] === last[1] ? ring : [...ring, first];
+  };
+  const openRing = (ring) => {
+    const out = ring.slice();
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) out.pop();
+    return out;
+  };
+  const toMulti = (rings) => rings.map((ring) => [closeRing(ring)]);
+  const fromMulti = (multi) =>
+    multi
+      .map((poly) => openRing(poly[0]))
+      .filter((ring) => ring.length >= 3)
+      .map((ring) => ring.map(([x, z]) => [round(x, 3), round(z, 3)]));
+  const rebuild = (province, rings) => {
+    if (!rings.length) return false;
+    const sorted = rings.slice().sort((a, b) => ringArea(b) - ringArea(a));
+    const [main, ...islands] = sorted;
+    const [cx, cz] = ringCentroid(main);
+    province.rings = [main];
+    province.islands = islands.filter((ring) => ringArea(ring) >= 0.01);
+    province.centroid = [round(cx, 3), round(cz, 3)];
+    province.area = round(ringArea(main), 2);
+    return true;
+  };
+
+  for (const def of SPLITS) {
+    const raw = def.shape.map(([lon, lat]) => projector.project(lon, lat));
+    const [ox, oz] = ringCentroid(raw);
+    // A slightly enlarged outline is used for the cut, so every country owning
+    // land around the coast stops exactly where the new province starts: a
+    // hairline of the old owner would otherwise show as a coloured fringe.
+    const grown = raw.map(([x, z]) => [ox + (x - ox) * 1.06, oz + (z - oz) * 1.06]);
+    const shape = [[closeRing(grown)]];
+
+    const parts = [[closeRing(raw)]];
+    let hosts = 0;
+    for (const [otherId, other] of provinces) {
+      const multi = toMulti([...other.rings, ...other.islands]);
+      const pieces = intersection(multi, shape);
+      if (!pieces.length) continue;
+      const trimmed = fromMulti(difference(multi, shape));
+      if (!trimmed.length) continue;
+      if (!rebuild(other, trimmed)) continue;
+      hosts += 1;
+      parts.push(...pieces);
+      if (!other.neighbors.includes(def.id)) other.neighbors.push(def.id);
+    }
+    if (!hosts) {
+      console.warn(`split ${def.id}: the shape did not cut any province`);
+      continue;
+    }
+    const merged = union(...parts.map((poly) => [poly]));
+    const rings = fromMulti(merged).sort((a, b) => ringArea(b) - ringArea(a));
+    const [main, ...islets] = rings;
+    const [cx, cz] = ringCentroid(main);
+    const province = {
+      id: def.id,
+      name: def.name,
+      nameRu: def.nameRu,
+      pop: def.pop,
+      rings: [main],
+      islands: islets.filter((ring) => ringArea(ring) >= 0.01),
+      centroid: [round(cx, 3), round(cz, 3)],
+      area: round(ringArea(main), 2),
+      neighbors: [],
+      featureIndex: -1,
+    };
+    for (const [otherId] of provinces) {
+      if (otherId === def.id) continue;
+      if (provinces.get(otherId).neighbors.includes(def.id)) province.neighbors.push(otherId);
+    }
+    for (const [a, b] of def.seaLinks ?? []) {
+      const other = provinces.get(a === def.id ? b : a);
+      if (!other) continue;
+      if (!province.neighbors.includes(other.id)) province.neighbors.push(other.id);
+      if (!other.neighbors.includes(def.id)) other.neighbors.push(def.id);
+    }
+
+    // Second pass: the new province also swallowed the dataset's own outline of
+    // the peninsula, which can stick out of the drawn shape. Trim every other
+    // province by the final geometry so no coloured band is left around it.
+    const finalShape = toMulti([...province.rings, ...province.islands]);
+    for (const [otherId, other] of provinces) {
+      if (otherId === def.id) continue;
+      const multi = toMulti([...other.rings, ...other.islands]);
+      const trimmed = fromMulti(difference(multi, finalShape));
+      if (trimmed.length) rebuild(other, trimmed);
+      // Rounding the clipped coastline can leave specks of the old owner along
+      // the new shore; they are invisible land, so drop them.
+      other.islands = (other.islands ?? []).filter((ring) => {
+        const [ix, iz] = ringCentroid(ring);
+        const near = Math.hypot(ix - province.centroid[0], iz - province.centroid[1]) < 4;
+        return !(near && ringArea(ring) < 0.08);
+      });
+    }
+    provinces.set(def.id, province);
+  }
+}
+
 function buildEurope(topo) {
   const { geo, adj } = topo;
   const projector = makeProjector(BOUNDS);
@@ -268,6 +385,10 @@ function buildEurope(topo) {
       if (!province.neighbors.includes(other)) province.neighbors.push(other);
     }
   }
+
+  // Hand-drawn splits (Crimea) before the topology quirks are fixed up, so the
+  // new province already has its neighbours when sea routes are added.
+  splitProvinces(provinces, projector);
 
   // Exclaves after the topology pass: the dataset says Russia borders Poland
   // and Lithuania, but that contact is Kaliningrad, which is now its own land.

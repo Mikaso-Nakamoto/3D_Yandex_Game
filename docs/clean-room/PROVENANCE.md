@@ -71,6 +71,7 @@ Iron) и не являются выражением конкретного пр�
 | Natural Earth 110m (границы стран) | Public domain | `src/data/map.json` (генерируется) |
 | three.js | MIT | npm |
 | topojson-client | ISC | npm |
+| polygon-clipping | MIT | npm, только сборка карт (`tools/build-map.mjs`) |
 | Vite | MIT | npm |
 
 Ассетов из игры-референса в репозитории нет.

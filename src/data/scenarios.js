@@ -14,12 +14,19 @@ export const THEATRES = {
     short: 'Европа + Америка',
     blurb: 'Два берега Атлантики на одной карте: старые державы и Новый Свет, связанные морскими путями.',
   },
+  world: {
+    id: 'world',
+    title: 'Весь мир',
+    short: 'Мир',
+    blurb: 'Планета на цилиндре: карта листается влево и вправо без края, а Сибирь достаёт до Аляски через Берингов пролив.',
+  },
 };
 
 /** "Победа: <phrase> под вашей короной" reads correctly for every theatre. */
 export const THEATRE_GENITIVE = {
   europe: 'вся Европа',
   atlantic: 'оба берега Атлантики',
+  world: 'весь мир',
 };
 
 export const SCENARIOS = [
@@ -39,7 +46,7 @@ export const SCENARIOS = [
         id: 'RUS',
         army: 1.45,
         name: 'Российская империя', short: 'Россия', color: '#4f8a5b', capital: 'RU',
-        provinces: ['RU', 'BY', 'UA', 'MD', 'LT', 'LV', 'EE', 'FI'], ai: { aggression: 0.9, eco: 1.05 },
+        provinces: ['RU', 'BY', 'UA', 'KRYM', 'MD', 'LT', 'LV', 'EE', 'FI'], ai: { aggression: 0.9, eco: 1.05 },
       },
       {
         id: 'AUS',
@@ -50,7 +57,7 @@ export const SCENARIOS = [
       {
         id: 'PRU',
         army: 1.2,
-        name: 'Королевство Пруссия', short: 'Пруссия', color: '#59616e', capital: 'DE',
+        name: 'Королевство Пруссия', short: 'Пруссия', color: '#4c5548', capital: 'DE',
         // KGD — Восточная Пруссия: отдельная провинция-эксклав, её можно гарнизонить.
         provinces: ['DE', 'PL', 'KGD'], ai: { aggression: 1.0, eco: 1.0 },
       },
@@ -127,7 +134,7 @@ export const SCENARIOS = [
       {
         id: 'GER',
         army: 1.35,
-        name: 'Германский рейх', short: 'Германия', color: '#59616e', capital: 'DE',
+        name: 'Германский рейх', short: 'Германия', color: '#4c5548', capital: 'DE',
         // Кёнигсберг — германский анклав на Балтике, как и был в 1939-м.
         provinces: ['DE', 'AT', 'CZ', 'KGD'], ai: { aggression: 1.15, eco: 1.1 },
       },
@@ -135,7 +142,7 @@ export const SCENARIOS = [
         id: 'SOV',
         army: 1.4,
         name: 'Советский Союз', short: 'СССР', color: '#7b2b33', capital: 'RU',
-        provinces: ['RU', 'UA', 'BY'], ai: { aggression: 1.1, eco: 1.0 },
+        provinces: ['RU', 'UA', 'KRYM', 'BY'], ai: { aggression: 1.1, eco: 1.0 },
       },
       {
         id: 'ITA',
@@ -298,7 +305,9 @@ export const SCENARIOS = [
         id: 'OTT',
         army: 1.3,
         name: 'Османская держава', short: 'Османы', color: '#7a5b3a', capital: 'TR',
-        provinces: ['TR', 'GR', 'BG', 'BA', 'RS', 'ME', 'MK', 'AL', 'XK', 'MD'], ai: { aggression: 1.2, eco: 1.0 },
+        // KRYM — Крымское ханство было вассалом Порты, поэтому полуостров
+        // принадлежит Османам, а не Польше-Литве, которой досталась Украина.
+        provinces: ['TR', 'GR', 'BG', 'BA', 'RS', 'ME', 'MK', 'AL', 'XK', 'MD', 'KRYM'], ai: { aggression: 1.2, eco: 1.0 },
       },
       {
         id: 'POL',
@@ -454,6 +463,9 @@ const concertBase = SCENARIOS.find((s) => s.id === 'concert');
 const civil1861 = {
   id: 'civil1861',
   theatre: 'atlantic',
+  // The only scenario whose story is in the New World: the menu backdrop and
+  // the default view should show America, not the Europe it also contains.
+  focus: 'america',
   title: 'Дом разделённый',
   era: '1861',
   startYear: 1861,
@@ -537,7 +549,113 @@ civil1861.nations = civil1861.nations.map((nation) =>
   nation.id === 'GBR' ? { ...nation, provinces: nation.provinces.filter((id) => id !== 'CA' && id !== 'NW') } : nation,
 );
 
-SCENARIOS.push(concertAtlantic, eve1939Atlantic, mosaicAtlantic, civil1861);
+// ---------------------------------------------------------------- World mode
+// The third theatre: the whole planet, cut out of the same public-domain data.
+// Siberia and Alaska are one strait apart, so a Pacific war is possible without
+// marching through Europe.
+const world1939 = {
+  id: 'world1939',
+  theatre: 'world',
+  title: 'Мир на пороге',
+  era: '1939',
+  startYear: 1939,
+  startMonth: 9,
+  monthsPerSecond: 0.12,
+  difficulty: 'Высоко',
+  blurb:
+    'Вся планета на одном столе: от Аляски до Камчатки, от Осло до Кейптауна. Сибирь связана с Америкой Беринговым проливом, а не дорогой через всю Европу. Карта листается влево и вправо без конца.',
+  nations: [
+    {
+      id: 'GER',
+      army: 1.3,
+      name: 'Германский рейх', short: 'Германия', color: '#4c5548', capital: 'DE',
+      provinces: ['DE', 'AT', 'CZ', 'KGD'], ai: { aggression: 1.25, eco: 1.15 },
+    },
+    {
+      id: 'SOV',
+      army: 1.25,
+      name: 'Советский Союз', short: 'СССР', color: '#7b2b33', capital: 'RU',
+      provinces: [
+        'RU', 'UA', 'BY', 'KRYM', 'MD', 'GEO', 'ARM', 'AZE',
+        'SIB', 'CEN', 'BAI', 'YAK', 'FAR', 'KAM', 'CHU',
+        'KAZ', 'UZB', 'TKM', 'KGZ', 'TJK',
+      ],
+      ai: { aggression: 1.05, eco: 1.1 },
+    },
+    {
+      id: 'USA',
+      army: 1.15,
+      name: 'Соединённые Штаты', short: 'США', color: '#3f6fb5', capital: 'NE',
+      // CA — Канада, а не Калифорния: американские провинции названы не по ISO.
+      provinces: ['NE', 'MW', 'SO', 'FL', 'WE', 'LO', 'AK', 'HI'],
+      ai: { aggression: 0.85, eco: 1.25 },
+    },
+    {
+      id: 'BNA',
+      army: 0.8,
+      name: 'Доминион Канада', short: 'Канада', color: '#a0b8d8', capital: 'CA',
+      provinces: ['CA', 'NW'], ai: { aggression: 0.7, eco: 1.05 },
+    },
+    {
+      id: 'GBR',
+      army: 1.15,
+      name: 'Британская империя', short: 'Британия', color: '#b04a4a', capital: 'GB',
+      provinces: ['GB', 'IE', 'IND', 'AUS', 'NZL', 'RSA', 'EGY'],
+      ai: { aggression: 0.95, eco: 1.2 },
+    },
+    {
+      id: 'FRA',
+      army: 1.1,
+      name: 'Французская республика', short: 'Франция', color: '#5a4fa8', capital: 'FR',
+      provinces: ['FR', 'ALG', 'TUN', 'MAR', 'SYR', 'LBN', 'VNM', 'MAD', 'SEN'],
+      ai: { aggression: 0.95, eco: 1.1 },
+    },
+    {
+      id: 'ITA',
+      army: 1.0,
+      name: 'Королевство Италия', short: 'Италия', color: '#4f8b63', capital: 'IT',
+      provinces: ['IT', 'LBY', 'ERI', 'SOM'], ai: { aggression: 1.1, eco: 1.0 },
+    },
+    {
+      id: 'JPN',
+      army: 1.1,
+      name: 'Японская империя', short: 'Япония', color: '#2f7f7a', capital: 'JPN',
+      provinces: ['JPN', 'KOR', 'PRK', 'TWN'], ai: { aggression: 1.2, eco: 1.05 },
+    },
+    {
+      id: 'CHN',
+      army: 0.9,
+      name: 'Китайская республика', short: 'Китай', color: '#c9a227', capital: 'NCH',
+      provinces: ['XIN', 'TIB', 'NMG', 'MAN', 'NCH', 'SIC', 'SCH'],
+      ai: { aggression: 0.85, eco: 1.0 },
+    },
+    {
+      id: 'POL',
+      army: 0.85,
+      name: 'Республика Польша', short: 'Польша', color: '#ae4266', capital: 'PL',
+      provinces: ['PL'], ai: { aggression: 0.8, eco: 0.95 },
+    },
+    {
+      id: 'TUR',
+      army: 0.95,
+      name: 'Турецкая республика', short: 'Турция', color: '#a8552f', capital: 'TR',
+      provinces: ['TR'], ai: { aggression: 0.8, eco: 0.95 },
+    },
+  ],
+  neutrals: [
+    { province: 'CH', garrison: 0.9, fort: 2 },
+    { province: 'ES', garrison: 0.8, fort: 1 },
+    { province: 'SE', garrison: 0.7, fort: 1 },
+    { province: 'IRN', garrison: 0.6, fort: 1 },
+    { province: 'SAU', garrison: 0.4, fort: 0 },
+    { province: 'BRA', garrison: 0.6, fort: 0 },
+    { province: 'ARG', garrison: 0.5, fort: 0 },
+    { province: 'MEX', garrison: 0.5, fort: 0 },
+  ],
+  balance: { aiAggression: 1.0, aiEco: 1.0, neutralStrength: 0.85 },
+};
+
+SCENARIOS.push(concertAtlantic, eve1939Atlantic, mosaicAtlantic, civil1861, world1939);
 
 // Never two nations of the same hue on one map: on the Atlantic map the USA and
 // the French Third Republic were both blue, and Canada wore Britain's exact red.

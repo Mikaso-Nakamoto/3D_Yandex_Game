@@ -124,6 +124,11 @@ export function distinctColors(colors, min = MIN_SEPARATION) {
   return out;
 }
 
+// Unowned land. Darker than every nation in the palette on purpose: the old
+// grey was so close to Germany's field grey that half of Europe read as one
+// country. A dark neutral makes owned land pop.
+export const NEUTRAL_COLOR = '#3c434b';
+
 // A curated political palette, one colour per nation.
 //
 // The colours are hand-picked and checked against each other: on a map of
@@ -132,12 +137,12 @@ export function distinctColors(colors, min = MIN_SEPARATION) {
 // blue and Canada wore Britain's exact red. `tests/game.test.js` fails if any
 // two nations that share a scenario come closer than MIN_SEPARATION.
 export const NATION_COLORS = {
-  RUS: '#4f8a5b', AUS: '#d9b45a', PRU: '#59616e', FRA: '#5a4fa8', GBR: '#b04a4a',
+  RUS: '#4f8a5b', AUS: '#d9b45a', PRU: '#4c5548', FRA: '#5a4fa8', GBR: '#b04a4a',
   OTT: '#7a5b3a', NLD: '#e08a3c', ESP: '#9a6a20', SWE: '#6c86a8', DNK: '#d98fa0',
-  POR: '#429cae', GER: '#59616e', SOV: '#7b2b33', ITA: '#4f8b63', POL: '#ae4266',
+  POR: '#429cae', GER: '#4c5548', SOV: '#7b2b33', ITA: '#4f8b63', POL: '#ae4266',
   YUG: '#7a6aa0', ROM: '#aeae42', HUN: '#a88f5a', SVK: '#8f9e6a', BUL: '#5f7632',
   GRE: '#327676', TUR: '#a8552f', NOR: '#a0b8d8', FIN: '#7fb3a8', BEL: '#c8a24a',
   SUI: '#b9b9b9', HRE: '#d9b45a', KAL: '#4f8fbf', MOS: '#4f8a5b', ENG: '#b04a4a',
   CAS: '#aeae42', LIV: '#8f9e6a', USA: '#3f6fb5', CSA: '#8f8f7a', BNA: '#a0b8d8',
-  MEX: '#6f9e4a', HAI: '#bb81b1',
+  MEX: '#6f9e4a', HAI: '#bb81b1', JPN: '#2f7f7a', CHN: '#c9a227',
 };
