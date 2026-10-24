@@ -1342,19 +1342,29 @@ export class App {
     this.nowSignature = signature;
     if (!info) {
       bar.classList.add('hidden');
+      // The onboarding pill may come back once nothing is happening.
+      $('#hint-bar')?.classList.remove('is-replaced');
       return;
     }
     bar.textContent = info.text;
     bar.className = `now-bar ${info.kind}`;
-    // A live status wins over the onboarding pill sitting in the same slot.
+    // A live status wins over the onboarding pill sitting in the same slot. The
+    // pill is hidden in the same frame: a 0.2 s fade meant that for a moment the
+    // two texts were drawn on top of each other.
     const hint = $('#hint-bar');
-    if (hint) hint.style.opacity = '0';
+    if (hint) {
+      hint.classList.add('is-replaced');
+      hint.style.opacity = '0';
+    }
   }
 
   /** One-line instruction at the top of the map. */
   #hint(text) {
     const bar = $('#hint-bar');
     if (!bar) return;
+    // A manual hint also owns the slot: the live status must not sit on top.
+    $('#now-bar')?.classList.add('hidden');
+    bar.classList.remove('is-replaced');
     bar.textContent = text;
     bar.classList.add('muted');
     bar.style.opacity = '1';

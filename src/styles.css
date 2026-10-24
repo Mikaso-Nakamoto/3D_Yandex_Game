@@ -1808,6 +1808,13 @@ body {
   color: var(--ink);
 }
 
+/* Replaced by the live status: hidden without a fade, so two lines of text never
+   share the same pixels. */
+.hint-bar.is-replaced {
+  transition: none;
+  visibility: hidden;
+}
+
 .hint-bar {
   position: absolute;
   top: 56px;
