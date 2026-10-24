@@ -1101,8 +1101,10 @@ export class App {
       return `
         <div class="pp-diplo has-pact">
           <div class="pp-pact"><i></i>Пакт о ненападении · ещё ${left} с</div>
-          <p class="pp-warn">Нападение нарушит договор. Другие державы это запомнят.</p>
-          <button class="pp-action danger" data-break="${owner.id}">Нарушить пакт</button>
+          <div class="pp-pact-row">
+            <button class="pp-action danger" data-break="${owner.id}">Нарушить пакт</button>
+            <p class="pp-warn">Нападение нарушит договор. Это запомнят.</p>
+          </div>
         </div>`;
     }
     const wait = Math.ceil((owner.pactAskedUntil ?? 0) - game.state.time);

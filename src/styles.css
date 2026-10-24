@@ -3717,10 +3717,20 @@ kbd {
 
 .pp-warn {
   margin: 0;
-  flex-basis: 100%;
+  flex: 1 1 110px;
+  min-width: 0;
   font-size: 10.5px;
   line-height: 1.4;
   color: #d99c8f;
+}
+
+/* Signed pact: the warning sits beside the «break» button instead of on its own
+   line, so the card still ends above the fold on a 390 px-tall phone. */
+.pp-pact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-basis: 100%;
 }
 
 .pp-warn.soft {
@@ -3852,6 +3862,11 @@ kbd {
 
   .pp-diplo-hint {
     font-size: 9px;
+  }
+
+  .pp-warn {
+    font-size: 9.5px;
+    line-height: 1.3;
   }
 
   /* A card that still needs a scroll ends with a soft fade instead of a row
