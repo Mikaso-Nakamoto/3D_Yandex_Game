@@ -11,7 +11,10 @@ const GLOW = {
   valid: { color: 0x74b06e, intensity: 0.24 },
   target: { color: 0xf0d38a, intensity: 0.34 },
   invalid: { color: 0xc25555, intensity: 0.32 },
-  accent: { color: 0xd9b45a, intensity: 0.13 },
+  // The selected nation on the menu must be obvious at a glance: it used to
+  // be a 13 % golden tint that vanished under the hover highlight.
+  accent: { color: 0xf3c85a, intensity: 0.42 },
+  accentHover: { color: 0xffd98a, intensity: 0.56 },
 };
 
 export class World {
@@ -47,6 +50,7 @@ export class World {
     this.dragHover = null;
     this.validTargets = new Set();
     this.accent = new Set();
+    this.accentLines = [];
     this.selected = null;
     this.selectionLine = null;
 
@@ -102,6 +106,7 @@ export class World {
     this.dragHover = null;
     this.validTargets = new Set();
     this.accent = new Set();
+    this.accentLines = [];
     this.selected = null;
     this.selectionLine = null;
     this.zoom = 1;
@@ -290,6 +295,35 @@ export class World {
   setAccent(ids = []) {
     this.accent = new Set(ids);
     this.#refreshGlow();
+    this.#refreshAccentLines();
+  }
+
+  /**
+   * A golden ring around the whole nation, not just a tint: on a big map a
+   * subtle tint is invisible, and «which country did I pick» must never be a
+   * question the player has to ask twice.
+   */
+  #refreshAccentLines() {
+    if (this.accentLines) {
+      for (const line of this.accentLines) {
+        this.scene.remove(line);
+        line.geometry.dispose();
+        line.material.dispose();
+      }
+    }
+    this.accentLines = [];
+    for (const id of this.accent) {
+      const province = this.byId[id];
+      if (!province) continue;
+      // Only the outer ring: islands would otherwise draw a lot of extra lines.
+      const ring = province.rings[0];
+      const geo = new THREE.BufferGeometry().setFromPoints(ring.map(([x, z]) => new THREE.Vector3(x, 0.03, z)));
+      const mat = new THREE.LineBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0.9, depthTest: false });
+      const line = new THREE.LineLoop(geo, mat);
+      line.renderOrder = 8;
+      this.scene.add(line);
+      this.accentLines.push(line);
+    }
   }
 
   flashProvince(id, strength = 1) {
@@ -302,10 +336,12 @@ export class World {
       if (this.dragFrom) {
         if (id === this.dragHover) state = this.validTargets.has(id) ? 'target' : 'invalid';
         else if (this.validTargets.has(id)) state = 'valid';
+      } else if (this.accent.has(id)) {
+        // An accented province stays golden while hovered: it used to turn
+        // white under the cursor, which read as «the highlight disappeared».
+        state = this.hovered === id ? 'accentHover' : 'accent';
       } else if (id === this.hovered) {
         state = 'hover';
-      } else if (this.accent.has(id)) {
-        state = 'accent';
       }
       const glow = GLOW[state];
       const flash = this.flash.get(id) ?? 0;

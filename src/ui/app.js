@@ -32,6 +32,7 @@ export class App {
     this.mapMode = 'europe';
     this.panelFolded = false;
     this.panelFoldTimer = null;
+    this.autoFrom = null;
     this.map = maps[this.theatre];
     this.mapById = Object.fromEntries(this.map.provinces.map((p) => [p.id, p]));
     this.settings = this.#loadSettings();
@@ -208,6 +209,7 @@ export class App {
 
   showMenu() {
     this.game = null;
+    this.autoFrom = null;
     this.panelFolded = false;
     clearTimeout(this.panelFoldTimer);
     $('#focus-card').classList.add('hidden');
@@ -800,6 +802,27 @@ export class App {
       return;
     }
     if (this.screen !== 'game' || !this.game) return;
+    if (this.autoFrom) {
+      const from = this.autoFrom;
+      if (!provinceId || provinceId === from) {
+        this.autoFrom = null;
+        this.#renderProvincePanel();
+        return;
+      }
+      const result = this.game.addAuto(from, provinceId, this.#autoDefaults(from).when, this.#autoDefaults(from).keep);
+      this.autoFrom = null;
+      if (result.ok) {
+        this.#toast(`Приказ: из «${this.game.provinceName(from)}» в «${this.game.provinceName(provinceId)}»`, 'good');
+        sfx.select();
+      } else {
+        this.#toast(result.reason, 'bad');
+      }
+      this.selectedProvince = from;
+      this.world.setSelected(from);
+      this.#renderProvincePanel();
+      this.#updateHud();
+      return;
+    }
     if (!provinceId) {
       this.selectedProvince = null;
       this.world.setSelected(null);
@@ -1034,6 +1057,19 @@ export class App {
     hint.classList.toggle('muted', !panel.classList.contains('hidden'));
   }
 
+  /** One-line instruction at the top of the map. */
+  #hint(text) {
+    const bar = $('#hint-bar');
+    if (!bar) return;
+    bar.textContent = text;
+    bar.classList.add('muted');
+    bar.style.opacity = '1';
+    clearTimeout(this.hintTimer);
+    this.hintTimer = setTimeout(() => {
+      bar.style.opacity = '0';
+    }, 6000);
+  }
+
   #renderProvincePanel() {
     // Live numbers must not replace the button under the pointer mid-click.
     if (this.pressing) return;
@@ -1192,7 +1228,8 @@ export class App {
       ${
         isMine
           ? `<div class="pp-section"><span>Развитие провинции</span></div>
-      <div class="pp-upgrades">${upgrades}</div>`
+      <div class="pp-upgrades">${upgrades}</div>
+      ${this.#autoBlock(province.id)}`
           : ''
       }
       <p class="pp-hint">${
@@ -1260,6 +1297,61 @@ export class App {
       panel.__hasScrollListener = true;
       panel.addEventListener('scroll', update, { passive: true });
     }
+  }
+
+  /**
+   * Standing orders of one province: «when this province holds N men, send
+   * everything above K to the target». Compact rows, two steppers each, and one
+   * button that turns the map into a target picker.
+   */
+  /** Sensible starting numbers: leave about half the norm, send above 80 %. */
+  #autoDefaults(provinceId) {
+    const norm = Math.max(20, this.game.maxGarrison(provinceId));
+    return { when: Math.round(norm * 0.8), keep: Math.round(norm * 0.5) };
+  }
+
+  #autoBlock(provinceId) {
+    const game = this.game;
+    if (!game) return '';
+    const orders = game.autoOrdersFrom(provinceId);
+    const picking = this.autoFrom === provinceId;
+    const rows = orders
+      .map((order) => {
+        const target = game.provinceName(order.to);
+        const amount = game.autoAmount(order);
+        return `<div class="pp-auto-row">
+          <div class="pp-auto-head">
+            <b>→ ${target}</b>
+            <button class="pp-auto-del" data-auto-del="${order.id}" title="Удалить приказ">✕</button>
+          </div>
+          <div class="pp-auto-steps">
+            <span class="pp-auto-key">когда здесь ≥</span>
+            <span class="pp-step">
+              <button type="button" data-auto-step="${order.id}" data-field="when" data-delta="-10">−</button>
+              <b>${fmt(order.when)}</b>
+              <button type="button" data-auto-step="${order.id}" data-field="when" data-delta="10">+</button>
+            </span>
+          </div>
+          <div class="pp-auto-steps">
+            <span class="pp-auto-key">оставлять</span>
+            <span class="pp-step">
+              <button type="button" data-auto-step="${order.id}" data-field="keep" data-delta="-10">−</button>
+              <b>${fmt(order.keep)}</b>
+              <button type="button" data-auto-step="${order.id}" data-field="keep" data-delta="10">+</button>
+            </span>
+            <span class="pp-auto-now">уйдёт ${fmt(amount)}</span>
+          </div>
+        </div>`;
+      })
+      .join('');
+    return `
+      <div class="pp-section"><span>Автоотправка</span></div>
+      <div class="pp-auto">
+        ${rows || '<p class="pp-auto-empty">Каждый раз одно и то же перетаскивание? Настройте приказ: когда гарнизон вырастет, войска уйдут сами.</p>'}
+        <button class="pp-action ${picking ? 'danger' : ''}" data-auto-add="${provinceId}">
+          ${picking ? 'Выберите провинцию на карте…' : 'Добавить приказ'}
+        </button>
+      </div>`;
   }
 
   /**
@@ -1777,6 +1869,10 @@ export class App {
   // ---------------------------------------------------------------- UI bindings
 
   #bindUi() {
+    // The AI settings were only reachable after picking a nation, which made
+    // «Агрессивность ИИ» look like it kept disappearing. The menu has its own
+    // way in now, and the rules modal works without a selected nation.
+    $('#btn-menu-rules').addEventListener('click', () => this.#openRules());
     $('#btn-howto').addEventListener('click', () => {
       sfx.click();
       $('#modal-howto').classList.remove('hidden');
@@ -1991,6 +2087,39 @@ export class App {
         this.selectedProvince = null;
         this.world.setSelected(null);
         $('#province-panel').classList.add('hidden');
+        return;
+      }
+      const autoAdd = event.target.closest('[data-auto-add]');
+      if (autoAdd && this.game) {
+        const id = autoAdd.dataset.autoAdd;
+        this.autoFrom = this.autoFrom === id ? null : id;
+        if (this.autoFrom) {
+          this.#hint(`Выберите провинцию, куда отправлять войска из «${this.game.provinceName(id)}»`);
+          this.#armPanelFold();
+        }
+        this.#renderProvincePanel();
+        sfx.click();
+        return;
+      }
+      const autoDel = event.target.closest('[data-auto-del]');
+      if (autoDel && this.game) {
+        this.game.removeAuto(Number(autoDel.dataset.autoDel));
+        this.#renderProvincePanel();
+        sfx.click();
+        return;
+      }
+      const autoStep = event.target.closest('[data-auto-step]');
+      if (autoStep && this.game) {
+        const order = this.game.autoOrders().find((o) => o.id === Number(autoStep.dataset.autoStep));
+        if (order) {
+          const delta = Number(autoStep.dataset.delta);
+          const next = { ...order };
+          if (autoStep.dataset.field === 'when') next.when = Math.max(order.keep + 10, order.when + delta);
+          else next.keep = Math.max(10, Math.min(order.when - 10, order.keep + delta));
+          this.game.addAuto(order.from, order.to, next.when, next.keep);
+          this.#renderProvincePanel();
+          this.#armPanelFold();
+        }
         return;
       }
       const pactButton = event.target.closest('[data-pact]');

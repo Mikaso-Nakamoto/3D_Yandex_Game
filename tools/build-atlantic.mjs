@@ -37,6 +37,20 @@ const round = (v, p = 3) => {
 const unproject = (map, [x, z]) => [x / map.projection.lonScale + map.projection.lonMid, map.projection.latMid - z];
 const project = ([lon, lat]) => [round((lon - lonMid) * lonScale), round(latMid - lat)];
 
+// --- gameplay scale -------------------------------------------------------
+// On one projection North America is about 1.6× wider and taller than Europe:
+// correct on an atlas, unplayable on a map where a province must be a
+// comfortable target. The map is a game board, so the American landmass is
+// compressed toward the Atlantic coast (longitude) and, south of latitude 42°,
+// toward that parallel — the Arctic keeps its true place next to Scandinavia.
+const SCALE = { x: 0.62, z: 0.62 };
+const PIVOT = project([-50, 42]);
+const scalePoint = ([x, z]) => [
+  round(PIVOT[0] + (x - PIVOT[0]) * SCALE.x),
+  round(z <= PIVOT[1] ? z : PIVOT[1] + (z - PIVOT[1]) * SCALE.z),
+];
+const scaleFor = (map, point) => (map === america ? scalePoint(point) : point);
+
 // Louisiana used the id «PL», which is Poland on the European map.
 const RENAME = { PL: 'LO' };
 
@@ -47,7 +61,7 @@ const renameIn = (map, id) => (map === america ? RENAME[id] ?? id : id);
 function convertRing(map, ring) {
   const out = [];
   for (const point of ring) {
-    const xy = project(unproject(map, point));
+    const xy = scaleFor(map, project(unproject(map, point)));
     const last = out[out.length - 1];
     if (!last || Math.abs(last[0] - xy[0]) > 0.02 || Math.abs(last[1] - xy[1]) > 0.02) out.push(xy);
   }
@@ -59,7 +73,7 @@ function convertProvince(map, province) {
   const rings = province.rings.map((ring) => convertRing(map, ring)).filter(Boolean);
   if (!rings.length) return null;
   const islands = (province.islands ?? []).map((ring) => convertRing(map, ring)).filter(Boolean);
-  const centroid = project(unproject(map, province.centroid));
+  const centroid = scaleFor(map, project(unproject(map, province.centroid)));
   return {
     id: renameIn(map, province.id),
     name: province.name,
@@ -118,14 +132,31 @@ for (const province of provinces) {
 
 // The same province name may exist on both maps (e.g. «Кипр»), so only the
 // ids are guaranteed to be unique — names are already Russian in the data.
-const width = round((BOUNDS.lonMax - BOUNDS.lonMin) * lonScale, 2);
-const height = round(BOUNDS.latMax - BOUNDS.latMin, 2);
+// The real extents after scaling, so the camera fits what is actually drawn.
+let minX = Infinity;
+let maxX = -Infinity;
+let minZ = Infinity;
+let maxZ = -Infinity;
+for (const province of provinces) {
+  for (const ring of [...province.rings, ...(province.islands ?? [])]) {
+    for (const [x, z] of ring) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+  }
+}
+const width = round(maxX - minX, 2);
+const height = round(maxZ - minZ, 2);
 
 const out = {
   generatedAt: new Date().toISOString(),
   source: 'Natural Earth 110m (public domain) via world-atlas; merged from map.json and map-america.json',
   theatre: 'atlantic',
   bounds: BOUNDS,
+  // Where the drawn geometry actually sits after the gameplay scaling.
+  extent: { minX: round(minX, 2), maxX: round(maxX, 2), minZ: round(minZ, 2), maxZ: round(maxZ, 2) },
   projection: { lonMid, latMid, lonScale: round(lonScale, 5) },
   width,
   height,

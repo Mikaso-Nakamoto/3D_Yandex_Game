@@ -59,6 +59,9 @@ export class Game {
       offers: [],
       nextOfferId: 1,
       nextArmyId: 1,
+      // Standing orders: «when this province holds N men, send the rest to X».
+      autos: [],
+      nextAutoId: 1,
       nextLogId: 1,
       playerAggro: false,
       rng: this.rng.s,
@@ -538,6 +541,112 @@ export class Game {
       route,
       routeTime: this.routeTime(route),
     };
+  }
+
+  // ---------------------------------------------------------------- auto orders
+
+  /** Every standing order of the player, newest last. */
+  autoOrders() {
+    return this.state.autos ?? [];
+  }
+
+  /** Orders that start in `provinceId`. */
+  autoOrdersFrom(provinceId) {
+    return this.autoOrders().filter((order) => order.from === provinceId);
+  }
+
+  /**
+   * «When this province holds `when` men, march everything above `keep` to
+   * `to`». A player asking for a repeating transfer used to click the same
+   * drag every twenty seconds; this is that click, written down once.
+   */
+  addAuto(fromId, toId, when, keep) {
+    const s = this.state;
+    const from = s.provinces[fromId];
+    if (!from || from.owner !== s.nationId) return { ok: false, reason: 'Это не ваша провинция' };
+    if (fromId === toId) return { ok: false, reason: 'Провинции совпадают' };
+    if (!this.neighbors(fromId).includes(toId) && !this.routeBetween(fromId, toId)) {
+      return { ok: false, reason: 'Нет пути по своим провинциям' };
+    }
+    const norm = this.maxGarrison(fromId);
+    const threshold = Math.max(BAL.minSend * 2, Math.round(when));
+    const left = Math.max(BAL.minSend, Math.min(Math.round(keep), threshold - BAL.minSend));
+    const existing = this.autoOrders().find((order) => order.from === fromId && order.to === toId);
+    if (existing) {
+      existing.when = threshold;
+      existing.keep = left;
+      return { ok: true, order: existing, updated: true };
+    }
+    if (this.autoOrdersFrom(fromId).length >= 3) {
+      return { ok: false, reason: 'Из одной провинции — не больше трёх приказов' };
+    }
+    const order = { id: s.nextAutoId ?? 1, from: fromId, to: toId, when: threshold, keep: left, norm };
+    s.nextAutoId = (s.nextAutoId ?? 1) + 1;
+    s.autos = [...this.autoOrders(), order];
+    this.#log(`Автоотправка: ${this.provinceName(fromId)} → ${this.provinceName(toId)} при ${threshold} чел.`, 'info');
+    return { ok: true, order };
+  }
+
+  removeAuto(id) {
+    const before = this.autoOrders();
+    const after = before.filter((order) => order.id !== id);
+    if (after.length === before.length) return false;
+    this.state.autos = after;
+    return true;
+  }
+
+  /** Visible for tests: how many men one order would send right now. */
+  autoAmount(order) {
+    const from = this.state.provinces[order.from];
+    if (!from || from.owner !== this.state.nationId) return 0;
+    return Math.max(0, Math.floor(from.garrison - order.keep));
+  }
+
+  #runAutos() {
+    const s = this.state;
+    for (const order of this.autoOrders()) {
+      const from = s.provinces[order.from];
+      if (!from || from.owner !== s.nationId) continue;
+      if (from.garrison < order.when) continue;
+      const amount = Math.floor(from.garrison - order.keep);
+      if (amount < BAL.minSend) continue;
+      // One column per order at a time: the next one leaves after this arrives.
+      if (s.armies.some((army) => army.autoId === order.id)) continue;
+      const adjacent = this.neighbors(order.from).includes(order.to);
+      const route = adjacent ? null : this.routeBetween(order.from, order.to);
+      const ratio = amount / Math.max(1, from.garrison);
+      const before = from.garrison;
+      let sent = 0;
+      if (route) {
+        sent = this.#launchRoute(s.nationId, route, ratio, {});
+      } else {
+        sent = this.launchArmy(s.nationId, order.from, order.to, ratio);
+      }
+      if (sent <= 0) continue;
+      const army = s.armies[s.armies.length - 1];
+      if (army) {
+        army.autoId = order.id;
+        army.autoKeep = order.keep;
+      }
+      // The province must keep its promise: `launchArmy` rounds down, so put
+      // back whatever would have dropped the garrison below the reserve.
+      const leftover = from.garrison;
+      if (leftover < order.keep && army) {
+        const giveBack = Math.min(army.troops, order.keep - leftover);
+        army.troops -= giveBack;
+        from.garrison += giveBack;
+        if (army.troops < BAL.minSend) {
+          from.garrison += army.troops;
+          s.armies.pop();
+          continue;
+        }
+      }
+      this.#log(
+        `Автоотправка: ${this.provinceName(order.from)} → ${this.provinceName(order.to)} (${Math.round(army?.troops ?? sent)} из ${Math.round(before)})`,
+        'auto',
+      );
+      this.#emit('auto', { from: order.from, to: order.to, amount: sent });
+    }
   }
 
   /**
@@ -1214,6 +1323,7 @@ export class Game {
     this.#tickOffers();
     this.#reinforce(dt);
     this.#desertion(dt);
+    this.#runAutos();
     this.#moveArmies(dt);
     this.#think(dt);
     this.#checkEnd();

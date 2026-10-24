@@ -1343,3 +1343,104 @@ test('the player-visible focus text names the province and the reward', () => {
   assert.ok(focus.name.length > 3, 'the ambition has a name');
   assert.ok(name.length > 1, 'the target has a name');
 });
+
+// ---------------------------------------------------------------- palette
+
+test('no two nations of one scenario wear the same colour', async () => {
+  const { isDistinct, deltaE } = await import('../src/data/palette.js');
+  for (const scenario of SCENARIOS) {
+    for (let i = 0; i < scenario.nations.length; i += 1) {
+      for (let j = i + 1; j < scenario.nations.length; j += 1) {
+        const a = scenario.nations[i];
+        const b = scenario.nations[j];
+        assert.ok(
+          isDistinct(a.color, b.color),
+          `${scenario.id}: ${a.id} ${a.color} and ${b.id} ${b.color} are too close (ΔE ${deltaE(a.color, b.color).toFixed(1)})`,
+        );
+      }
+    }
+  }
+});
+
+test('the USA and France are told apart on the Atlantic map', async () => {
+  const { deltaE } = await import('../src/data/palette.js');
+  const scenario = SCENARIOS.find((s) => s.id === 'eve1939-atlantic');
+  const usa = scenario.nations.find((n) => n.id === 'USA');
+  const fra = scenario.nations.find((n) => n.id === 'FRA');
+  assert.ok(deltaE(usa.color, fra.color) > 17, `ΔE ${deltaE(usa.color, fra.color).toFixed(1)}`);
+});
+
+// ---------------------------------------------------------------- auto orders
+
+/** A game with the AI muted and one player province plus one foreign neighbour. */
+const autoSetup = () => {
+  const game = makeGame();
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  const mine = Object.values(game.state.provinces).filter((p) => p.owner === game.state.nationId);
+  const from = mine[0].id;
+  const to = game.neighbors(from).find((id) => game.state.provinces[id].owner !== game.state.nationId);
+  return { game, from, to };
+};
+
+test('a standing order sends the surplus and keeps the reserve', () => {
+  const { game, from, to } = autoSetup();
+  const norm = game.maxGarrison(from);
+  const result = game.addAuto(from, to, Math.round(norm * 0.5), Math.round(norm * 0.3));
+  assert.ok(result.ok, result.reason);
+  const before = game.state.provinces[from].garrison;
+  game.update(1.2);
+  const army = game.state.armies.find((a) => a.autoId === result.order.id);
+  assert.ok(army, 'the order must march by itself');
+  assert.ok(army.troops > 0);
+  assert.ok(game.state.provinces[from].garrison >= result.order.keep, 'the reserve stays at home');
+  assert.ok(game.state.provinces[from].garrison < before);
+});
+
+test('a standing order waits for its threshold', () => {
+  const { game, from, to } = autoSetup();
+  const norm = game.maxGarrison(from);
+  game.state.provinces[from].garrison = Math.round(norm * 0.8);
+  const result = game.addAuto(from, to, norm + 50, Math.round(norm * 0.4));
+  assert.ok(result.ok, result.reason);
+  game.update(1.5);
+  assert.equal(game.state.armies.filter((a) => a.autoId).length, 0, 'not yet at the threshold');
+});
+
+test('only one column per standing order is on the road', () => {
+  const { game, from, to } = autoSetup();
+  const result = game.addAuto(from, to, 30, 20);
+  assert.ok(result.ok, result.reason);
+  game.update(1.2);
+  const first = game.state.armies.filter((a) => a.autoId === result.order.id).length;
+  game.state.provinces[from].garrison += 200;
+  game.update(1.2);
+  const second = game.state.armies.filter((a) => a.autoId === result.order.id).length;
+  assert.equal(first, 1);
+  assert.equal(second, 1, 'the next column leaves only after this one arrives');
+});
+
+test('auto orders can be removed, and are capped per province', () => {
+  const { game, from, to } = autoSetup();
+  const first = game.addAuto(from, to, 100, 40);
+  assert.ok(first.ok, first.reason);
+  const targets = game.neighbors(from).filter((id) => id !== to && game.state.provinces[id].owner !== game.state.nationId);
+  assert.ok(targets.length >= 2, 'the test province needs three foreign neighbours');
+  assert.ok(game.addAuto(from, targets[0], 100, 40).ok);
+  const third = game.addAuto(from, targets[1], 100, 40);
+  const fourth = game.addAuto(from, targets[2] ?? targets[0], 100, 40);
+  assert.ok(third.ok);
+  assert.equal(fourth.ok, false, 'three orders per province is the cap');
+  assert.equal(game.autoOrdersFrom(from).length, 3);
+  assert.ok(game.removeAuto(first.order.id));
+  assert.equal(game.autoOrdersFrom(from).length, 2);
+});
+
+test('the Atlantic map is no longer twice the size of Europe', () => {
+  assert.ok(atlanticMap.width < 140, `width ${atlanticMap.width}`);
+  assert.ok(atlanticMap.width / atlanticMap.height > 2.2, 'the theatre stays a wide Atlantic map');
+  const america = atlanticMap.provinces.filter((p) => ['AK', 'CA', 'NW', 'NE', 'MW', 'WE', 'SO', 'FL', 'LO', 'MX', 'CU', 'HI'].includes(p.id));
+  const xs = america.flatMap((p) => p.rings.flat().map(([x]) => x));
+  const europe = atlanticMap.provinces.filter((p) => p.centroid[0] > 20);
+  assert.ok(europe.length > 30, 'Europe keeps its provinces');
+  assert.ok(Math.max(...xs) < 12, 'America stays on its side of the ocean');
+});

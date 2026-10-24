@@ -1,4 +1,6 @@
 // Scenario data: who owns what in each era. All sets, names and balance values are original.
+import { NATION_COLORS } from './palette.js';
+
 export const THEATRES = {
   europe: {
     id: 'europe',
@@ -55,7 +57,7 @@ export const SCENARIOS = [
       {
         id: 'FRA',
         army: 1.25,
-        name: 'Королевство Франция', short: 'Франция', color: '#3c6ea5', capital: 'FR',
+        name: 'Королевство Франция', short: 'Франция', color: '#5a4fa8', capital: 'FR',
         provinces: ['FR'], ai: { aggression: 1.0, eco: 1.05 },
       },
       {
@@ -100,7 +102,7 @@ export const SCENARIOS = [
       {
         id: 'POR',
         army: 0.8,
-        name: 'Королевство Португалия', short: 'Португалия', color: '#4a8b88', capital: 'PT',
+        name: 'Королевство Португалия', short: 'Португалия', color: '#3f8ea8', capital: 'PT',
         provinces: ['PT'], ai: { aggression: 0.75, eco: 1.0 },
       },
     ],
@@ -132,7 +134,7 @@ export const SCENARIOS = [
       {
         id: 'SOV',
         army: 1.4,
-        name: 'Советский Союз', short: 'СССР', color: '#9c3a3a', capital: 'RU',
+        name: 'Советский Союз', short: 'СССР', color: '#7b2b33', capital: 'RU',
         provinces: ['RU', 'UA', 'BY'], ai: { aggression: 1.1, eco: 1.0 },
       },
       {
@@ -144,7 +146,7 @@ export const SCENARIOS = [
       {
         id: 'FRA',
         army: 1.05,
-        name: 'Третья республика', short: 'Франция', color: '#3c6ea5', capital: 'FR',
+        name: 'Третья республика', short: 'Франция', color: '#5a4fa8', capital: 'FR',
         provinces: ['FR'], ai: { aggression: 0.85, eco: 1.0 },
       },
       {
@@ -254,7 +256,7 @@ export const SCENARIOS = [
       {
         id: 'POR',
         army: 0.7,
-        name: 'Португальская республика', short: 'Португалия', color: '#4a8b88', capital: 'PT',
+        name: 'Португальская республика', short: 'Португалия', color: '#3f8ea8', capital: 'PT',
         provinces: ['PT'], ai: { aggression: 0.65, eco: 0.95 },
       },
     ],
@@ -289,7 +291,7 @@ export const SCENARIOS = [
       {
         id: 'FRA',
         army: 1.05,
-        name: 'Королевство Франция', short: 'Франция', color: '#3c6ea5', capital: 'FR',
+        name: 'Королевство Франция', short: 'Франция', color: '#5a4fa8', capital: 'FR',
         provinces: ['FR'], ai: { aggression: 1.0, eco: 1.05 },
       },
       {
@@ -337,7 +339,7 @@ export const SCENARIOS = [
       {
         id: 'POR',
         army: 0.85,
-        name: 'Королевство Португалия', short: 'Португалия', color: '#4a8b88', capital: 'PT',
+        name: 'Королевство Португалия', short: 'Португалия', color: '#3f8ea8', capital: 'PT',
         provinces: ['PT'], ai: { aggression: 0.8, eco: 1.05 },
       },
       {
@@ -536,6 +538,16 @@ civil1861.nations = civil1861.nations.map((nation) =>
 );
 
 SCENARIOS.push(concertAtlantic, eve1939Atlantic, mosaicAtlantic, civil1861);
+
+// Never two nations of the same hue on one map: on the Atlantic map the USA and
+// the French Third Republic were both blue, and Canada wore Britain's exact red.
+// Each scenario repairs only the pairs that actually clash. See palette.js.
+for (const scenario of SCENARIOS) {
+  scenario.nations = scenario.nations.map((nation) => ({
+    ...nation,
+    color: NATION_COLORS[nation.id] ?? nation.color,
+  }));
+}
 
 export const SCENARIO_BY_ID = Object.fromEntries(SCENARIOS.map((s) => [s.id, s]));
 
