@@ -1137,7 +1137,7 @@ export class App {
       button.innerHTML = `
         <span class="o-icon">${icon(order.icon, 16)}</span>
         <span class="o-name">${order.name}</span>
-        <span class="o-cost">◈ ${BAL.orderGold[order.id]}</span>
+        <span class="o-cost">${BAL.orderGold[order.id]} золота</span>
         <span class="o-cd hidden"></span>`;
       button.addEventListener('click', () => this.#castOrder(order.id));
       bar.appendChild(button);

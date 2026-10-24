@@ -1688,7 +1688,9 @@ body {
 .send-ratio {
   position: absolute;
   left: 50%;
-  bottom: 74px;
+  /* 74 px put the pill straight over the top of the order cards (they start at
+     88 px from the bottom): the cards looked clipped. */
+  bottom: 100px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -3925,5 +3927,75 @@ kbd {
 
   .pp-head {
     flex: 0 0 auto;
+  }
+}
+
+/* ---------------------------------------------------------------- end screen on a phone
+   A 390 px-tall landscape phone cut the end card right after the stat tiles:
+   «Сыграть ещё» and «В меню» were below the fold, so the run could not be
+   restarted without hunting for a scroll. Seven stats fit in four columns. */
+
+@media (max-height: 560px) and (orientation: landscape) {
+  #screen-end {
+    padding: 8px;
+  }
+
+  #screen-end .end-card {
+    max-width: 760px;
+    max-height: calc(100vh - 16px);
+    padding: 12px 18px;
+  }
+
+  .end-emblem {
+    font-size: 28px;
+    margin-bottom: 2px;
+  }
+
+  .end-card .eyebrow {
+    font-size: 9px;
+  }
+
+  .end-card h2 {
+    font-size: 26px;
+    margin: 0 0 3px;
+  }
+
+  .end-card p {
+    font-size: 11.5px;
+    line-height: 1.35;
+    margin: 0 0 8px;
+  }
+
+  .end-stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .end-stat {
+    padding: 5px 7px;
+    border-radius: 8px;
+  }
+
+  .end-stat .k {
+    font-size: 8px;
+  }
+
+  .end-stat .v {
+    font-size: 17px;
+    margin-top: 1px;
+  }
+
+  .end-score {
+    margin: 0 0 8px;
+    padding: 6px 10px;
+  }
+
+  .end-actions {
+    gap: 8px;
+  }
+
+  .end-actions .btn {
+    padding: 8px 16px;
   }
 }
