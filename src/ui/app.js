@@ -1037,15 +1037,22 @@ export class App {
                     chance === 0
                       ? `<div class="pp-row"><span>Доля войск</span><b class="muted">${Math.round(
                           game.state.sendRatio * 100,
-                        )}% — перетащите больше или поднимите долю</b></div>`
+                        )}% — мало, перетащите больше</b></div>`
                       : ''
                   }`;
               })()
             : ''
         }
         <div class="pp-row"><span>Население</span><b>${province.pop.toFixed(1)} млн</b></div>
-        <div class="pp-row"><span>Доход провинции</span><b class="gold">${isMine ? `+${(income * doctrineIncome).toFixed(2)} золота/с` : '—'}</b></div>
-        <div class="pp-row"><span>Прирост рекрутов</span><b>${isMine ? `+${(recruits * 60).toFixed(0)}/мин` : '—'}</b></div>
+        ${
+          // Income and recruits are only ever paid to the owner: on a foreign
+          // province they were three rows of dashes that pushed the pact
+          // button under the fold of a phone card.
+          isMine
+            ? `<div class="pp-row"><span>Доход провинции</span><b class="gold">+${(income * doctrineIncome).toFixed(2)} золота/с</b></div>
+        <div class="pp-row"><span>Прирост рекрутов</span><b>+${(recruits * 60).toFixed(0)}/мин</b></div>`
+            : ''
+        }
         <div class="pp-row"><span>Крепость</span><b>${province.fort > 0 ? `уровень ${province.fort} из ${BAL.maxLevel}` : 'нет'}</b></div>
       </div>
 
@@ -1062,6 +1069,21 @@ export class App {
           : `Оборона ${fmt(defense)}: ${fmt(breakdown.effective)} боевых войск × ${breakdown.fortMul.toFixed(2)} крепость × ${breakdown.doctrineMul.toFixed(2)} доктрина × ${breakdown.moraleMul.toFixed(2)} дух. Шанс — для доли ${Math.round(game.state.sendRatio * 100)}% и с учётом пополнения защитника в пути.`
       }</p>
     `;
+    this.#markPanelOverflow(panel);
+  }
+
+  /** A scrolled card gets a soft bottom edge instead of a row cut in half. */
+  #markPanelOverflow(panel = $('#province-panel')) {
+    if (!panel) return;
+    const update = () => {
+      const atEnd = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 2;
+      panel.classList.toggle('has-more', panel.scrollHeight > panel.clientHeight + 2 && !atEnd);
+    };
+    update();
+    if (!panel.__hasScrollListener) {
+      panel.__hasScrollListener = true;
+      panel.addEventListener('scroll', update, { passive: true });
+    }
   }
 
   /**

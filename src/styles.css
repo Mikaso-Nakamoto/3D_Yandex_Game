@@ -2195,6 +2195,42 @@ kbd {
     display: none;
   }
 
+  /* The card must fit a 390 px screen without scrolling: the last upgrade row
+     used to hang 8 px below the fold, so «Казармы» always looked cut off. */
+  .province-panel {
+    max-height: calc(100% - 104px);
+    padding: 9px;
+  }
+
+  .pp-hint {
+    font-size: 10px;
+    line-height: 1.35;
+    margin-top: 7px;
+  }
+
+  .pp-meter {
+    margin-bottom: 6px;
+  }
+
+  .pp-rows {
+    gap: 3px;
+    margin: 6px 0;
+  }
+
+  .pp-upgrades {
+    gap: 5px;
+  }
+
+  .pp-diplo {
+    margin-top: 7px;
+    padding-top: 7px;
+    gap: 6px;
+  }
+
+  .pp-diplo-hint {
+    font-size: 9.5px;
+  }
+
   .log,
   .log-dock {
     display: none;
@@ -3725,4 +3761,169 @@ kbd {
 
 .modal-body.no-more {
   mask-image: none;
+}
+
+/* ---------------------------------------------------------------- phone panel (final)
+   Several media blocks above touch the province card (left 8 / width 288 /
+   padding 10×11 at max-height 560). This final block keeps the numbers in one
+   place for short landscape phones: the card must fit a 390 px screen whole,
+   and the three upgrade rows with it. */
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .province-panel {
+    /* Full column between the HUD and the bottom edge. */
+    top: 76px;
+    bottom: 8px;
+    height: auto;
+    max-height: none;
+    padding: 8px 9px;
+  }
+
+  /* The ratio control used to sit under the card, which cost the card 36 px of
+     height and hid the third upgrade. Right side is free and thumb-friendly. */
+  .send-ratio {
+    left: auto;
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .pp-head {
+    margin-bottom: 4px;
+  }
+
+  .pp-meter {
+    margin: 4px 0 5px;
+  }
+
+  .meter-head,
+  .meter-foot {
+    font-size: 9.5px;
+  }
+
+  .pp-hint {
+    display: none;
+  }
+
+  .pp-rows {
+    gap: 1px;
+    margin: 3px 0;
+  }
+
+  .pp-row {
+    font-size: 10px;
+    line-height: 1.2;
+    padding: 1.5px 0;
+  }
+
+  .pp-row b.odds {
+    font-size: 12px;
+  }
+
+  .pp-section {
+    margin: 3px 0 1px;
+    font-size: 8.5px;
+  }
+
+  .pp-upgrades {
+    gap: 3px;
+  }
+
+  .upg {
+    min-height: 30px;
+    padding: 3px 6px;
+  }
+
+  .upg .u-icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .u-name,
+  .u-cost {
+    font-size: 10px;
+  }
+
+  .pp-diplo {
+    margin-top: 5px;
+    padding-top: 5px;
+  }
+
+  .pp-diplo-hint {
+    font-size: 9px;
+  }
+
+  /* A card that still needs a scroll ends with a soft fade instead of a row
+     of text cut in half. The class is set from JS when content overflows. */
+  .province-panel.has-more {
+    mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+  }
+
+  /* The long «drag to attack» paragraph is learnt once; on a phone it is the
+     first thing to give way so the three upgrades stay visible. */
+  .pp-hint {
+    display: none;
+  }
+}
+
+/* Very short phones (iPhone SE in landscape is 568×320): the card is ~285 px
+   of content in a 234 px column, so the diplomacy action is moved up under the
+   garrison meter — it must never be the thing that hides below the fold. */
+@media (max-height: 340px) and (orientation: landscape) {
+  /* At 568×320 the HUD needs a second row (nation, date, progress, gold, spirit,
+     recruits, «Державы», speed, pause do not fit on one), so everything that
+     hangs from the top has to move below 76 px. */
+  .toasts {
+    top: 84px;
+  }
+
+  .orders-bar {
+    top: 84px;
+    bottom: auto;
+    transform: none;
+    max-height: calc(100% - 168px);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .orders-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Three orders in ~170 px: icon, name and price only, nothing else. */
+  .order {
+    padding: 4px 4px;
+  }
+
+  .order .o-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .order .o-name {
+    font-size: 9px;
+    margin-top: 1px;
+    line-height: 1.15;
+  }
+
+  .order .o-cost {
+    font-size: 9px;
+    margin-top: 1px;
+  }
+
+  .province-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pp-diplo {
+    order: -1;
+    margin: 0 0 5px;
+    padding: 0 0 5px;
+    border-top: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .pp-head {
+    flex: 0 0 auto;
+  }
 }
