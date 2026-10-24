@@ -3628,6 +3628,40 @@ kbd {
   color: #d98a7f;
 }
 
+/* «Сейчас»: one line about the thing that matters this second. It is not an
+   instruction, it is a status, so it stays visible on a phone where the hint
+   pill is hidden — an incoming column must be visible without opening a card. */
+.now-bar {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  max-width: min(72vw, 560px);
+  padding: 5px 14px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: #dfe7f2;
+  background: rgba(9, 16, 27, 0.82);
+  border: 1px solid rgba(217, 180, 90, 0.28);
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.now-bar.warn {
+  color: #f3d9a2;
+  border-color: rgba(217, 180, 90, 0.55);
+  background: rgba(38, 27, 12, 0.86);
+}
+
+.now-bar.hidden {
+  display: none;
+}
+
 /* The onboarding pill yields to an open province card. */
 .hint-bar.muted {
   opacity: 0 !important;

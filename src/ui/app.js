@@ -17,10 +17,11 @@ import {
 import { platform } from '../platform/yandex.js';
 import { sfx } from '../audio.js';
 import { icon } from './icons.js';
-import { offerTitle, provincesCount, nationsCount } from '../game/text.js';
+import { offerTitle, provincesCount, nationsCount, plural } from '../game/text.js';
 
 const SAVE_KEY = 'crowns.save.v1';
 const SETTINGS_KEY = 'crowns.settings.v1';
+const TIPS_KEY = 'crowns.tips.v1';
 const DIFFICULTY_LEVEL = { 'Низко': 1, 'Средне': 2, 'Высоко': 3 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -72,6 +73,7 @@ export class App {
     this.armyTokens = new Map();
     this.lastBattleSound = 0;
     this.hasSave = this.#readSave() !== null;
+    this.seenTips = this.#readTips();
 
     this.#hydrateIcons();
     this.#buildMenu();
@@ -97,10 +99,42 @@ export class App {
   #loadSettings() {
     try {
       const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-      return { sound: raw.sound !== false, labels: raw.labels !== false, rules: raw.rules ?? null };
+      return {
+        sound: raw.sound !== false,
+        labels: raw.labels !== false,
+        tips: raw.tips !== false,
+        rules: raw.rules ?? null,
+      };
     } catch {
-      return { sound: true, labels: true, rules: null };
+      return { sound: true, labels: true, tips: true, rules: null };
     }
+  }
+
+  #readTips() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(TIPS_KEY) || '[]');
+      return new Set(Array.isArray(raw) ? raw : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  /**
+   * A one-time tip for the first time something happens. Unlike the timed
+   * onboarding toasts these are impossible to miss: they fire on the event the
+   * player just caused, and they never repeat — a tip that keeps appearing is
+   * noise, and noise is what the switch in the pause menu turns off.
+   */
+  #tip(key, text) {
+    if (this.settings.tips === false) return;
+    if (this.seenTips.has(key)) return;
+    this.seenTips.add(key);
+    try {
+      localStorage.setItem(TIPS_KEY, JSON.stringify([...this.seenTips]));
+    } catch {
+      /* storage full or disabled: the tip is still shown once this session */
+    }
+    this.#toast(text, 'info');
   }
 
   #saveSettings() {
@@ -534,6 +568,10 @@ export class App {
           sfx.capture();
           this.#toast(`Провинция ${game.provinceName(payload.provinceId)} взята`, 'good');
           if (this.selectedProvince === payload.provinceId) this.#renderProvincePanel();
+          this.#tip(
+            'capture',
+            'Провинция ваша. Клик по ней — мануфактура, казармы, крепость и гарнизон',
+          );
         } else if (payload.from === game.state.nationId) {
           sfx.loss();
           this.#toast(`Потеряна ${game.provinceName(payload.provinceId)}`, 'bad');
@@ -1209,6 +1247,77 @@ export class App {
     hint.classList.toggle('muted', !panel.classList.contains('hidden'));
   }
 
+  /**
+   * «Сейчас» — the one thing the player needs to know this second: an offer
+   * waiting for an answer, a column already marching at their land, or their
+   * own troops on the road. Silence when nothing is happening: a permanent
+   * banner becomes wallpaper and stops being read.
+   */
+  #nowInfo() {
+    const game = this.game;
+    if (!game) return null;
+    const s = game.state;
+    const me = s.nationId;
+    const name = (id) => s.nations[id]?.short ?? '—';
+    const finalTo = (a) => (a.path ? a.path[a.path.length - 1] : a.to);
+    const offer = s.offers?.[0];
+    if (offer) {
+      const what =
+        offer.kind === 'tribute'
+          ? 'мир с уступкой'
+          : offer.kind === 'passage'
+            ? 'право прохода'
+            : offer.kind === 'pact'
+              ? 'пакт'
+              : 'мир';
+      return { text: `${name(offer.from)} предлагает ${what} — ответьте в карточке`, kind: 'warn' };
+    }
+    const incoming = s.armies.filter(
+      (a) => a.owner !== me && s.provinces[finalTo(a)]?.owner === me && !game.hasTruce(a.owner, me),
+    );
+    if (incoming.length) {
+      incoming.sort((a, b) => a.duration - a.t - (b.duration - b.t));
+      const first = incoming[0];
+      const to = finalTo(first);
+      const left = Math.max(0, Math.ceil(first.duration - first.t));
+      const capital = to === s.nations[me]?.capital ? ' — столица' : '';
+      const more = incoming.length > 1 ? ` · ещё ${incoming.length - 1}` : '';
+      return {
+        text: `Колонна ${name(first.owner)} → ${game.provinceName(to)}${capital} · ${left} с${more}`,
+        kind: 'warn',
+      };
+    }
+    const mine = s.armies.filter((a) => a.owner === me);
+    if (mine.length) return { text: `${plural(mine.length, 'колонна', 'колонны', 'колонн')} в пути`, kind: 'info' };
+    return null;
+  }
+
+  /** Repaints the «Сейчас» line only when its text actually changes. */
+  #syncNow() {
+    const bar = $('#now-bar');
+    if (!bar) return;
+    if (this.screen !== 'game' || !this.game || this.hintTimer) {
+      if (this.nowSignature) {
+        bar.classList.add('hidden');
+        this.nowSignature = '';
+      }
+      return;
+    }
+    const info = this.#nowInfo();
+    const signature = info ? `${info.kind}:${info.text}` : '';
+    if (signature === this.nowSignature) return;
+    this.nowSignature = signature;
+    if (!info) {
+      bar.classList.add('hidden');
+      return;
+    }
+    bar.textContent = info.text;
+    bar.className = `now-bar ${info.kind}`;
+    // A live status wins over the onboarding pill sitting in the same slot.
+    const hint = $('#hint-bar');
+    if (hint) hint.style.opacity = '0';
+  }
+
   /** One-line instruction at the top of the map. */
   #hint(text) {
     const bar = $('#hint-bar');
@@ -1219,6 +1328,7 @@ export class App {
     clearTimeout(this.hintTimer);
     this.hintTimer = setTimeout(() => {
       bar.style.opacity = '0';
+      this.hintTimer = null;
     }, 6000);
   }
 
@@ -1935,6 +2045,7 @@ export class App {
     else if (result.accepted) {
       this.#toast(result.kind === 'peace' ? `Мир с ${name}` : `Пакт с ${name}`, 'good');
       sfx.select();
+      this.#tip('pact', 'Договоры и войны — в «Державах», вкладка «Переговоры»');
     } else this.#toast(`${name}: отказ. Сила и усталость решают — попробуйте позже`, 'bad');
     this.#afterDiplomacy();
   }
@@ -2568,6 +2679,10 @@ export class App {
         this.world.flashProvince(this.selectedProvince, 0.45);
         this.#renderProvincePanel();
         this.#updateHud();
+        this.#tip(
+          'upgrade',
+          'Мануфактура — доход, казармы — рекруты, крепость — оборона. Уровень виден в карточке',
+        );
       }
     });
 
@@ -2591,8 +2706,13 @@ export class App {
       this.labels.setVisible(this.settings.labels && this.screen === 'game');
       this.#saveSettings();
     });
+    $('#toggle-tips').addEventListener('change', (event) => {
+      this.settings.tips = event.target.checked;
+      this.#saveSettings();
+    });
     $('#toggle-sound').checked = this.settings.sound;
     $('#toggle-labels').checked = this.settings.labels;
+    $('#toggle-tips').checked = this.settings.tips !== false;
     sfx.setEnabled(this.settings.sound);
 
     $('#btn-again').addEventListener('click', () => {
@@ -2731,6 +2851,11 @@ export class App {
       if (this.saveTimer <= 0) {
         this.saveTimer = 12;
         this.save();
+      }
+      this.nowTimer = (this.nowTimer ?? 0) - dt;
+      if (this.nowTimer <= 0) {
+        this.nowTimer = 0.5;
+        this.#syncNow();
       }
     }
     this.world.render();

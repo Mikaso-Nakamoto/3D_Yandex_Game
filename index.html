@@ -161,6 +161,7 @@
         <div class="hint-bar" id="hint-bar">
           Перетащите войска из своей провинции в соседнюю · клик по провинции — улучшения
         </div>
+        <div class="now-bar hidden" id="now-bar" aria-live="polite"></div>
       </section>
     </div>
 
@@ -325,6 +326,10 @@
           <label class="switch">
             <input type="checkbox" id="toggle-labels" checked />
             <span>Подписи</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="toggle-tips" checked />
+            <span>Подсказки</span>
           </label>
         </div>
         <p class="save-note" id="save-note">Прогресс сохраняется автоматически</p>
