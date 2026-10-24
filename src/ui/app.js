@@ -566,11 +566,12 @@ export class App {
     const victory = result === 'victory';
     $('#end-emblem').textContent = victory ? '♛' : '☠';
     const theatre = THEATRES[this.scenario?.theatre ?? 'europe'];
-    const place = theatre?.id === 'america' ? 'Новый Свет' : 'Европа';
-    $('#end-eyebrow').textContent = victory ? `${place} ваш` : 'Держава пала';
+    const atlantic = theatre?.id === 'atlantic';
+    const genitive = atlantic ? 'Атлантики' : 'Европы';
+    $('#end-eyebrow').textContent = victory ? (atlantic ? 'Два берега ваши' : 'Европа ваша') : 'Держава пала';
     $('#end-title').textContent = victory ? 'Победа' : 'Поражение';
     $('#end-text').textContent = victory
-      ? `Каждая провинция ${place === 'Европа' ? 'Европы' : 'Нового Света'} под вашей короной. Полное завоевание — единственный способ победить, и у вас это получилось.`
+      ? `Каждая провинция ${genitive} под вашей короной. Полное завоевание — единственный способ победить, и у вас это получилось.`
       : reason === 'eliminated'
         ? 'Последнюю провинцию пришлось отдать. В следующий раз держите резервы в глубине и не открывайте все фронты сразу.'
         : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
