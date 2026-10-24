@@ -83,7 +83,28 @@ export class ArrowLayer {
       });
     }
 
-    if (this.preview) {
+    if (this.preview?.route?.length > 2) {
+      // Planned road: dim gold arrows along every leg so the route reads as a
+      // path rather than a single leap over half the continent.
+      for (let i = 1; i < this.preview.route.length; i += 1) {
+        const a = this.world.projectPoint(this.preview.route[i - 1][0], this.preview.route[i - 1][1], 0.5);
+        const b = this.world.projectPoint(this.preview.route[i][0], this.preview.route[i][1], 0.5);
+        if (!a.visible || !b.visible) continue;
+        this.#drawArrow({
+          from: a,
+          to: b,
+          color: this.preview.valid ? '#ffe6a3' : '#ff8a8a',
+          edge: 'rgba(10, 8, 4, 0.9)',
+          width: 14,
+          dashed: true,
+          flow: 1.4,
+          alpha: 0.72,
+        });
+      }
+    }
+
+    // Only one preview at a time: either the planned road or a free-hand line.
+    if (this.preview && !(this.preview.route?.length > 2)) {
       const from = this.#project(this.preview.from);
       if (from && this.preview.point) {
         const target = this.world.projectPoint(this.preview.point[0], this.preview.point[1], 0.5);

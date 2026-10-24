@@ -64,11 +64,60 @@ test('game boots with the player owning its provinces and full garrisons', () =>
   assert.ok(game.player.gold > 0);
 });
 
-test('cannot move troops to a non-adjacent province', () => {
+test('a non-adjacent province without a land route is still refused', () => {
   const game = makeGame();
+  // France owns a single province here, so there is nothing to walk through.
   const check = game.canSend('FR', 'RU');
   assert.equal(check.ok, false);
-  assert.match(check.reason, /гранич/);
+  assert.match(check.reason, /пут/);
+});
+
+test('troops can be ordered through the realm to a distant province', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'RUS', map, seed: 7 });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  game.state.nations.RUS.manpower = 0; // no drip-feed, so the numbers stay exact
+  const route = game.routeBetween('RU', 'LT');
+  assert.ok(route, 'route RU -> LT exists');
+  assert.ok(route.length > 2, `route goes through own land: ${route.join('->')}`);
+  const result = game.sendTroops('RU', 'LT', 0.5);
+  assert.equal(result.ok, true);
+  const army = game.state.armies.find((a) => a.path);
+  assert.ok(army, 'a planned column was created');
+  assert.deepEqual(army.path, route);
+  assert.equal(army.to, route[1], 'the first hop is the first waypoint');
+});
+
+test('a planned column passes through and leaves the requested garrison', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'RUS', map, seed: 11 });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  game.state.nations.RUS.manpower = 0;
+  const route = game.routeBetween('RU', 'LT');
+  const waypoint = route[1];
+  const beforeWaypoint = game.province(waypoint).garrison;
+  const beforeTarget = game.province('LT').garrison;
+  const result = game.sendTroops('RU', 'LT', 0.5, { leave: { [waypoint]: 30 } });
+  assert.equal(result.ok, true);
+  const sent = result.amount;
+  // Walk the column over the whole route. Without a route it would strand in
+  // the waypoint and the target would never grow.
+  for (let i = 0; i < 4000 && game.state.armies.length; i += 1) game.update(0.1);
+  assert.equal(game.state.armies.length, 0, 'column finished its march');
+  assert.ok(
+    Math.abs(game.province(waypoint).garrison - beforeWaypoint - 30) <= 1,
+    `garrison left on the way: ${game.province(waypoint).garrison - beforeWaypoint}`,
+  );
+  assert.ok(
+    Math.abs(game.province('LT').garrison - beforeTarget - (sent - 30)) <= 2,
+    `the rest reached the far end: ${game.province('LT').garrison - beforeTarget} of ${sent - 30}`,
+  );
+});
+
+test('route targets cover the whole realm, not only the neighbours', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'RUS', map, seed: 3 });
+  const targets = game.routeTargets('RU');
+  assert.ok(targets.has('LT'), 'a province two hops away is a target');
+  assert.ok(!targets.has('RU'), 'the source itself is not a target');
+  assert.ok(targets.size > game.neighbors('RU').length, 'more than the direct neighbours');
 });
 
 test('cannot move troops from a province you do not own', () => {
@@ -1211,4 +1260,38 @@ test('a broken pact is remembered against a new proposal', () => {
   const clean = game.pactOutlook('NLD');
   game.player.oathbreaks = 2;
   assert.ok(game.pactOutlook('NLD') < clean, 'reputation must matter');
+});
+
+test('a pact signed while a column is marching turns that column back', () => {
+  const game = makeGame();
+  const before = game.province('FR').garrison;
+  const beforeHome = game.province('DE').garrison;
+  // An enemy column already on the road to the player's capital.
+  game.state.armies.push({ id: 900, owner: 'PRU', from: 'DE', to: 'FR', troops: 120, t: 0, duration: 30, sea: false });
+  game.state.offers.push({ id: 'pact-test', from: 'PRU', kind: 'pact', expires: game.state.time + 45 });
+  const accepted = game.answerPeace('pact-test', true);
+  assert.equal(accepted.accepted, true);
+  assert.equal(game.hasTruce('PRU', 'FRA'), true);
+  assert.equal(game.state.armies.some((a) => a.owner === 'PRU'), false, 'column recalled');
+  assert.ok(
+    Math.abs(game.province('DE').garrison - beforeHome - 120) <= 1,
+    `the column came home: +${game.province('DE').garrison - beforeHome}`,
+  );
+  for (let i = 0; i < 700; i += 1) game.update(0.1);
+  assert.equal(game.province('FR').owner, 'FRA', 'the capital was not taken after the treaty');
+  assert.ok(game.province('FR').garrison >= before, 'no losses from the recalled column');
+});
+
+test('a column that cannot turn back does not capture after the treaty', () => {
+  const game = makeGame();
+  // Home province is no longer Prussian, so the column cannot simply return.
+  game.state.armies.push({ id: 901, owner: 'PRU', from: 'DE', to: 'FR', troops: 90, t: 0, duration: 20, sea: false });
+  game.state.provinces.DE.owner = 'FRA';
+  game.state.offers.push({ id: 'pact-test-2', from: 'PRU', kind: 'pact', expires: game.state.time + 45 });
+  game.answerPeace('pact-test-2', true);
+  const armies = game.state.armies.filter((a) => a.id === 901);
+  assert.equal(armies.length, 1, 'this column had to keep marching');
+  for (let i = 0; i < 600 && game.state.armies.some((a) => a.id === 901); i += 1) game.update(0.1);
+  assert.equal(game.province('FR').owner, 'FRA', 'no capture under a fresh truce');
+  assert.ok(game.province('DE').garrison > 0, 'the men were placed in friendly land');
 });

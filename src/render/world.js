@@ -229,8 +229,8 @@ export class World {
     this.previewArrowData = null;
   }
 
-  showPreviewArrow(fromId, point, valid = true) {
-    this.previewArrowData = { from: fromId, point, valid };
+  showPreviewArrow(fromId, point, valid = true, route = null) {
+    this.previewArrowData = { from: fromId, point, valid, route };
     this.callbacks.onArrowPreview?.(this.previewArrowData);
   }
 
@@ -476,7 +476,12 @@ export class World {
 
     if (this.dragFrom) {
       if (this.dragStartPoint) {
-        this.dragStartPoint.moved += Math.abs(e.movementX ?? 0) + Math.abs(e.movementY ?? 0);
+        // Distance from where the finger went down, not movementX/Y: touch
+        // pointer events report those as 0, so every finger drag looked like a
+        // tap and no army ever marched on a phone.
+        const dx = e.clientX - this.dragStartPoint.x;
+        const dy = e.clientY - this.dragStartPoint.y;
+        this.dragStartPoint.moved = Math.max(this.dragStartPoint.moved, Math.hypot(dx, dy));
       }
       const id = this.pick(e.clientX, e.clientY);
       const hover = id && this.validTargets.has(id) ? id : null;
@@ -582,7 +587,19 @@ export class World {
       if (hit) end = { x: hit.x, z: hit.z };
     }
     const valid = overId ? this.validTargets.has(overId) : true;
-    this.showPreviewArrow(this.dragFrom, [end.x, end.z], valid);
+    // A multi-province order shows the whole planned road, not a straight line
+    // across the map: the player must see which provinces the column crosses.
+    let route = null;
+    if (overId && this.routeProvider) {
+      const ids = this.routeProvider(this.dragFrom, overId);
+      if (ids && ids.length > 2) {
+        route = ids
+          .map((id) => this.byId[id]?.centroid)
+          .filter(Boolean)
+          .map(([x, z]) => [x, z]);
+      }
+    }
+    this.showPreviewArrow(this.dragFrom, [end.x, end.z], valid, route);
   }
 
   // ---------------------------------------------------------------- frame

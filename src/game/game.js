@@ -375,7 +375,12 @@ export class Game {
     if (!from || !to) return { ok: false, reason: 'Нет такой провинции' };
     if (from.owner !== this.state.nationId) return { ok: false, reason: 'Это не ваша провинция' };
     if (fromId === toId) return { ok: false, reason: 'Выберите другую провинцию' };
-    if (!this.neighbors(fromId).includes(toId)) return { ok: false, reason: 'Провинции не граничат' };
+    // A direct neighbour is always reachable. Anything beyond it needs a land
+    // route through the player's own provinces — that is how a column can be
+    // sent to the far end of the realm without waiting for each hop by hand.
+    if (!this.neighbors(fromId).includes(toId) && !this.routeBetween(fromId, toId)) {
+      return { ok: false, reason: 'Нет пути по своим провинциям' };
+    }
     // Several armies may leave the same province at once; only the troops that are
     // still at home can march, so the garrison is the single source of truth.
     if (this.sendableTroops(fromId, this.state.sendRatio) < BAL.minSend) {
@@ -393,13 +398,145 @@ export class Game {
     return { ok: true };
   }
 
-  sendTroops(fromId, toId, ratio = this.state.sendRatio) {
+  /**
+   * Every province the player can order troops to from `fromId`, own or foreign.
+   * Used for the drag highlight: the whole interior lights up, not just the
+   * immediate neighbours.
+   */
+  routeTargets(fromId) {
+    const me = this.state.nationId;
+    const reach = new Set([fromId]);
+    const dist = new Map([[fromId, 0]]);
+    const queue = [fromId];
+    while (queue.length) {
+      const current = queue.shift();
+      for (const nid of this.neighbors(current)) {
+        const p = this.state.provinces[nid];
+        if (!p || p.owner !== me) continue;
+        const cost = dist.get(current) + this.travelTime(current, nid);
+        if (dist.has(nid) && dist.get(nid) <= cost) continue;
+        dist.set(nid, cost);
+        reach.add(nid);
+        queue.push(nid);
+      }
+    }
+    const targets = new Set(reach);
+    for (const nid of Object.keys(this.state.provinces)) {
+      if (reach.has(nid)) continue;
+      if (this.neighbors(nid).some((adj) => reach.has(adj))) targets.add(nid);
+    }
+    targets.delete(fromId);
+    return targets;
+  }
+
+  /**
+   * Shortest land/sea route from the player's province to `toId`. Intermediate
+   * provinces must already belong to the player; only the last one may be
+   * foreign (that is the assault). Returns an array of province ids or null.
+   */
+  routeBetween(fromId, toId, nationId = this.state.nationId) {
+    const s = this.state;
+    const from = s.provinces[fromId];
+    const to = s.provinces[toId];
+    if (!from || !to || from.owner !== nationId) return null;
+    if (fromId === toId) return [fromId];
+    const dist = new Map([[fromId, 0]]);
+    const prev = new Map();
+    const done = new Set();
+    const queue = [fromId];
+    while (queue.length) {
+      let bestIndex = 0;
+      for (let i = 1; i < queue.length; i += 1) if (dist.get(queue[i]) < dist.get(queue[bestIndex])) bestIndex = i;
+      const current = queue.splice(bestIndex, 1)[0];
+      if (done.has(current)) continue;
+      done.add(current);
+      if (current === toId) break;
+      for (const nid of this.neighbors(current)) {
+        if (done.has(nid)) continue;
+        const p = s.provinces[nid];
+        if (!p) continue;
+        // Walk only through our own land; the destination itself may be hostile.
+        if (nid !== toId && p.owner !== nationId) continue;
+        const cost = dist.get(current) + this.travelTime(current, nid, nationId);
+        if (dist.has(nid) && dist.get(nid) <= cost) continue;
+        dist.set(nid, cost);
+        prev.set(nid, current);
+        queue.push(nid);
+      }
+    }
+    if (!dist.has(toId)) return null;
+    const path = [toId];
+    let cursor = toId;
+    while (cursor !== fromId) {
+      cursor = prev.get(cursor);
+      if (!cursor) return null;
+      path.unshift(cursor);
+    }
+    return path;
+  }
+
+  /** Total march time along a route, used for the arrival forecast. */
+  routeTime(path, nationId = this.state.nationId) {
+    let total = 0;
+    for (let i = 1; i < path.length; i += 1) total += this.travelTime(path[i - 1], path[i], nationId);
+    return total;
+  }
+
+  sendTroops(fromId, toId, ratio = this.state.sendRatio, options = {}) {
     const check = this.canSend(fromId, toId);
     if (!check.ok) return check;
+    const route = this.neighbors(fromId).includes(toId) && !options.forceRoute
+      ? [fromId, toId]
+      : this.routeBetween(fromId, toId);
+    if (!route) return { ok: false, reason: 'Нет пути по своим провинциям' };
     if (this.state.provinces[toId].owner !== this.state.nationId) this.state.playerAggro = true;
-    const amount = this.launchArmy(this.state.nationId, fromId, toId, ratio);
+    const amount = options.leave || route.length > 2
+      ? this.#launchRoute(this.state.nationId, route, ratio, options.leave ?? {})
+      : this.launchArmy(this.state.nationId, fromId, toId, ratio);
     if (amount < BAL.minSend) return { ok: false, reason: 'Слишком мало войск' };
-    return { ok: true, amount, duration: this.state.armies[this.state.armies.length - 1]?.duration, sea: this.isSeaRoute(fromId, toId) };
+    const army = this.state.armies[this.state.armies.length - 1];
+    return {
+      ok: true,
+      amount,
+      duration: army?.duration,
+      sea: this.isSeaRoute(fromId, toId),
+      route,
+      routeTime: this.routeTime(route),
+    };
+  }
+
+  /**
+   * Column with a planned route: it walks through the player's own provinces,
+   * optionally leaving a garrison in any of them, and only fights at the end.
+   */
+  #launchRoute(nationId, route, ratio = 0.5, leave = {}) {
+    const from = this.state.provinces[route[0]];
+    if (!from || from.owner !== nationId) return 0;
+    const amount = Math.floor(from.garrison * Math.max(0.05, Math.min(1, ratio)));
+    if (amount < BAL.minSend) return 0;
+    from.garrison -= amount;
+    const first = route[1];
+    const army = {
+      id: this.state.nextArmyId++,
+      owner: nationId,
+      from: route[0],
+      to: first,
+      troops: amount,
+      t: 0,
+      duration: this.travelTime(route[0], first, nationId),
+      sea: this.isSeaRoute(route[0], first),
+      path: route.slice(),
+      // Index of the province this column is currently marching to.
+      leg: 1,
+      leave: Object.fromEntries(
+        Object.entries(leave)
+          .map(([id, n]) => [id, Math.max(0, Math.floor(n))])
+          .filter(([, n]) => n > 0),
+      ),
+    };
+    this.state.armies.push(army);
+    this.#announceIncoming(army, nationId);
+    return amount;
   }
 
   /** Shared by the player and the AI. Returns the number of troops that marched. */
@@ -425,19 +562,24 @@ export class Game {
       sea,
     });
 
-    // An enemy column heading for your land used to be visible only as an arrow
-    // on the globe: easy to miss, and the first news was the province falling.
-    const target = this.state.provinces[toId];
-    if (target?.owner === this.state.nationId && nationId !== this.state.nationId) {
-      const attacker = this.state.nations[nationId];
-      // No case declension of province names: the arrow form already used for
-      // captures reads the same for «Латвия», «Кипр» and «США».
-      const who = attacker?.short ?? 'Противник';
-      this.#log(`${who} ${marchesVerb(who)} войска: ${amount} → ${this.provinceName(toId)}`, 'bad');
-      // The folded log must not hide the one message that needs an answer now.
-      this.#emit('incoming', { to: toId, from: fromId, amount, attacker: nationId });
-    }
+    this.#announceIncoming({ to: toId, from: fromId, troops: amount }, nationId);
     return amount;
+  }
+
+  /**
+   * An enemy column heading for your land used to be visible only as an arrow
+   * on the globe: easy to miss, and the first news was the province falling.
+   */
+  #announceIncoming(army, nationId) {
+    const target = this.state.provinces[army.to];
+    if (target?.owner !== this.state.nationId || nationId === this.state.nationId) return;
+    const attacker = this.state.nations[nationId];
+    // No case declension of province names: the arrow form already used for
+    // captures reads the same for «Латвия», «Кипр» and «США».
+    const who = attacker?.short ?? 'Противник';
+    this.#log(`${who} ${marchesVerb(who)} войска: ${army.troops} → ${this.provinceName(army.to)}`, 'bad');
+    // The folded log must not hide the one message that needs an answer now.
+    this.#emit('incoming', { to: army.to, from: army.from, amount: army.troops, attacker: nationId });
   }
 
   /** Seconds an army needs for the march. Includes the player's march bonus. */
@@ -511,6 +653,56 @@ export class Game {
 
   static pairKey(a, b) {
     return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
+
+  /** Breadth-first search for the closest province a nation still owns. */
+  #nearestOwnProvince(nationId, provinceId) {
+    if (!provinceId) return null;
+    const seen = new Set([provinceId]);
+    const queue = [provinceId];
+    while (queue.length) {
+      const id = queue.shift();
+      const p = this.state.provinces[id];
+      if (p && p.owner === nationId) return p;
+      for (const nid of this.neighbors(id)) {
+        if (seen.has(nid)) continue;
+        seen.add(nid);
+        queue.push(nid);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * A pact is signed while columns are already on the road. Leaving them to
+   * march would mean signing a treaty and losing a province to it in the same
+   * breath, so every column aimed at the new partner's land turns back.
+   */
+  #recallColumns(aId, bId) {
+    const s = this.state;
+    const finalTarget = (army) => (army.path ? army.path[army.path.length - 1] : army.to);
+    const kept = [];
+    for (const army of s.armies) {
+      const enemy = army.owner === aId ? bId : army.owner === bId ? aId : null;
+      const target = enemy ? s.provinces[finalTarget(army)] : null;
+      if (!enemy || !target || target.owner !== enemy) {
+        kept.push(army);
+        continue;
+      }
+      const home = s.provinces[army.from];
+      if (home && home.owner === army.owner) {
+        home.garrison += army.troops;
+        if (army.owner === s.nationId || enemy === s.nationId) {
+          this.#log(`Перемирие: колонна ${s.nations[army.owner]?.short ?? ''} возвращена в ${this.provinceName(home.id)}`, 'good');
+        }
+        continue;
+      }
+      // Nowhere to go back to: the column keeps walking and is stopped at the
+      // border on arrival (see #resolveArrival).
+      army.haltedByTruce = true;
+      kept.push(army);
+    }
+    s.armies = kept;
   }
 
   /** True while the two nations are bound by a truce. */
@@ -670,6 +862,7 @@ export class Game {
     this.state.relations[key].kind = pact ? 'pact' : 'peace';
     this.#adjustExhaustion(offer.from, -relief);
     this.#adjustExhaustion(this.state.nationId, -relief);
+    this.#recallColumns(offer.from, this.state.nationId);
     this.#log(
       pact
         // Nation names are quoted in the nominative: «с Пруссией» would need
@@ -792,6 +985,7 @@ export class Game {
     s.relations[key].kind = pact ? 'pact' : 'peace';
     s.relations[key].grudge = null;
     this.#adjustExhaustion(nationId, -(pact ? BAL.pactRelief : BAL.peaceRelief) * 0.5);
+    this.#recallColumns(nationId, s.nationId);
     this.#log(
       pact
         ? `Пакт о ненападении: ${them.short} — ${Math.round(duration)} с без нападений`
@@ -1049,15 +1243,62 @@ export class Game {
 
   #moveArmies(dt) {
     const s = this.state;
-    for (let i = s.armies.length - 1; i >= 0; i -= 1) {
-      const army = s.armies[i];
+    const finished = [];
+    for (const army of s.armies) {
       const buff = army.owner === s.nationId && s.time < s.orders.marchUntil ? 1.6 : 1;
       army.t += dt * buff;
-      if (army.t >= army.duration) {
-        s.armies.splice(i, 1);
-        this.#resolveArrival(army);
-      }
+      if (army.t < army.duration) continue;
+      if (!this.#advanceArmy(army)) finished.push(army);
     }
+    if (finished.length) s.armies = s.armies.filter((army) => !finished.includes(army));
+  }
+
+  /**
+   * One hop of a planned march. A column with a route does not stop at every
+   * friendly province: it leaves the requested garrison there (if any) and
+   * walks on, so an order to the far side of the realm does not need a second
+   * drag once the first hop lands.
+   */
+  #advanceArmy(army) {
+    const s = this.state;
+    const path = army.path;
+    const target = s.provinces[army.to];
+    const isFinal = !path || army.leg >= path.length - 1;
+
+    if (!isFinal && target && target.owner === army.owner) {
+      const leave = Math.max(0, Math.min(army.leave?.[army.to] ?? 0, army.troops));
+      if (leave > 0) {
+        target.garrison += leave;
+        army.troops -= leave;
+        if (army.owner === s.nationId) {
+          this.#log(`${this.provinceName(army.to)}: оставлен гарнизон +${Math.round(leave)}`, 'good');
+        }
+      }
+      const nextId = path[army.leg + 1];
+      const next = s.provinces[nextId];
+      // Only the destination may be hostile; if an intermediate province falls
+      // to the enemy mid-march the column has nowhere to walk.
+      const blocked = next && next.owner !== army.owner && army.leg + 1 < path.length - 1;
+      if (army.troops < BAL.minSend || blocked) {
+        // The road ahead is gone (province lost) or nobody is left to march:
+        // the column stays where it is instead of vanishing with its men.
+        if (army.troops > 0) target.garrison += army.troops;
+        if (blocked && army.owner === s.nationId) {
+          this.#log(`Поход прерван: ${this.provinceName(nextId)} больше не ваша`, 'bad');
+        }
+        return false;
+      }
+      army.leg += 1;
+      army.from = army.to;
+      army.to = nextId;
+      army.duration = this.travelTime(army.from, army.to, army.owner);
+      army.sea = this.isSeaRoute(army.from, army.to);
+      army.t = 0;
+      return true;
+    }
+
+    this.#resolveArrival(army);
+    return false;
   }
 
   #resolveArrival(army) {
@@ -1065,6 +1306,18 @@ export class Game {
     const target = s.provinces[army.to];
     const attacker = s.nations[army.owner];
     if (!target || !attacker) return;
+
+    // The treaty was signed while this column was already marching at the
+    // partner's land (its home province may have been lost meanwhile). It must
+    // not capture anything: send the men to the nearest friendly province.
+    if (target.owner && target.owner !== army.owner && this.hasTruce(army.owner, target.owner)) {
+      const home = s.provinces[army.from]?.owner === army.owner ? s.provinces[army.from] : this.#nearestOwnProvince(army.owner, army.from);
+      if (home) home.garrison += army.troops;
+      if (army.owner === s.nationId) {
+        this.#log(`Перемирие: колонна остановлена на границе, ${Math.round(army.troops)} возвращены`, 'good');
+      }
+      return;
+    }
 
     // Friendly move: reinforce. Troops stack above the garrison cap instead of
     // evaporating, and the excess is reported so the player can see it.

@@ -4014,3 +4014,141 @@ kbd {
     padding: 8px 16px;
   }
 }
+
+/* ---------------------------------------------------------------- march planner */
+/* A long order is planned in a small sheet: the road is shown province by
+   province and every waypoint can keep a garrison. It appears only for
+   multi-province orders and never covers the whole map. */
+
+.route-card {
+  position: absolute;
+  left: 50%;
+  bottom: 148px;
+  transform: translateX(-50%);
+  z-index: 7;
+  width: min(380px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(16, 27, 43, 0.98), rgba(8, 14, 24, 0.98));
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+}
+
+.route-card h4 {
+  margin: 0 0 2px;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.route-card .rc-path {
+  font-size: 11px;
+  color: var(--gold);
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+
+.route-card .rc-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.route-card .rc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.route-card .rc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.route-card .rc-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.route-card .rc-step button {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.route-card .rc-step button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.route-card .rc-step b {
+  min-width: 30px;
+  text-align: center;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.route-card .rc-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.route-card .btn {
+  padding: 7px 14px;
+  font-size: 12px;
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  /* Clear of the province card on the left and of the order column on the
+     right: the planner sits between them. */
+  .route-card {
+    left: 304px;
+    right: auto;
+    bottom: auto;
+    top: 84px;
+    transform: none;
+    width: min(340px, calc(100vw - 420px));
+    padding: 9px 11px;
+  }
+
+  .route-card h4 {
+    font-size: 14px;
+  }
+
+  .route-card .rc-meta {
+    margin-bottom: 5px;
+  }
+
+  .route-card .rc-rows {
+    gap: 2px;
+    margin-bottom: 6px;
+  }
+}
+
+/* Very narrow landscape (small phones): there is no room between the card and
+   the orders, so the planner is simply a small overlay. */
+@media (max-width: 700px) and (orientation: landscape) {
+  .route-card {
+    left: 8px;
+    right: 8px;
+    top: 76px;
+    bottom: auto;
+    transform: none;
+    width: auto;
+  }
+}

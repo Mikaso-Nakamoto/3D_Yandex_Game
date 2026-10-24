@@ -44,6 +44,8 @@ export class App {
       onArrowPreview: (preview) => this.arrowLayer.setPreview(preview),
     });
     this.arrowLayer = new ArrowLayer($('#arrows'), this.world);
+    // The drag preview asks the model for the real road through own land.
+    this.world.routeProvider = (from, to) => this.game?.routeBetween(from, to) ?? null;
     this.labels = new LabelLayer($('#labels'), this.map);
     this.labels.setVisible(false);
 
@@ -624,7 +626,9 @@ export class App {
 
   #dragStart(provinceId) {
     if (!this.game) return;
-    const targets = this.game.neighbors(provinceId).filter((id) => id !== provinceId);
+    // Not just the neighbours: any province the column can reach through the
+    // player's own land (plus the foreign provinces on its borders).
+    const targets = [...this.game.routeTargets(provinceId)].filter((id) => id !== provinceId);
     this.world.setValidTargets(targets);
     this.world.setSelected(provinceId);
     sfx.click();
@@ -635,8 +639,71 @@ export class App {
     this.world.setSelected(this.selectedProvince);
   }
 
+  /**
+   * March planner: only for orders that cross friendly provinces. Shows the
+   * road, lets the player leave a garrison in any waypoint and sends the rest
+   * on to the far end.
+   */
+  #openRoutePlanner(from, to, route) {
+    const game = this.game;
+    const waypoints = route.slice(1, -1);
+    const sendable = game.sendableTroops(from);
+    this.routePlanner = { from, to, route, leave: Object.fromEntries(waypoints.map((id) => [id, 0])) };
+    const card = $('#route-card');
+    const render = () => {
+      const plan = this.routePlanner;
+      if (!plan) return;
+      const name = (id) => game.provinceName(id);
+      const total = plan.route.reduce((sum, id, i) => (i === 0 ? 0 : sum + Math.round(game.travelTime(plan.route[i - 1], id))), 0);
+      const leftTotal = Object.values(plan.leave).reduce((a, b) => a + b, 0);
+      const rows = plan.route
+        .slice(1, -1)
+        .map((id) => {
+          const value = plan.leave[id] ?? 0;
+          return `<div class="rc-row">
+            <span>${name(id)} · оставить</span>
+            <span class="rc-step">
+              <button type="button" data-step="${id}" data-delta="-10" ${value <= 0 ? 'disabled' : ''}>−</button>
+              <b>${value}</b>
+              <button type="button" data-step="${id}" data-delta="10" ${value + 10 > sendable - leftTotal + value ? 'disabled' : ''}>+</button>
+            </span>
+          </div>`;
+        })
+        .join('');
+      card.innerHTML = `
+        <h4>План похода</h4>
+        <div class="rc-path">${[plan.route[0], ...plan.route.slice(1)].map(name).join(' → ')}</div>
+        <div class="rc-meta">${plan.route.length - 1} ${plan.route.length - 1 === 1 ? 'переход' : plan.route.length - 1 < 5 ? 'перехода' : 'переходов'} · примерно ${total} с · в колонне ${fmt(sendable)} чел.</div>
+        <div class="rc-rows">${
+          rows ||
+          `<div class="rc-row"><span>Промежуточных провинций нет</span><span></span></div>`
+        }</div>
+        <div class="rc-actions">
+          <button type="button" class="btn ghost" data-rc-cancel>Отмена</button>
+          <button type="button" class="btn primary" data-rc-send>Отправить${leftTotal ? ` (${fmt(sendable - leftTotal)})` : ''}</button>
+        </div>`;
+    };
+    this.routeRender = render;
+    render();
+    card.classList.remove('hidden');
+  }
+
+  #closeRoutePlanner() {
+    this.routePlanner = null;
+    this.routeRender = null;
+    $('#route-card').classList.add('hidden');
+  }
+
   #dragDrop(from, to) {
     if (!this.game) return;
+    // A long march is planned in a small sheet first: the player chooses how
+    // many men stay in each province along the road. Neighbour moves stay
+    // instant, as before.
+    const route = this.game.neighbors(from).includes(to) ? null : this.game.routeBetween(from, to);
+    if (route && route.length > 2 && !this.routePlanner) {
+      this.#openRoutePlanner(from, to, route);
+      return;
+    }
     let result = this.game.sendTroops(from, to);
     if (!result.ok && result.needsBreak) {
       const owner = result.with;
@@ -652,9 +719,9 @@ export class App {
       } else {
         this.pendingBreak = { owner, at: now };
         this.#toast(`Пакт: ${name}. Перетащите ещё раз, чтобы напасть`, 'bad');
-        this.selectedProvince = from;
+        // No province card here: the warning is one line, and the card used to
+        // jump out over the map on every first drag across a border.
         this.world.setSelected(from);
-        this.#renderProvincePanel();
         this.#updateHud();
         return;
       }
@@ -664,11 +731,12 @@ export class App {
       return;
     }
     sfx.march();
-    this.#toast(`${fmt(result.amount)} в походе${result.sea ? ' морем' : ''}`, 'good');
+    const hop = result.route && result.route.length > 2 ? ` через ${result.route.length - 2} пров.` : '';
+    this.#toast(`${fmt(result.amount)} в походе${result.sea ? ' морем' : ''}${hop}`, 'good');
     this.world.setValidTargets([]);
-    this.selectedProvince = from;
     this.world.setSelected(from);
-    this.#renderProvincePanel();
+    // Sending troops must not pop the province card over the map every time.
+    if (!document.querySelector('#province-panel').classList.contains('hidden')) this.#renderProvincePanel();
     this.#updateHud();
   }
 
@@ -1665,6 +1733,43 @@ export class App {
         sfx.click();
       });
     }
+
+    $('#route-card').addEventListener('click', (event) => {
+      if (event.target.closest('[data-rc-cancel]')) {
+        this.#closeRoutePlanner();
+        return;
+      }
+      const step = event.target.closest('[data-step]');
+      if (step && this.routePlanner) {
+        const id = step.dataset.step;
+        const delta = Number(step.dataset.delta);
+        const plan = this.routePlanner;
+        const totalLeft = Object.values(plan.leave).reduce((a, b) => a + b, 0);
+        const sendable = this.game.sendableTroops(plan.from);
+        const next = Math.max(0, Math.min(plan.leave[id] + delta, sendable - (totalLeft - plan.leave[id])));
+        plan.leave[id] = Math.round(next);
+        this.routeRender?.();
+        return;
+      }
+      if (event.target.closest('[data-rc-send]') && this.routePlanner) {
+        const plan = this.routePlanner;
+        const result = this.game.sendTroops(plan.from, plan.to, this.game.state.sendRatio, { leave: plan.leave });
+        this.#closeRoutePlanner();
+        if (!result.ok) {
+          this.#toast(result.reason, 'bad');
+          return;
+        }
+        sfx.march();
+        const kept = Object.values(plan.leave).reduce((a, b) => a + b, 0);
+        this.#toast(
+          `${fmt(result.amount - kept)} в походе через ${plan.route.length - 2} пров.${kept ? `, ${fmt(kept)} остаётся` : ''}`,
+          'good',
+        );
+        this.world.setValidTargets([]);
+        this.world.setSelected(plan.from);
+        this.#updateHud();
+      }
+    });
 
     $('#province-panel').addEventListener('click', (event) => {
       const close = event.target.closest('[data-close]');
