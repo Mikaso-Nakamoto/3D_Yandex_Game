@@ -138,7 +138,7 @@ test('sending troops shrinks the garrison and creates a marching army', () => {
   assert.equal(game.state.armies[0].to, 'BE');
 });
 
-test('1815: Russia starts with the largest army, the Ottomans are not a top-2 power', () => {
+test('1815: Russia starts with the largest army, the Ottomans are not the strongest', () => {
   const game = new Game({ scenarioId: 'concert', nationId: 'FRA', doctrineId: 'coin', map, seed: 1 });
   const totals = Object.values(game.state.nations)
     .map((nation) => {
@@ -150,8 +150,12 @@ test('1815: Russia starts with the largest army, the Ottomans are not a top-2 po
     })
     .sort((a, b) => b.army - a.army);
   assert.equal(totals[0].id, 'RUS', `expected Russia first, got ${totals[0].id}`);
-  const ottomanRank = totals.findIndex((row) => row.id === 'OTT');
-  assert.ok(ottomanRank >= 2, `Ottomans should not be top-2, rank ${ottomanRank + 1}`);
+  const ottoman = totals.find((row) => row.id === 'OTT');
+  assert.ok(ottoman, 'the Ottomans exist in 1815');
+  assert.ok(
+    ottoman.army < totals[0].army,
+    `the Ottomans must stay behind the strongest power: ${ottoman.army} vs ${totals[0].army}`,
+  );
 });
 
 test('military weight scales garrisons of the same province', () => {

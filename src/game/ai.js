@@ -161,7 +161,10 @@ function attack(game, nation, owned) {
       // The defender keeps reinforcing during the march, so plan against the
       // province as it will look on arrival — the same number the player sees.
       const def = game.projectedDefense(nid, game.travelTime(p.id, nid, nation.id));
-      if (atk < def * 1.5) continue;
+      // A tired nation only presses an attack it cannot lose; otherwise it
+      // shores up its own line instead of opening yet another front.
+      const margin = nation.exhaustion > BAL.warWearyAt ? BAL.warWearyMargin : 1.5;
+      if (atk < def * margin) continue;
 
       let score = def;
       if (!target.owner) score *= 0.75;

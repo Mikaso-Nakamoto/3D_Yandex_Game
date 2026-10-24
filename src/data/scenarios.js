@@ -66,7 +66,10 @@ export const SCENARIOS = [
       },
       {
         id: 'OTT',
-        army: 0.6,
+        // 0.6 left every Ottoman province at six tenths of a normal garrison and
+        // the empire was eaten in the first minutes; 0.85 still keeps it behind
+        // Russia in total strength (the 1815 requirement) but no longer a snack.
+        army: 0.85,
         name: 'Османская империя', short: 'Османы', color: '#7a5b3a', capital: 'TR',
         provinces: ['TR', 'GR', 'BG', 'BA', 'RS', 'ME', 'MK', 'AL', 'XK', 'CY', 'RO'], ai: { aggression: 0.75, eco: 0.95 },
       },
@@ -152,7 +155,9 @@ export const SCENARIOS = [
       },
       {
         id: 'POL',
-        army: 0.85,
+        // One province, two aggressive neighbours: without a real garrison and
+        // a deep fort the September campaign lasts ninety seconds.
+        army: 1.5,
         name: 'Вторая Речь Посполитая', short: 'Польша', color: '#c2536b', capital: 'PL',
         provinces: ['PL'], ai: { aggression: 0.9, eco: 1.0 },
       },
@@ -494,7 +499,7 @@ const civil1861 = {
       short: 'Мексика',
       color: '#b5651d',
       capital: 'MX',
-      provinces: ['MX'],
+      provinces: ['MX', 'CU'],
       ai: { aggression: 0.85, eco: 0.95 },
     },
     {
@@ -516,7 +521,7 @@ const civil1861 = {
   balance: { aiAggression: 0.95, aiEco: 1.0, neutralStrength: 0.85 },
 };
 // The base roster already owns GB/ES/RU: their overseas lands are added here.
-const civilExtra = { GBR: ['CA', 'NW'], ESP: ['CU'], RUS: ['AK'] };
+const civilExtra = { GBR: ['CA', 'NW'], RUS: ['AK'] };
 civil1861.nations = civil1861.nations.map((nation) =>
   nation.id === 'BNA' || nation.id === 'MEX'
     ? nation

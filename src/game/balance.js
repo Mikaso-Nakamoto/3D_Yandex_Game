@@ -44,6 +44,15 @@ export const BAL = {
   combatHopeless: 0.75, // weaker than this: always loses
   combatSwing: 0.08, // legacy noise for survivor counts
   loserSurvivorBase: 0.6,
+  // Homeland defence. A capital and the last two provinces of a dying realm
+  // are defended harder: without this, one lost border province snowballed into
+  // half of Europe disappearing before the player's first five minutes.
+  capitalDefense: 0.2,
+  lastStandDefense: 0.18,
+  // A tired nation does not open new fronts: above this exhaustion it only
+  // attacks when it is clearly stronger than the defender.
+  warWearyAt: 45,
+  warWearyMargin: 2.1,
   counterAttack: 0.05, // odds of the defender counter-attacking the attacker's home province
   counterAttackMargin: 0.35, // share of the defender's surviving garrison that marches
   desertionBelow: 25, // morale level at which soldiers start slipping away

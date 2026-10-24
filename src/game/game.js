@@ -108,9 +108,13 @@ export class Game {
     }
 
     // Capitals start with a fort so small nations are not instantly overrun.
+    // A nation that holds a single province gets a second level: one province
+    // means the capital *is* the country.
     for (const n of sc.nations) {
       const capital = state.provinces[n.capital];
-      if (capital && capital.owner === n.id) capital.fort = Math.max(1, capital.fort);
+      if (!capital || capital.owner !== n.id) continue;
+      const single = n.provinces.length === 1;
+      capital.fort = Math.max(single ? 2 : 1, capital.fort);
     }
 
     // Neutral provinces: fixed garrisons, no economy.
@@ -210,7 +214,26 @@ export class Game {
     const above = Math.max(0, p.garrison - max);
     const effective = Math.min(p.garrison, max) + above * BAL.overstackDefense;
     const morale = owner ? this.moraleModifier(owner.id) : 1;
-    return effective * (1 + p.fort * BAL.fortDefense) * (1 + doctrineMod(owner?.doctrine, 'defense')) * morale;
+    return (
+      effective *
+      (1 + p.fort * BAL.fortDefense) *
+      (1 + doctrineMod(owner?.doctrine, 'defense')) *
+      morale *
+      this.#homelandMul(p)
+    );
+  }
+
+  /**
+   * Capitals and the last two provinces of a nation defend harder. It is the
+   * same rule for the player and the AI: a nation is not wiped out in one
+   * afternoon, and a rump state can still bite.
+   */
+  #homelandMul(p) {
+    if (!p.owner) return 1;
+    let mul = 1;
+    if (this.state.nations[p.owner]?.capital === p.id) mul += BAL.capitalDefense;
+    if (this.#provinceCount(p.owner) <= 2) mul += BAL.lastStandDefense;
+    return mul;
   }
 
   /** Human-readable breakdown of the defence number shown in the UI. */
@@ -223,6 +246,7 @@ export class Game {
     const fortMul = 1 + p.fort * BAL.fortDefense;
     const doctrineMul = 1 + doctrineMod(owner?.doctrine, 'defense');
     const moraleMul = owner ? this.moraleModifier(owner.id) : 1;
+    const homelandMul = this.#homelandMul(p);
     return {
       garrison: p.garrison,
       above,
@@ -231,6 +255,7 @@ export class Game {
       fortMul,
       doctrineMul,
       moraleMul,
+      homelandMul,
       total: this.#defensePower(p),
     };
   }

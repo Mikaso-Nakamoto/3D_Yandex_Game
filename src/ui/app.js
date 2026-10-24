@@ -503,6 +503,17 @@ export class App {
     this.world.resetView();
     this.world.setAutoPan(false);
     this.world.zoomTarget = 1;
+    // On the wide Atlantic map the realm is a small patch: start the camera on
+    // the capital instead of showing two continents at once.
+    if (this.map.width > 80 && this.game) {
+      // Geometry lives on the map data, not on the game state.
+      const capital = this.mapById[this.game.player.capital];
+      if (capital?.centroid) {
+        this.world.panTarget.x = capital.centroid[0];
+        this.world.panTarget.z = capital.centroid[1];
+        this.world.zoomTarget = 1.6;
+      }
+    }
     this.labels.setVisible(this.settings.labels);
     this.#syncColors(true);
     this.#updateHud();
