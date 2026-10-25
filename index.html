@@ -39,6 +39,9 @@
             <button type="button" class="mode-btn" data-mode="atlantic" role="tab">Европа и Северная Америка</button>
             <button type="button" class="mode-btn" data-mode="world" role="tab">Весь мир</button>
           </div>
+          <!-- К5: задача дня. Одна строка над сценариями: причина вернуться
+               завтра, не вытесняющая сами сценарии. -->
+          <div id="menu-daily" class="menu-daily"></div>
           <div id="scenario-list" class="scenario-list"></div>
           <div class="menu-actions">
             <button id="btn-play-now" class="btn primary">Играть</button>
@@ -47,6 +50,8 @@
           </div>
         </div>
         <div class="menu-foot">
+          <span class="menu-stars" id="menu-stars"></span>
+          <span class="dot-sep">·</span>
           <span>Карта: Natural Earth (public domain)</span>
           <span class="dot-sep">·</span>
           <span>Движок: three.js</span>
@@ -334,6 +339,7 @@
         <h2 id="end-title">Победа</h2>
         <p id="end-text"></p>
         <div class="end-stars" id="end-stars"></div>
+        <div class="end-meta" id="end-meta"></div>
         <div class="end-stats" id="end-stats"></div>
         <div class="end-score" id="end-score"></div>
         <div class="end-board hidden" id="end-board"></div>

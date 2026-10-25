@@ -2,13 +2,26 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/game/game.js';
-import { SCENARIOS, PLAYABLE_SCENARIOS } from '../src/data/scenarios.js';
+import { SCENARIOS, PLAYABLE_SCENARIOS, getScenario } from '../src/data/scenarios.js';
 import { normalizeRules, DEFAULT_RULES, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH, ruleOptionMatches } from '../src/game/rules.js';
 import { BAL } from '../src/game/balance.js';
 import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
 import { NATION_COLORS, deltaE } from '../src/data/palette.js';
 import { NEUTRAL_SHADES, assignNeutralColors } from '../src/data/neutral.js';
 import { aiThink } from '../src/game/ai.js';
+import {
+  theatreOrder,
+  unlockStars,
+  unlockSource,
+  isUnlocked,
+  normalizeStars,
+  starTotals,
+  dailyChallenge,
+  isDailyFresh,
+  describeDaily,
+  earnedAchievements,
+  achievementById,
+} from '../src/game/progress.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
 const atlanticMap = JSON.parse(readFileSync(new URL('../src/data/map-atlantic.json', import.meta.url), 'utf8'));
@@ -2847,4 +2860,124 @@ test('a saved lesson resumes on the same step', () => {
   const restored = Game.deserialize(game.serialize(), map);
   assert.equal(restored.tutorial.step, 2);
   assert.equal(restored.tutorial.done, false);
+});
+
+// ---------------------------------------------------------------- прогресс (К5)
+
+test('the first scenario of a theatre is open, the rest wait for one star', () => {
+  const order = theatreOrder('europe');
+  assert.ok(order.length >= 3);
+  assert.equal(isUnlocked(order[0].id, {}), true, 'the first card is free');
+  assert.equal(isUnlocked(order[1].id, {}), false, 'the second one waits');
+  assert.equal(isUnlocked(order[1].id, { [order[0].id]: 1 }), true, 'one star opens it');
+  assert.equal(unlockStars(order[1].id), 1);
+  assert.equal(unlockSource(order[1].id).id, order[0].id);
+  assert.equal(unlockStars(order[0].id), 0, 'the first one needs nothing');
+  // The lesson is never part of the chain.
+  assert.ok(!order.some((s) => s.tutorial));
+});
+
+test('the star table is clamped and ignores scenarios that do not exist', () => {
+  const table = normalizeStars({ concert: 9, eve1939: -2, ghost: 3, mosaic: 2.6 });
+  assert.equal(table.concert, 3);
+  assert.equal(table.eve1939, undefined);
+  assert.equal(table.ghost, undefined);
+  assert.equal(table.mosaic, 3);
+  const totals = starTotals({ concert: 3, eve1939: 2 });
+  assert.equal(totals.earned, 5);
+  assert.equal(totals.max, PLAYABLE_SCENARIOS.length * 3);
+});
+
+test('unlocking walks the whole theatre one scenario at a time', () => {
+  const order = theatreOrder('europe');
+  const stars = {};
+  // Nothing but the first card is open at the start.
+  assert.deepEqual(
+    order.map((s) => isUnlocked(s.id, stars)),
+    order.map((_, i) => i === 0),
+  );
+  // Earn one star at a time and exactly one new card opens each step.
+  for (let i = 0; i < order.length; i += 1) {
+    assert.equal(isUnlocked(order[i].id, stars), true, `${order[i].id} is open after ${i} stars`);
+    if (i + 1 < order.length) assert.equal(isUnlocked(order[i + 1].id, stars), false, `${order[i + 1].id} still waits`);
+    stars[order[i].id] = 1;
+  }
+  // Another theatre has its own first card open and its own second card locked.
+  const atlantic = theatreOrder('atlantic');
+  assert.equal(isUnlocked(atlantic[0].id, stars), true, 'every theatre starts with a free card');
+  assert.equal(isUnlocked(atlantic[1].id, stars), false, 'stars of Europe do not open America');
+  // A theatre of one scenario (the world map) is open from the start.
+  assert.ok(theatreOrder('world').every((s) => isUnlocked(s.id, stars)));
+});
+
+test("today's task is the same all day and different tomorrow", () => {
+  const a = dailyChallenge({ today: '2026-10-25', stars: { concert: 1 }, theatre: 'europe' });
+  const b = dailyChallenge({ today: '2026-10-25', stars: { concert: 1 }, theatre: 'europe' });
+  assert.deepEqual(a, b, 'deterministic inside one day');
+  const seen = new Set();
+  for (let day = 1; day <= 14; day += 1) {
+    seen.add(dailyChallenge({ today: `2026-11-${String(day).padStart(2, '0')}`, stars: { concert: 1 }, theatre: 'europe' }).goal.text);
+  }
+  assert.ok(seen.size > 1, 'the task changes from day to day');
+  // Only open scenarios are offered: a lock must never hide the daily card.
+  const stars = { concert: 3 };
+  const locked = PLAYABLE_SCENARIOS.filter((s) => !isUnlocked(s.id, stars)).map((s) => s.id);
+  for (let day = 1; day <= 10; day += 1) {
+    const card = dailyChallenge({ today: `2026-12-${String(day).padStart(2, '0')}`, stars, theatre: 'europe' });
+    assert.ok(!locked.includes(card.scenarioId), `${card.scenarioId} is locked`);
+    assert.equal(getScenario(card.scenarioId).theatre ?? 'europe', 'europe', 'the task stays on the open map');
+  }
+});
+
+test('the daily card is pinned once it is resolved', () => {
+  const first = dailyChallenge({ today: '2026-10-25', stars: {} });
+  const pinned = dailyChallenge({ today: '2026-10-25', stars: {}, scenarioId: first.scenarioId, nationId: first.nationId });
+  assert.equal(pinned.scenarioId, first.scenarioId);
+  assert.equal(pinned.nationId, first.nationId);
+  assert.equal(isDailyFresh(pinned, '2026-10-25'), true);
+  assert.equal(isDailyFresh(pinned, '2026-10-26'), false);
+  assert.match(describeDaily(pinned), /Возьмите|Удержите/);
+  // A daily never offers a one-province minor: the card picks the strongest one.
+  const strongest = [...getScenario(pinned.scenarioId).nations].sort((a, b) => (b.army ?? 1) - (a.army ?? 1))[0];
+  assert.equal(pinned.nationId, strongest.id);
+  assert.ok(!/NaN|undefined/.test(describeDaily(pinned)));
+  // The «hold» wording adds today's starting size, so the sentence is a number.
+  const hold = { ...pinned, goal: { ...pinned.goal, kind: 'hold', seconds: 120 }, owned: 4 };
+  assert.match(describeDaily(hold), /Удержите 7 провинций 2 мин/);
+});
+
+test('a daily match plays the task aim instead of the scenario aim', () => {
+  const card = dailyChallenge({ today: '2026-10-25', stars: {}, theatre: 'europe', scenarioId: 'concert', nationId: 'RUS' });
+  const game = new Game({
+    scenarioId: 'concert',
+    nationId: 'RUS',
+    map,
+    seed: 11,
+    rules: { ...AUTO_ON },
+    goalOverride: card.goal,
+    daily: card.date,
+  });
+  assert.deepEqual(game.state.daily, { id: '2026-10-25', scenarioId: 'concert', done: false });
+  assert.equal(game.state.goal.text, card.goal.text);
+  assert.equal(game.state.goal.target, 9 + card.goal.add);
+  assert.equal(game.state.goal.limit, card.goal.limit);
+  assert.equal(game.state.goal.count, true);
+  // A normal match keeps its own aim.
+  assert.equal(makeGame().state.goal.text, 'Удержать 4 провинции 3 мин');
+  assert.equal(makeGame().state.daily, null);
+});
+
+test('achievements are earned once and only by a finished match', () => {
+  assert.deepEqual(earnedAchievements({ status: 'goal', stats: { lostProvinces: 0 }, starCount: 3 }), [
+    'first_win',
+    'three_stars',
+    'no_losses',
+  ]);
+  assert.deepEqual(earnedAchievements({ status: 'timeout', stats: {}, starCount: 0 }), []);
+  assert.deepEqual(earnedAchievements({ status: 'victory', stats: { lostProvinces: 2 }, starCount: 1 }, { first_win: true }), []);
+  assert.deepEqual(earnedAchievements({ status: 'goal', stats: {}, starCount: 3, daily: true }, { first_win: true, three_stars: true }), [
+    'no_losses',
+    'daily',
+  ]);
+  assert.equal(achievementById('first_win').title, 'Первая победа');
 });

@@ -15,8 +15,10 @@ import { plural } from './text.js';
  * @param {Record<string,string|null>} options.owners  province → nation
  * @param {string} [options.mode]  'goal' | 'conquest'
  */
-export function buildGoal({ scenario, nationId, owners, mode = 'goal' }) {
-  const def = scenario.goal ?? { kind: 'capture', add: 5 };
+export function buildGoal({ scenario, nationId, owners, mode = 'goal', override = null }) {
+  // К5: a daily task rewrites the aim of the match (`override`) while keeping
+  // the scenario, the map and the balance.
+  const def = { ...(scenario.goal ?? { kind: 'capture', add: 5 }), ...(override ?? {}) };
   const owned = Object.values(owners).filter((owner) => owner === nationId).length;
   const hold = def.kind === 'hold';
   const target = owned + (def.add ?? 5);
@@ -31,7 +33,8 @@ export function buildGoal({ scenario, nationId, owners, mode = 'goal' }) {
     // not about «ещё 1 провинция».
     limit: mode === 'conquest' ? 0 : (def.limit ?? GOAL_LIMIT),
     // A hand-written aim counts itself in words; the counted form gets «N из M».
-    count: !def.text,
+    // A task may ask for the count explicitly («взять 3 провинции»).
+    count: def.count ?? !def.text,
     text:
       def.text ??
       (hold

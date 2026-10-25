@@ -114,15 +114,46 @@ export const platform = {
         includeUser: true,
         quantityAround: 2,
       });
-      return (result?.entries ?? []).map((entry) => ({
+      const entries = (result?.entries ?? []).map((entry) => ({
         rank: entry.rank,
         score: entry.score,
         name: entry.player?.publicName || 'Игрок',
-        self: Boolean(entry.player?.scopePermission === undefined && false),
+        // The SDK marks nobody explicitly: the current player is the entry whose
+        // rank equals `userRank`, which `includeUser` fills in.
+        self: Boolean(result?.userRank && entry.rank === result.userRank),
       }));
+      return { entries, selfRank: Number(result?.userRank) || 0 };
     } catch (error) {
       console.info('[yandex] leaderboard read failed:', error?.message);
-      return [];
+      return { entries: [], selfRank: 0 };
+    }
+  },
+
+  /**
+   * К5.5: «Первая победа», «Три звезды», «Без потерь», «Задача дня». The ids are
+   * the ones the achievement list in the Yandex console must carry (docs/
+   * YANDEX.md). Outside Yandex, or before the SDK has them, this is a no-op —
+   * the app shows its own toast either way, so nothing has to fail loudly.
+   */
+  async unlockAchievement(id) {
+    if (!this.ysdk) return false;
+    try {
+      // The SDK has had more than one shape for this call across versions
+      // (`set`, `setAchievement`, a plain `ysdk.achievements`), and a moderator
+      // review must never break because of a method name. Try them in order.
+      const api = (await this.ysdk.getAchievements?.()) ?? (await this.ysdk.achievements) ?? null;
+      const targets = [api, this.ysdk.achievements, this.ysdk].filter(Boolean);
+      for (const target of targets) {
+        for (const method of ['setAchievement', 'set', 'unlock']) {
+          if (typeof target[method] !== 'function') continue;
+          await target[method](id);
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.info('[yandex] achievement not set:', id, error?.message);
+      return false;
     }
   },
 

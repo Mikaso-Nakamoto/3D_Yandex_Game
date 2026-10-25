@@ -20,6 +20,22 @@ import { sfx } from '../audio.js';
 import { icon } from './icons.js';
 import { TutorialUI } from './tutorial.js';
 import { buildGoal, goalProgressText } from '../game/goal.js';
+import {
+  ACHIEVEMENTS,
+  achievementById,
+  dailyChallenge,
+  dayKey,
+  describeDaily,
+  earnedAchievements,
+  isDailyFresh,
+  isUnlocked,
+  normalizeStars,
+  starTotals,
+  theatreOrder,
+  unlockSource,
+  unlockStars,
+  untilNextDay,
+} from '../game/progress.js';
 import { offerTitle, provincesCount, nationsCount, plural } from '../game/text.js';
 
 const SAVE_KEY = 'crowns.save.v1';
@@ -133,9 +149,27 @@ export class App {
         labels: raw.labels !== false,
         tips: raw.tips !== false,
         rules: raw.rules ?? null,
+        // К5: the meta of the game lives next to the settings, because that is
+        // where it already was (stars) and because it is small enough for one
+        // localStorage key.
+        stars: normalizeStars(raw.stars ?? {}),
+        bestTimes: raw.bestTimes && typeof raw.bestTimes === 'object' ? raw.bestTimes : {},
+        daily: raw.daily && typeof raw.daily === 'object' ? raw.daily : null,
+        achievements: raw.achievements && typeof raw.achievements === 'object' ? raw.achievements : {},
+        dailyDone: Number(raw.dailyDone) || 0,
       };
     } catch {
-      return { sound: true, labels: true, tips: true, rules: null };
+      return {
+        sound: true,
+        labels: true,
+        tips: true,
+        rules: null,
+        stars: {},
+        bestTimes: {},
+        daily: null,
+        achievements: {},
+        dailyDone: 0,
+      };
     }
   }
 
@@ -196,6 +230,69 @@ export class App {
       console.info('save failed', error?.message);
     }
     platform.save({ save: JSON.stringify(payload) });
+  }
+
+  /** К5.3: everything earned, in the shape the cloud key `meta` holds. */
+  #metaPayload() {
+    return {
+      v: 1,
+      stars: normalizeStars(this.settings.stars),
+      bestTimes: this.settings.bestTimes ?? {},
+      daily: this.settings.daily ?? null,
+      dailyDone: Number(this.settings.dailyDone) || 0,
+      achievements: this.settings.achievements ?? {},
+    };
+  }
+
+  /** Pushes the meta to Yandex. Best effort: a browser without the SDK ignores it. */
+  #saveMeta() {
+    platform.save({ meta: this.#metaPayload() });
+  }
+
+  /**
+   * The cloud copy of the meta. Stars only go up, a record time only goes down,
+   * a daily check mark survives only for its own day, achievements are a union:
+   * playing on two devices must never erase one of them.
+   */
+  mergeCloudMeta(meta) {
+    if (!meta || typeof meta !== 'object') return;
+    const stars = normalizeStars({ ...(meta.stars ?? {}) });
+    const merged = { ...(this.settings.stars ?? {}) };
+    for (const [id, value] of Object.entries(stars)) merged[id] = Math.max(merged[id] ?? 0, value);
+    this.settings.stars = normalizeStars(merged);
+    for (const [id, value] of Object.entries(meta.bestTimes ?? {})) {
+      const time = Number(value);
+      if (!Number.isFinite(time) || time <= 0) continue;
+      const current = Number(this.settings.bestTimes?.[id]) || 0;
+      if (!current || time < current) this.settings.bestTimes = { ...(this.settings.bestTimes ?? {}), [id]: Math.round(time) };
+    }
+    if (isDailyFresh(meta.daily?.card, dayKey())) {
+      const mine = this.settings.daily;
+      const same = isDailyFresh(mine?.card, dayKey());
+      if (!same) this.settings.daily = meta.daily;
+      else if (meta.daily.done && !mine.done) this.settings.daily = { ...mine, done: true };
+    }
+    this.settings.dailyDone = Math.max(Number(this.settings.dailyDone) || 0, Number(meta.dailyDone) || 0);
+    this.settings.achievements = { ...(meta.achievements ?? {}), ...(this.settings.achievements ?? {}) };
+    this.#saveSettings();
+    this.#buildMenu();
+  }
+
+  /**
+   * One entry point for what the cloud returned: the running match and the meta.
+   * Called from main.js after the SDK has answered, before the first screen.
+   */
+  applyCloud(cloud) {
+    if (!cloud) return;
+    if (cloud.save) {
+      try {
+        const saved = JSON.parse(cloud.save);
+        if (saved?.game) this.enableContinue(saved);
+      } catch {
+        /* malformed cloud save: the local one, if any, still works */
+      }
+    }
+    if (cloud.meta) this.mergeCloudMeta(cloud.meta);
   }
 
   async #resumeFromStorage() {
@@ -262,28 +359,121 @@ export class App {
       const starRow = best
         ? `<span class="scenario-stars" title="Лучший результат">${Array.from({ length: 3 }, (_, i) => `<span class="mini-star ${i < best ? 'is-on' : ''}">${icon('star', 12)}</span>`).join('')}</span>`
         : '';
+      // К5.1: the next scenario opens for one star in the previous one. The
+      // lock is drawn on the card and explained on click; a dead card with no
+      // answer is how a menu loses a player.
+      const unlocked = isUnlocked(scenario.id, this.settings.stars);
+      const need = unlockStars(scenario.id);
+      const source = unlockSource(scenario.id);
+      const lockRow = unlocked
+        ? ''
+        : `<span class="card-lock" title="Откроется за ${need} звезду">${icon('lock', 12)}${plural(need, 'звезда', 'звезды', 'звёзд')}</span>`;
+      const bestTime = Number(this.settings.bestTimes?.[scenario.id]) || 0;
       const card = document.createElement('button');
-      card.className = 'scenario-card';
+      card.className = `scenario-card${unlocked ? '' : ' is-locked'}`;
       card.type = 'button';
       card.dataset.scenario = scenario.id;
+      card.setAttribute('aria-disabled', String(!unlocked));
       card.innerHTML = `
         <div class="scenario-era">${scenario.era}</div>
         ${starRow}
+        ${lockRow}
         <div class="scenario-title">${scenario.title}</div>
-        <div class="scenario-desc">${scenario.blurb}</div>
+        <div class="scenario-desc">${unlocked ? scenario.blurb : `Откроется за ${plural(need, 'звезду', 'звезды', 'звёзд')} в «${source?.title ?? 'предыдущем сценарии'}».`}</div>
         <div class="scenario-meta">
           <span class="th-long">${THEATRES[scenario.theatre]?.title ?? 'Европа'}</span>
           <span class="th-short">${THEATRES[scenario.theatre]?.short ?? 'Европа'}</span>
           <span>${nationsCount(scenario.nations.length)}</span>
+          ${bestTime ? `<span class="scenario-best" title="Лучшее время выполнения цели">${this.#clockText(bestTime)}</span>` : ''}
           <span class="difficulty">${dots}<span>${scenario.difficulty}</span></span>
         </div>`;
       card.addEventListener('click', () => {
+        if (!unlocked) {
+          sfx.loss();
+          this.#toast(`Сценарий откроется за ${plural(need, 'звезду', 'звезды', 'звёзд')} в «${source?.title ?? 'предыдущем сценарии'}»`, 'bad');
+          return;
+        }
         sfx.select();
         this.openNationSelect(scenario.id);
       });
       list.appendChild(card);
     }
     $('#btn-continue').classList.toggle('hidden', !this.hasSave);
+    this.#buildDaily();
+    this.#renderStarTotal();
+  }
+
+  /** «★ 7 из 24» in the footer: the one number that says how far you have come. */
+  #renderStarTotal() {
+    const node = $('#menu-stars');
+    if (!node) return;
+    const { earned, max } = starTotals(this.settings.stars);
+    node.innerHTML = `${icon('star', 12)} ${earned} из ${max}`;
+    node.title = 'Сумма звёзд по всем сценариям';
+  }
+
+  /** «1:20» — a match clock, also used for the best time on a card. */
+  #clockText(seconds) {
+    const total = Math.max(0, Math.round(seconds));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  /**
+   * К5.2: today's task. Resolved once per day and kept in the settings, so the
+   * card does not change while the player is deciding, and so a reload does not
+   * reroll it into something easier.
+   */
+  #dailyCard() {
+    const today = dayKey();
+    const stored = this.settings.daily;
+    // One task per day and one per theatre: a world-mode player must not be
+    // sent to Europe by the «Играть» button under a card that names Europe.
+    const cards = isDailyFresh(stored?.card, today) && stored?.cards ? stored.cards : {};
+    if (cards[this.mapMode]) return cards[this.mapMode];
+    const card = dailyChallenge({ today, stars: this.settings.stars, theatre: this.mapMode });
+    const fresh = {
+      ...(stored ?? {}),
+      // `done` is global: the day's task is done once, whichever theatre it was.
+      done: isDailyFresh(stored?.card, today) ? Boolean(stored?.done) : false,
+      card,
+      cards: { ...cards, [this.mapMode]: card },
+    };
+    this.settings.daily = fresh;
+    this.#saveSettings();
+    return card;
+  }
+
+  #buildDaily() {
+    const box = $('#menu-daily');
+    if (!box) return;
+    const card = this.#dailyCard();
+    const done = Boolean(this.settings.daily?.done) && isDailyFresh(this.settings.daily?.card, dayKey());
+    this.dailyCard = card;
+    box.classList.toggle('is-done', done);
+    box.innerHTML = `
+      <span class="daily-icon">${icon(done ? 'check' : 'calendar', 18)}</span>
+      <span class="daily-body">
+        <span class="daily-title">${done ? 'Задача дня выполнена' : 'Задача дня'}</span>
+        <span class="daily-text">${describeDaily(card)}</span>
+        <span class="daily-where">${card.scenarioTitle} · ${THEATRES[card.theatre ?? 'europe']?.title ?? 'Европа'} · ${card.era} · ${card.nationName}${done ? ` · новая ${untilNextDay()}` : ''}</span>
+      </span>
+      ${done ? '' : '<button class="btn primary" type="button" data-daily-start>Играть</button>'}`;
+    box.querySelector('[data-daily-start]')?.addEventListener('click', () => {
+      sfx.select();
+      this.#startDaily(card);
+    });
+  }
+
+  /** Starts the daily match: its own aim, the scenario and nation of the card. */
+  #startDaily(card) {
+    const scenario = getScenario(card.scenarioId);
+    if (!scenario) return;
+    this.scenario = scenario;
+    this.selectedNation = scenario.nations.some((n) => n.id === card.nationId) ? card.nationId : scenario.nations[0].id;
+    this.doctrine = 'coin';
+    this.mapMode = scenario.theatre ?? 'europe';
+    this.setTheatre(this.mapMode);
+    this.startGame({ goalOverride: card.goal, daily: card.date });
   }
 
   /** Menu mode: the European map alone, or Europe together with North America. */
@@ -670,6 +860,8 @@ export class App {
       map: this.map,
       seed: (Math.random() * 2 ** 31) | 0,
       rules,
+      goalOverride: overrides.goalOverride ?? null,
+      daily: overrides.daily ?? null,
     });
     game.setSendRatio(this.preferredRatio);
     this.#attachGame(game);
@@ -691,6 +883,9 @@ export class App {
 
   #attachGame(game) {
     this.game = game;
+    // К5.2: this match is played for today's task. Kept on the app as well as in
+    // the save so the end screen can mark the day without asking the model.
+    this.dailyActive = Boolean(game.state.daily);
     this.scenario = getScenario(game.state.scenarioId);
     this.setTheatre(this.scenario.theatre ?? 'europe');
     this.selectedNation = game.state.nationId;
@@ -981,10 +1176,53 @@ export class App {
       .join('');
     // Stars are a per-scenario record: they survive the end screen and the
     // next launch, and only ever go up.
+    const starsBefore = { ...this.settings.stars };
     const stars = { ...(this.settings.stars ?? {}) };
-    stars[game.state.scenarioId] = Math.max(stars[game.state.scenarioId] ?? 0, score.starCount);
-    this.settings.stars = stars;
+    const bestStars = Math.max(stars[game.state.scenarioId] ?? 0, score.starCount);
+    stars[game.state.scenarioId] = bestStars;
+    this.settings.stars = normalizeStars(stars);
+    // К5.4: the best time of the aim, in the same table as the stars. Only a
+    // reached aim has a time worth keeping: «время вышло» is not a record.
+    const time = game.state.time;
+    const bestTime = Number(this.settings.bestTimes?.[game.state.scenarioId]) || 0;
+    // A record needs a real clock behind it: a match finished in the first
+    // second (a resumed save, a scripted run) must not print «Лучшее время 0:00».
+    const newRecord = won && time >= 2 && (!bestTime || time < bestTime);
+    if (newRecord) this.settings.bestTimes = { ...(this.settings.bestTimes ?? {}), [game.state.scenarioId]: Math.round(time) };
+    // К5.2: today's task is checked off by a reached aim in the daily match.
+    // The card the match was started from: same day, same scenario. `cards`
+    // holds one card per theatre, `card` is the one shown last.
+    const dailyState = this.settings.daily ?? {};
+    const dailyCard = [dailyState.card, ...Object.values(dailyState.cards ?? {})].find(
+      (card) => card && isDailyFresh(card, dayKey()) && card.scenarioId === game.state.daily?.scenarioId,
+    ) ?? null;
+    const dailyMatch = Boolean(game.state.daily) && Boolean(dailyCard);
+    const dailyJustDone = Boolean(won && dailyMatch && !this.settings.daily?.done);
+    if (dailyJustDone) {
+      this.settings.daily = { ...(this.settings.daily ?? {}), card: dailyCard, done: true };
+      this.settings.dailyDone = (Number(this.settings.dailyDone) || 0) + 1;
+    }
+    // К5.5: achievements, earned once. The SDK call is best effort; the toast is
+    // the part the player actually sees.
+    const fresh = earnedAchievements(
+      { status: game.state.status, stats, starCount: score.starCount, daily: Boolean(won && dailyMatch) },
+      this.settings.achievements ?? {},
+    );
+    if (fresh.length) {
+      const owned = { ...(this.settings.achievements ?? {}) };
+      for (const id of fresh) owned[id] = Date.now();
+      this.settings.achievements = owned;
+      for (const id of fresh) platform.unlockAchievement(id);
+    }
     this.#saveSettings();
+    // К5.3: the same table goes to the cloud, so a second browser sees the stars.
+    this.#saveMeta();
+    // К5.4: three tables, all of them «выше — лучше» (Yandex leaderboards sort
+    // descending, so the time is submitted converted: seconds saved of two
+    // hours, never a raw «who was faster» where a small number would lose).
+    const totalStars = starTotals(this.settings.stars).earned;
+    platform.submitScore('crowns_stars', totalStars);
+    if (won) platform.submitScore('crowns_time', Math.max(0, 7200 - Math.round(time)));
     $('#end-stats').innerHTML = `
       <div class="end-stat"><div class="k">Провинций</div><div class="v">${game.progress.owned}</div></div>
       <div class="end-stat"><div class="k">Захвачено</div><div class="v">${stats.captured}</div></div>
@@ -1005,23 +1243,31 @@ export class App {
         <span>скорость +${fmt(score.speedBonus)}</span>
         ${score.victory ? '<span class="good">победа +500</span>' : ''}
       </div>`;
+    // К5: what the match changed beyond the numbers — the task of the day, the
+    // star table, a record and the scenario it just opened.
+    const opened = theatreOrder(this.scenario.theatre ?? 'europe').filter(
+      (s) => !isUnlocked(s.id, starsBefore) && isUnlocked(s.id, this.settings.stars),
+    );
+    const { earned } = starTotals(this.settings.stars);
+    const pieces = [];
+    if (dailyMatch) {
+      pieces.push(
+        dailyJustDone
+          ? '<span class="is-good">Задача дня выполнена</span>'
+          : '<span class="is-bad">Задача дня не выполнена — можно попробовать ещё раз</span>',
+      );
+    }
+    pieces.push(`<span>${icon('star', 12)} ${earned} из ${starTotals(this.settings.stars).max}</span>`);
+    if (newRecord) pieces.push(`<span class="is-good">Лучшее время: ${this.#clockText(time)}</span>`);
+    for (const id of fresh) {
+      const meta = achievementById(id);
+      if (meta) pieces.push(`<span class="is-good">${icon('trophy', 12)} ${meta.title}</span>`);
+    }
+    for (const scenario of opened) pieces.push(`<span class="is-good">Открыт сценарий «${scenario.title}»</span>`);
+    $('#end-meta').innerHTML = pieces.join('');
     $('#end-board').classList.add('hidden');
     $('#end-board').innerHTML = '';
-    platform.submitScore('crowns', score.total).then((submitted) => {
-      if (!submitted) return;
-      platform.topScores('crowns', 5).then((entries) => {
-        if (!entries.length) return;
-        $('#end-board').classList.remove('hidden');
-        $('#end-board').innerHTML = `
-          <div class="board-title">Лучшие правители</div>
-          ${entries
-            .map(
-              (entry) =>
-                `<div class="board-row ${entry.self ? 'is-self' : ''}"><span class="board-rank">${entry.rank}</span><span class="board-name">${entry.name}</span><b>${fmt(entry.score)}</b></div>`,
-            )
-            .join('')}`;
-      });
-    });
+    this.#renderBoard(score.total, totalStars);
     $('#btn-again').textContent = tutorial ? 'Дальше: настоящая партия' : 'Сыграть ещё';
     this.tutorialUI.hide();
     $('#screen-game')?.classList.remove('is-tutorial');
@@ -1032,11 +1278,47 @@ export class App {
     if (!tutorial) setTimeout(() => platform.showInterstitial(), 1600);
   }
 
+  /**
+   * К5.4: where the player stands, in one short line per table. The plan asks
+   * for «место в топе видно на экране итогов» — not for a five-row table pushing
+   * the buttons off the card, which is exactly what a full leaderboard did on a
+   * laptop once the meta lines arrived.
+   */
+  async #renderBoard(points, stars) {
+    const submit = await Promise.all([
+      platform.submitScore('crowns', points),
+      platform.submitScore('crowns_stars', stars),
+    ]);
+    if (!submit.some(Boolean)) return;
+    const [byPoints, byStars] = await Promise.all([
+      platform.topScores('crowns', 3),
+      platform.topScores('crowns_stars', 3),
+    ]);
+    const line = (title, board, format) => {
+      if (!board?.entries?.length) return '';
+      const best = board.entries[0];
+      const mine = board.selfRank ? ` · вы ${board.selfRank}-й` : '';
+      return `<span>${title}: лидер ${best.name} ${format(best.score)}${mine}</span>`;
+    };
+    const html = [
+      line('Очки партии', byPoints, (value) => fmt(value)),
+      // The leader's number, not the player's: «лидер Пётр 3 из 24» is honest,
+      // «лидер Пётр 9 из 24» for every match was the player's own total.
+      line('Звёзды', byStars, (value) => `${fmt(value)} из ${starTotals(this.settings.stars).max}`),
+    ].join('');
+    if (!html) return;
+    const board = $('#end-board');
+    board.classList.remove('hidden');
+    board.innerHTML = html;
+  }
+
   #restart() {
     if (!this.scenario || !this.selectedNation) return;
-    // «Сыграть ещё» after the lesson must start the game, not repeat the lesson.
-    if (this.scenario.tutorial) {
-      this.#markTutorialDone();
+    // «Сыграть ещё» after the lesson or the daily task starts the game, not the
+    // lesson again and not the same dated aim.
+    if (this.scenario.tutorial || this.dailyActive) {
+      if (this.scenario.tutorial) this.#markTutorialDone();
+      this.dailyActive = false;
       this.#playNow();
       return;
     }

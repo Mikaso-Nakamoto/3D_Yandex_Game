@@ -2050,6 +2050,21 @@ kbd {
 .end-card {
   text-align: center;
   max-width: 460px;
+  /* К5 added two lines of meta (daily, stars, record, achievements, the
+     scenario it opened) and the buttons fell off a 720 px screen: the card
+     scrolls inside itself instead of growing the page. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 180, 90, 0.4) transparent;
+}
+
+.end-card .end-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: linear-gradient(180deg, rgba(13, 21, 33, 0) 0%, rgba(13, 21, 33, 0.96) 40%);
 }
 
 .end-emblem {
@@ -3264,12 +3279,28 @@ kbd {
   color: #8fc98a;
 }
 
+/* К5.4: the leaderboard is a footnote, not a table: one short line per board. */
 .end-board {
-  margin-top: 10px;
+  margin-top: 2px;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px 14px;
+  font-size: 10.5px;
+  color: var(--muted, rgba(169, 182, 201, 0.75));
 }
+
+.end-board span {
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.end-board.hidden {
+  display: none;
+}
+
 
 .board-title {
   font-size: 9.5px;
@@ -6027,5 +6058,362 @@ kbd {
   .tut-skip {
     font-size: 10px;
     padding: 3px 7px;
+  }
+}
+
+/* ---------------------------------------------------------------- К5: мета
+   Stars, the lock on next scenarios and today's task. All of it sits in the
+   menu the player already reads, because a separate «прогресс» screen would be
+   one more place nobody opens. */
+
+.menu-daily {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(217, 180, 90, 0.28);
+  background: linear-gradient(90deg, rgba(29, 24, 14, 0.92), rgba(11, 18, 29, 0.92));
+  text-align: left;
+}
+
+.menu-daily:empty {
+  display: none;
+}
+
+.daily-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid rgba(217, 180, 90, 0.4);
+  color: var(--gold, #d9b45a);
+  background: rgba(217, 180, 90, 0.08);
+}
+
+.daily-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.daily-title {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(226, 216, 194, 0.66);
+}
+
+.daily-text {
+  font-family: var(--serif);
+  font-size: 16px;
+  color: var(--ink, #f2ecdf);
+}
+
+.daily-where {
+  font-size: 11.5px;
+  color: var(--muted, rgba(169, 182, 201, 0.75));
+}
+
+.menu-daily.is-done {
+  border-color: rgba(111, 168, 111, 0.45);
+  background: linear-gradient(90deg, rgba(17, 30, 20, 0.92), rgba(11, 18, 29, 0.92));
+}
+
+.menu-daily.is-done .daily-icon {
+  border-color: rgba(111, 168, 111, 0.55);
+  color: #8ccb8c;
+  background: rgba(111, 168, 111, 0.1);
+}
+
+.menu-daily .btn {
+  flex: none;
+}
+
+/* A locked scenario is visible, dimmed and answers a click with a reason —
+   «кнопка не работает» is the worst thing a menu can do. */
+.scenario-card.is-locked {
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(14, 21, 33, 0.86), rgba(8, 13, 22, 0.9));
+}
+
+.scenario-card.is-locked::after {
+  background: radial-gradient(80% 60% at 85% 0%, rgba(140, 155, 180, 0.07), transparent 70%);
+}
+
+.scenario-card.is-locked .scenario-era,
+.scenario-card.is-locked .scenario-title,
+.scenario-card.is-locked .scenario-desc,
+.scenario-card.is-locked .scenario-meta {
+  opacity: 0.42;
+}
+
+.scenario-card.is-locked:hover {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+.card-lock {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(226, 216, 194, 0.72);
+}
+
+.scenario-best {
+  color: rgba(217, 180, 90, 0.85);
+}
+
+.menu-stars {
+  color: rgba(217, 180, 90, 0.8);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  font-size: 11.5px;
+}
+
+.menu-stars .ico {
+  color: var(--gold, #d9b45a);
+}
+
+/* The end screen gained two lines of meta: the task of the day and the star
+   table. They read as a footnote, not as another block of numbers. */
+.end-meta {
+  margin: 2px 0 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  justify-content: center;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted, rgba(169, 182, 201, 0.8));
+}
+
+.end-meta:empty {
+  display: none;
+}
+
+.end-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.end-meta .is-good {
+  color: #9fd9a6;
+}
+
+.end-meta .is-bad {
+  color: #e8a3a3;
+}
+
+.end-meta .mini-star {
+  width: 12px;
+  height: 12px;
+}
+
+@media (max-width: 900px) {
+  .menu-daily {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .menu-daily .btn {
+    padding: 7px 12px;
+  }
+
+  .daily-text {
+    font-size: 14px;
+  }
+}
+
+/* The results card on a short landscape screen: the stat grid is the part that
+   can give up room, the buttons must stay visible without scrolling. */
+@media (max-height: 620px) {
+  .end-card {
+    max-width: 520px;
+    padding: 16px 18px;
+  }
+
+  .end-emblem {
+    font-size: 30px;
+    margin-bottom: 4px;
+  }
+
+  .end-card p {
+    margin-bottom: 10px;
+  }
+
+  /* Seven numbers in three columns are three rows and the buttons end up over
+     the score. On a wide-but-short window four columns fit, so the grid is two
+     rows and the whole card fits 390 px without scrolling. */
+  .end-stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .end-stat {
+    padding: 6px 8px;
+  }
+
+  .end-stat .v {
+    font-size: 17px;
+  }
+
+  .end-stars {
+    margin-bottom: 8px;
+  }
+
+  .end-meta {
+    margin-bottom: 8px;
+  }
+
+  .end-actions {
+    margin-top: 8px;
+  }
+}
+
+/* Narrow phones keep the three-column grid of the results card. */
+@media (max-height: 620px) and (max-width: 620px) {
+  .end-stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* The very short landscape window (844×390 and below) is the one where the
+   results card still had to scroll for its own buttons. Everything here is a
+   size, not a feature: the numbers and the text all stay, the air goes. */
+@media (max-height: 460px) {
+  .end-card {
+    padding: 10px 16px;
+    max-width: 620px;
+  }
+
+  .end-emblem {
+    font-size: 22px;
+    margin-bottom: 2px;
+  }
+
+  .end-card h2 {
+    font-size: 21px;
+    margin-bottom: 3px;
+  }
+
+  .end-card p {
+    font-size: 11.5px;
+    line-height: 1.35;
+    margin-bottom: 6px;
+  }
+
+  .end-stars {
+    gap: 14px;
+    margin-bottom: 5px;
+  }
+
+  .end-star svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .end-star .star-label {
+    font-size: 8.5px;
+  }
+
+  .end-stats {
+    gap: 4px;
+    margin-bottom: 5px;
+  }
+
+  .end-stat {
+    padding: 4px 6px;
+    border-radius: 8px;
+  }
+
+  .end-stat .k {
+    font-size: 8px;
+  }
+
+  .end-stat .v {
+    font-size: 15px;
+  }
+
+  .end-score {
+    padding: 6px 10px;
+    margin-bottom: 4px;
+  }
+
+  .end-score .score-value {
+    font-size: 21px;
+  }
+
+  .end-actions {
+    gap: 8px;
+  }
+
+  .end-actions .btn {
+    padding: 8px 16px;
+  }
+}
+
+/* A 844×390 landscape window is wide and short: the results card splits into a
+   story column (emblem, title, stars, what changed) and a numbers column
+   (stats, score, buttons) instead of scrolling for its own button. Same
+   elements, no hidden information. */
+@media (max-height: 460px) and (min-width: 760px) {
+  /* CSS columns, not grid: the two halves have different heights and a grid
+     would pair «звёзды» with «очки» into one tall row. Columns let each half
+     keep its own rhythm. */
+  .end-card {
+    column-count: 2;
+    column-gap: 22px;
+    column-fill: balance;
+    max-width: 700px;
+    text-align: left;
+  }
+
+  .end-card > * {
+    break-inside: avoid;
+  }
+
+  .end-card .end-emblem {
+    text-align: center;
+  }
+
+  .end-card .end-stars,
+  .end-card .end-meta {
+    justify-content: flex-start;
+  }
+
+  /* In a half-width column four numbers per row wrapped «ПИК ИМПЕРИИ» onto
+     two lines: three per row reads better and still fits the height. */
+  .end-card .end-stats {
+    grid-template-columns: repeat(3, 1fr);
+    margin-top: 2px;
+  }
+
+  .end-card .end-actions {
+    position: static;
+    background: none;
+    padding-top: 0;
+    justify-content: flex-start;
   }
 }

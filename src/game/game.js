@@ -14,9 +14,23 @@ export const SAVE_VERSION = 1;
  * so the whole game can be stepped and tested headlessly.
  */
 export class Game {
-  constructor({ scenarioId, nationId, doctrineId = 'coin', map, seed = 20261023, rules = {} }) {
+  constructor({
+    scenarioId,
+    nationId,
+    doctrineId = 'coin',
+    map,
+    seed = 20261023,
+    rules = {},
+    // К5: the daily task replaces the aim of the match but not the scenario: a
+    // short, dated goal («возьмите 3 провинции за 4 минуты») inside an ordinary
+    // map. `{ ...goalDef, id, date }`; null for a normal match.
+    goalOverride = null,
+    daily = null,
+  }) {
     this.scenario = getScenario(scenarioId);
     this.rules = normalizeRules(rules);
+    this.goalOverride = goalOverride;
+    this.dailyId = daily;
     if (map.theatre && this.scenario.theatre && map.theatre !== this.scenario.theatre) {
       throw new Error(
         `Сценарий «${this.scenario.title}» относится к театру ${this.scenario.theatre}, а передана карта ${map.theatre}`,
@@ -71,6 +85,9 @@ export class Game {
       // К4: the lesson counts its three steps itself, and the aim of the match
       // waits for them (see #checkGoal). Null in every ordinary scenario.
       tutorial: sc.tutorial ? { step: 1, done: false } : null,
+      // К5: the daily card that this match is playing for, so a reloaded page
+      // still knows that finishing it is worth a check mark.
+      daily: this.dailyId ? { id: this.dailyId, scenarioId: this.scenario.id, done: false } : null,
       rng: this.rng.s,
     };
 
@@ -2810,6 +2827,7 @@ export class Game {
       nationId: state.nationId,
       owners: Object.fromEntries(Object.values(state.provinces).map((p) => [p.id, p.owner])),
       mode: this.rules.mode,
+      override: this.goalOverride,
     });
   }
 
@@ -2959,6 +2977,7 @@ export class Game {
       doctrineId: nation.doctrine,
       map,
       seed: save.rng ?? 1,
+      daily: save.state.daily?.id ?? null,
     });
     game.state = save.state;
     // Saves written before standing orders existed must still load; the field is
