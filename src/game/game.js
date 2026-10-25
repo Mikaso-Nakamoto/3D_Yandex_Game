@@ -2822,9 +2822,12 @@ export class Game {
     const me = s.nations[s.nationId];
     const capital = s.provinces[me.capital];
     if (!capital) return { ok: false, reason: 'Столицы нет на карте' };
+    // Old saves have no peak: the army the realm holds now is the honest
+    // stand-in, and it is never zero for a realm that just lost its last land.
+    const peak = me.armyPeak || this.armyTotal(me.id) || 0;
     const garrison = Math.max(
       BAL.minSend * 2,
-      Math.min(this.garrisonCeiling(me.capital), Math.round((me.armyPeak ?? 0) * fraction)),
+      Math.min(this.garrisonCeiling(me.capital), Math.round(peak * fraction)),
     );
     capital.owner = me.id;
     capital.garrison = garrison;
@@ -3064,6 +3067,10 @@ export class Game {
     // simply empty for them.
     game.state.autos = Array.isArray(game.state.autos) ? game.state.autos : [];
     game.state.nextAutoId = game.state.nextAutoId ?? 1;
+    // К6: a save from before the ads existed must not lose the right to ask for
+    // a second chance, and must not remember one that was never used.
+    game.state.ads = game.state.ads ?? { revive: false, speedup: false };
+    game.state.reviveGrace = game.state.reviveGrace ?? 0;
     game.state.rules = normalizeRules(save.state.rules ?? {});
     game.rules = game.state.rules;
     // Saves written before К2 have no aim: build one from the current rules so
