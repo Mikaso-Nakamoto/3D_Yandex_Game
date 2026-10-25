@@ -1897,6 +1897,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
+  padding-bottom: 4px;
 }
 
 .howto-grid h3 {
@@ -1907,9 +1908,9 @@ body {
 }
 
 .howto-grid p {
-  margin: 0 0 14px;
-  font-size: 12.5px;
-  line-height: 1.55;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.48;
   color: var(--ink-dim);
 }
 
@@ -3402,6 +3403,16 @@ kbd {
   /* Room for the scrollbar so it does not sit on the text. */
   padding-right: 8px;
   margin-right: -8px;
+  /* A soft fade at the bottom edge says «there is more» without a label: text
+     cut mid-line looked like a broken dialog. */
+  mask-image: linear-gradient(180deg, #000 calc(100% - 26px), rgba(0, 0, 0, 0.15) 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 26px), rgba(0, 0, 0, 0.15) 100%);
+}
+
+/* The rules dialog is a reading dialog: let it use the screen height instead of
+   stopping at 86 vh and cutting the last paragraph. */
+#modal-howto .modal-card {
+  max-height: 92vh;
 }
 
 .modal-card.split > .eyebrow,
