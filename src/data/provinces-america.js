@@ -10,8 +10,10 @@
 // Numbers are approximate and only used as economy weights, like the European ones.
 export const AMERICA = {
   // A little tighter than the full continent: keeps the theatre readable on a
-  // landscape phone screen without turning Canada into a wall of ice.
-  bounds: { lonMin: -170, lonMax: -52, latMin: 15, latMax: 70 },
+  // landscape phone screen without turning Canada into a wall of ice. The top
+  // edge matches the European theatre (72) and clears Alaska's north coast at
+  // 71.4, so the map is not cut flat across the state.
+  bounds: { lonMin: -170, lonMax: -52, latMin: 15, latMax: 72 },
   provinces: [
     // --- United States -------------------------------------------------------
     {

@@ -172,5 +172,7 @@ const out = {
 };
 
 const target = resolve(root, 'src/data/map-atlantic.json');
-writeFileSync(target, `${JSON.stringify(out, null, 1)}\n`);
+// Minified like the other map files: this is data the game loads, not code a
+// human edits, and the pretty version was 28 000 lines of diff noise.
+writeFileSync(target, JSON.stringify(out));
 console.log(`map-atlantic: ${provinces.length} provinces, ${width}×${height} units -> ${target}`);

@@ -19,11 +19,12 @@ const GLOW = {
   // be a 13 % golden tint that vanished under the hover highlight.
   accent: { color: 0xf3c85a, intensity: 0.42 },
   accentHover: { color: 0xffd98a, intensity: 0.56 },
-  // The province the player is looking at. A 1-pixel golden contour was lost
-  // among the borders (and the hover highlight used to wipe it out), so the
-  // selection now also lights the province itself.
-  selected: { color: 0xf3c85a, intensity: 0.34 },
-  selectedHover: { color: 0xffd98a, intensity: 0.46 },
+  // The province the player is looking at. The golden contour does the work;
+  // the fill is only lifted enough to separate the selection from a hovered
+  // neighbour. A stronger tint turned a red country beige, which read as
+  // «the country changed colour» rather than «this is selected».
+  selected: { color: 0xf3c85a, intensity: 0.05 },
+  selectedHover: { color: 0xffd98a, intensity: 0.08 },
 };
 
 
@@ -130,7 +131,6 @@ export class World {
     this.accentLines = [];
     this.selected = null;
     this.selectionLine = null;
-    this.selectionLines = [];
     this.selectionLines = [];
 
     this.pointers = new Map();
@@ -415,6 +415,16 @@ export class World {
     }
   }
 
+  /**
+   * Golden contour width that keeps roughly the same thickness on screen.
+   * `zoom` is how much closer the camera is than the fitted view, so the
+   * bandwidth shrinks as the player zooms in.
+   */
+  #selectionWidth() {
+    const zoom = Math.max(Number.isFinite(this.zoom) ? this.zoom : 1, 0.2);
+    return THREE.MathUtils.clamp(0.16 / zoom, 0.05, 0.5);
+  }
+
   setSelected(id) {
     this.selected = id;
     this.#refreshGlow();
@@ -436,7 +446,11 @@ export class World {
     if (!this.selected) return;
     const province = this.byId[this.selected];
     if (!province) return;
-    const width = 0.3;
+    // The band is built in world units, so a fixed width turns into a wide
+    // golden stripe as soon as the camera comes close: at the closest zoom on
+    // the world map 0.3 units are twenty pixels across. The width therefore
+    // follows the zoom, and the mesh is rebuilt when the zoom really changes.
+    const width = this.#selectionWidth();
     const positions = [];
     for (const ring of [province.rings[0], ...(province.islands ?? [])]) {
       const count = ring?.length ?? 0;
@@ -472,10 +486,13 @@ export class World {
         const scale = 1 + dot;
         let mx = scale > 1e-4 ? sx / scale : n1[0];
         let mz = scale > 1e-4 ? sz / scale : n1[1];
+        // Mitre joins explode on a sharp corner: at the clipped north edge of
+        // Alaska the outline grew into a golden wedge the size of a country.
+        // A modest limit keeps corners pointed without the spike.
         const len = Math.hypot(mx, mz);
-        if (len > 3) {
-          mx = (mx / len) * 3;
-          mz = (mz / len) * 3;
+        if (len > 1.6) {
+          mx = (mx / len) * 1.6;
+          mz = (mz / len) * 1.6;
         }
         offsets.push([cur[0] + mx * width, cur[1] + mz * width]);
       }
@@ -508,6 +525,7 @@ export class World {
     mesh.renderOrder = 9;
     this.scene.add(mesh);
     this.selectionLine = mesh;
+    this.selectionWidthUsed = width;
     this.selectionLines = [mesh];
   }
 
@@ -542,7 +560,7 @@ export class World {
       // Only the outer ring: islands would otherwise draw a lot of extra lines.
       const ring = province.rings[0];
       const geo = new THREE.BufferGeometry().setFromPoints(ring.map(([x, z]) => new THREE.Vector3(x, 0.03, z)));
-      const mat = new THREE.LineBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0.9, depthTest: false });
+      const mat = new THREE.LineBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0.7, depthTest: false });
       const line = new THREE.LineLoop(geo, mat);
       line.renderOrder = 8;
       this.scene.add(line);
@@ -1297,6 +1315,13 @@ export class World {
     this.zoomTarget = THREE.MathUtils.clamp(this.zoomTarget, limits.min, limits.max);
     this.zoom += (this.zoomTarget - this.zoom) * k;
     this.target.lerp(this.panTarget, k);
+
+    // The golden contour is geometry, not a line, so it has to be rebuilt when
+    // the zoom has changed enough for its fixed width to look wrong.
+    if (this.selected && this.selectionLine) {
+      const used = this.selectionWidthUsed || 1;
+      if (Math.abs(this.#selectionWidth() / used - 1) > 0.18) this.#rebuildSelectionLines();
+    }
 
     if (this.period && this.copyGroups.plus.length) {
       // The camera lives in [-period/2, period/2]. Whatever the side, the pair

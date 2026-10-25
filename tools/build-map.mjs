@@ -42,6 +42,62 @@ function normalizeLongitude(lon, lonMin) {
   return ((((lon - lonMin) % span) + span) % span) + lonMin;
 }
 
+/**
+ * Rings that cross the antimeridian (the western Aleutians, Chukotka) come out
+ * of Natural Earth with a 360-degree jump between two neighbouring vertices.
+ * A boolean union reads that jump literally and returns a ring a whole world
+ * wide but a fraction of a degree tall — which was drawn as a long straight
+ * line across North America. Unwrapping point by point and putting the ring
+ * back next to the rest of its country keeps it a small island.
+ */
+function unwrapRing(ring) {
+  const out = [];
+  let prev = null;
+  for (const [lon, lat] of ring) {
+    let value = lon;
+    if (prev !== null) {
+      while (value - prev > 180) value -= 360;
+      while (prev - value > 180) value += 360;
+    }
+    out.push([value, lat]);
+    prev = value;
+  }
+  const mean = out.reduce((acc, point) => acc + point[0], 0) / out.length;
+  const turn = Math.round(mean / 360) * 360;
+  return turn ? out.map(([lon, lat]) => [lon - turn, lat]) : out;
+}
+
+/**
+ * Cuts a lon/lat ring to the map box *before* it is projected. The projector
+ * wraps longitudes onto the box, so a ring that straddles the box edge (many
+ * Aleutian islets sit exactly on the -170 meridian) used to be torn apart:
+ * half of its points landed on the far right of the map, half on the left, and
+ * the ring closed as a band a whole map wide with a straight edge. That band
+ * was the long line the player saw across North America, and it also produced
+ * the sliver islands next to Alaska. Returns the pieces that survive.
+ */
+function clipToBox(ring, b) {
+  const { intersection } = polygonClipping;
+  const box = [[
+    [b.lonMin, b.latMin],
+    [b.lonMax, b.latMin],
+    [b.lonMax, b.latMax],
+    [b.lonMin, b.latMax],
+    [b.lonMin, b.latMin],
+  ]];
+  const closed = [...ring];
+  const first = closed[0];
+  const last = closed[closed.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) closed.push([first[0], first[1]]);
+  try {
+    return intersection([[closed]], box)
+      .map((poly) => poly[0].slice(0, -1))
+      .filter((piece) => piece.length >= 3);
+  } catch {
+    return [];
+  }
+}
+
 // Sutherland-Hodgman clipping of a ring against an axis-aligned box in lon/lat space.
 function clipRing(rawRing, b) {
   const ring = rawRing.map(([lon, lat]) => [normalizeLongitude(lon, b.lonMin), lat]);
@@ -584,7 +640,12 @@ function buildAmerica(topo) {
     const realUnits = realCode ? admin1Table[realCode] : null;
     if (realUnits?.length && realGroups) {
       const cells = admin1Cells({
-        units: realUnits,
+        // Units are cut to the map in lon/lat space: a unit ring that crosses
+        // the map edge (see clipToBox) must be split, not wrapped.
+        units: realUnits.map((unit) => ({
+          ...unit,
+          rings: unit.rings.flatMap((ring) => clipToBox(unwrapRing(ring), bounds)),
+        })),
         groups: realGroups,
         project: (lon, lat) => project(normalizeLongitude(lon, bounds.lonMin), lat),
         tolerance: 0.01,
@@ -618,7 +679,8 @@ function buildAmerica(topo) {
       if (!features.length) missing.push(`${group[0].id}: no feature "${source}"`);
       for (const f of features) {
         for (const poly of collectPolygons(f.geometry)) {
-          for (const ring of poly) {
+          for (const rawRing of poly) {
+           for (const ring of clipToBox(unwrapRing(rawRing), bounds)) {
             let pts = ring.map(toProjected);
             if (pts.length < 3) continue;
             // Keep a ring only in the province(s) whose part of the country it
@@ -654,6 +716,7 @@ function buildAmerica(topo) {
               if (ringArea(cell) < 0.02) continue;
               province.rings.push(cell.map(([x, z]) => [round(x, 3), round(z, 3)]));
             }
+           }
           }
         }
       }

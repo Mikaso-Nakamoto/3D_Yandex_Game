@@ -1685,6 +1685,29 @@ test('the Atlantic map is no longer twice the size of Europe', () => {
   assert.ok(Math.max(...xs) < 12, 'America stays on its side of the ocean');
 });
 
+test('no map hides a sliver ring a whole continent wide', () => {
+  // Rings crossing the antimeridian used to be torn apart by the projector:
+  // a handful of Aleutian islets at ±179 came out as a band spanning the whole
+  // map with a straight edge, and the renderer drew that edge as a border — the
+  // long lines over North America the player could see. The map builders now
+  // cut rings in lon/lat space before projecting, so this must never return.
+  const americaMap = JSON.parse(readFileSync(new URL('../src/data/map-america.json', import.meta.url), 'utf8'));
+  for (const [name, file] of Object.entries({ europe: map, america: americaMap, atlantic: atlanticMap, world: worldMap })) {
+    for (const province of file.provinces) {
+      for (const ring of [...province.rings, ...(province.islands ?? [])]) {
+        const xs = ring.map(([x]) => x);
+        const zs = ring.map(([, z]) => z);
+        const width = Math.max(...xs) - Math.min(...xs);
+        const height = Math.max(...zs) - Math.min(...zs);
+        assert.ok(
+          !(width > file.width * 0.25 && height < 2),
+          `${name}/${province.id}: кольцо ${width.toFixed(1)}×${height.toFixed(2)} — щель через всю карту`,
+        );
+      }
+    }
+  }
+});
+
 test('the selected settings segment stays highlighted for string and boolean rules', () => {
   const rules = normalizeRules({ aiStyle: 'hard', aiEconomy: 'weak', neutrals: 'strong', startPaused: true, aiPassive: true });
   // Every option of a string rule: exactly the stored one matches.
