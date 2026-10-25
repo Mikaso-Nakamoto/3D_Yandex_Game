@@ -341,6 +341,9 @@ export function oppositeTarget(game, nation, step, taken, state = game.state) {
  * Every step also carries an `alt` — the same reward for a push the other way.
  */
 export function buildFocusChain(game, nation, scenarioId, state = game.state) {
+  // The lesson has three steps of its own; a fourth, unrelated ambition in the
+  // HUD is one more thing to read in the first thirty seconds of the game.
+  if (scenarioId === 'tutorial') return [];
   const baseId = scenarioId.split('-')[0];
   const authored = FOCUS_CHAINS[baseId]?.[nation.id] ?? [];
   const clean = authored.filter((step) => {

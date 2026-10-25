@@ -3111,18 +3111,6 @@ kbd {
 
 /* ---------------------------------------------------------------- short landscape phones */
 
-/* Short landscape windows wide enough to keep the journal: the ratio control
-   used to sit in that corner and landed on the last journal lines. It steps up
-   over the dock. Narrower windows hide the journal entirely (max-width: 900),
-   so there the old bottom-left placement still applies. */
-@media (max-height: 560px) and (orientation: landscape) and (min-width: 901px) {
-  .send-ratio {
-    left: auto;
-    right: 8px;
-    bottom: 184px;
-  }
-}
-
 @media (max-height: 560px) and (orientation: landscape) {
   .province-panel {
     left: 8px;
@@ -3191,13 +3179,31 @@ kbd {
     font-size: 10px;
   }
 
-  /* Keep the send-ratio control clear of the open province panel. */
+  /* The ratio control had three different homes in this mode and, in the end,
+     sat on top of the «Военный налог» button: 312 px from the left is exactly
+     where the centred order bar begins. It now lives right above that bar, in
+     the one strip of the screen nothing else claims. On a phone (where the
+     province card is 288 px wide and reaches the middle of the screen) the
+     strip only exists to the right of the card. */
   .send-ratio {
-    left: 312px;
+    left: 50%;
     right: auto;
-    transform: none;
-    bottom: 8px;
+    transform: translateX(-50%);
+    bottom: 62px;
     padding: 6px 9px;
+  }
+
+  /* A 288 px card from the left edge and a centred control meet at ~640 px of a
+     667 px screen: on the narrowest landscape phones the pill goes right. */
+  @media (max-width: 760px) {
+    .send-ratio {
+      left: auto;
+      right: 8px;
+      transform: none;
+      /* Below the «Военный налог» / «Приказ» column, which starts at 54 px and
+         reaches ~110 px on the right edge of a 375 px tall window. */
+      bottom: 8px;
+    }
   }
 
   .send-ratio .eyebrow {
@@ -5838,5 +5844,188 @@ kbd {
   .order-list {
     flex-direction: column;
     margin-bottom: 5px;
+  }
+}
+
+/* ---------------------------------------------------------------- К4: обучение
+   The lesson is a pill under the HUD and a cursor flying from one province to
+   another. Both are absolutely positioned over the map and never take a click:
+   the lesson must teach the drag, not intercept it. */
+
+.tut-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.tut-guide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.tut-guide line {
+  stroke: rgba(217, 180, 90, 0.9);
+  stroke-width: 2;
+  stroke-dasharray: 2 9;
+  stroke-linecap: round;
+}
+
+.tut-hand {
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 30px;
+  height: 30px;
+  color: var(--gold, #d9b45a);
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
+  will-change: transform;
+}
+
+.tut-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 2px solid rgba(217, 180, 90, 0.95);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.tut-bar {
+  position: absolute;
+  /* The same slot as the hint pill: one instruction at a time, and it is the
+     one the player must follow. */
+  top: calc(var(--hud-bottom, 56px) + 6px + var(--goal-extra, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(600px, calc(100vw - 24px));
+  padding: 7px 8px 7px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 180, 90, 0.55);
+  background: rgba(20, 16, 9, 0.94);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.tut-bar.hidden {
+  display: none;
+}
+
+.tut-step {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--gold, #d9b45a);
+  color: #10151f;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.tut-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tut-text {
+  font-size: 12.5px;
+  line-height: 1.25;
+  color: #f4ecda;
+}
+
+.tut-note {
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: rgba(226, 216, 194, 0.68);
+}
+
+.tut-note:empty {
+  display: none;
+}
+
+.tut-note.is-good {
+  color: #9fd9a6;
+}
+
+.tut-note.is-bad {
+  color: #e8a3a3;
+}
+
+.tut-skip {
+  flex: none;
+  margin-left: 4px;
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: rgba(226, 216, 194, 0.7);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tut-skip:hover {
+  color: #f4ecda;
+  border-color: rgba(217, 180, 90, 0.55);
+}
+
+/* The one control the lesson points at breathes, so «нажмите вот это» needs no
+   second sentence. */
+.tut-target {
+  animation: tut-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes tut-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 180, 90, 0.55);
+    border-color: rgba(217, 180, 90, 0.95);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(217, 180, 90, 0);
+    border-color: rgba(217, 180, 90, 0.95);
+  }
+}
+
+/* The ordinary hint and «Сейчас» pills would sit on top of the lesson. */
+#screen-game.is-tutorial .hint-bar,
+#screen-game.is-tutorial .now-bar {
+  display: none;
+}
+
+/* The offer card is the hero of step two: it moves below the lesson pill
+   instead of hiding under it. */
+#screen-game.is-tutorial #offer-card {
+  top: calc(var(--hud-bottom, 56px) + 66px + var(--goal-extra, 0px));
+}
+
+@media (max-width: 560px), (max-height: 520px) {
+  .tut-bar {
+    gap: 7px;
+    padding: 6px 7px;
+    border-radius: 10px;
+  }
+
+  .tut-text {
+    font-size: 11.5px;
+  }
+
+  .tut-skip {
+    font-size: 10px;
+    padding: 3px 7px;
   }
 }

@@ -74,7 +74,7 @@ export class LabelLayer {
     }
   }
 
-  update(world, game, selectedId, hoveredId = null) {
+  update(world, game, selectedId, hoveredId = null, focusId = null) {
     if (!this.visible || !game) return;
 
     const candidates = [];
@@ -87,13 +87,15 @@ export class LabelLayer {
       const province = game.state.provinces[id];
       if (!province) continue;
       const important =
-        id === selectedId || id === hoveredId
-          ? 3
-          : province.owner === game.state.nationId
-            ? 2
-            : province.owner
-              ? 1
-              : 0;
+        id === focusId
+          ? 4
+          : id === selectedId || id === hoveredId
+            ? 3
+            : province.owner === game.state.nationId
+              ? 2
+              : province.owner
+                ? 1
+                : 0;
       candidates.push({ id, item, pos, important, area: item.area });
     }
 

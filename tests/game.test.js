@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/game/game.js';
-import { SCENARIOS } from '../src/data/scenarios.js';
+import { SCENARIOS, PLAYABLE_SCENARIOS } from '../src/data/scenarios.js';
 import { normalizeRules, DEFAULT_RULES, AI_STYLE, AI_ECONOMY, NEUTRAL_STRENGTH, ruleOptionMatches } from '../src/game/rules.js';
 import { BAL } from '../src/game/balance.js';
 import { offersVerb, offerSentence, marchesVerb, provincesCount, nationsCount } from '../src/game/text.js';
@@ -1416,6 +1416,9 @@ test('a column that cannot turn back does not capture after the treaty', () => {
 
 test('every nation starts with a focus chain that points at foreign land', () => {
   for (const scenario of SCENARIOS) {
+    // The lesson has no ambitions on purpose (К4): its three steps are the whole
+    // HUD story, and the chip is hidden while it runs.
+    if (scenario.tutorial) continue;
     const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map: mapFor(scenario), seed: 5 });
     for (const nation of game.nations) {
       // The player still has to pick a road, so the first step is a pair.
@@ -1464,6 +1467,7 @@ test('the player picks a direction and the other road disappears', () => {
 
 test('every fork offers two different provinces and the AI never waits', () => {
   for (const scenario of SCENARIOS) {
+    if (scenario.tutorial) continue;
     const game = new Game({ scenarioId: scenario.id, nationId: scenario.nations[0].id, map: mapFor(scenario), seed: 3 });
     let forks = 0;
     for (const nation of game.nations) {
@@ -2752,4 +2756,95 @@ test('the suggested order answers the situation and names a reason', () => {
   assert.equal(waiting.ready, false);
   assert.equal(waiting.kind, 'tax', 'the one that returns first');
   assert.ok(waiting.cooldown > 0);
+});
+
+// ---------------------------------------------------------------- обучение (К4)
+
+const tutorialGame = (seed = 4) =>
+  new Game({
+    scenarioId: 'tutorial',
+    nationId: 'FRA',
+    doctrineId: 'coin',
+    map,
+    seed,
+    rules: { ...AUTO_ON, neutrals: 'weak', peaceUntilFirstWar: true, aiStyle: 'calm' },
+  });
+
+test('the lesson is a real scenario that the menu never offers', () => {
+  const scenario = SCENARIOS.find((s) => s.id === 'tutorial');
+  assert.ok(scenario, 'tutorial scenario exists');
+  assert.equal(scenario.tutorial, true);
+  assert.equal(scenario.nations.find((n) => n.id === 'FRA').provinces.length, 3);
+  assert.ok(PLAYABLE_SCENARIOS.every((s) => s.id !== 'tutorial'), 'not a menu card');
+  assert.equal(PLAYABLE_SCENARIOS.length, SCENARIOS.length - 1);
+});
+
+test('the lesson aim is Belgium and it has its own clock', () => {
+  const game = tutorialGame();
+  assert.equal(game.state.goal.text, 'Взять Бельгию');
+  assert.equal(game.state.goal.limit, 300);
+  assert.equal(game.state.goal.count, false, 'a named aim is not counted in the pill');
+  assert.equal(game.state.goal.target, 4, 'three provinces in, one out');
+  // An ordinary scenario still gets the eight-minute clock and the counted aim.
+  const ordinary = makeGame();
+  assert.equal(ordinary.state.goal.limit, 480);
+  assert.equal(ordinary.state.goal.text, 'Удержать 4 провинции 3 мин');
+  assert.equal(ordinary.state.goal.count, true);
+});
+
+test('the first march of the lesson cannot be lost', () => {
+  const game = tutorialGame();
+  const odds = game.attackOdds('FR', 'BE', 0.5);
+  assert.ok(odds, 'Belgium is reachable from France');
+  assert.equal(odds.chance, 1, `a half army should be enough (${odds.chance})`);
+  assert.ok(odds.seconds < 6, `the march is short (${odds.seconds}s)`);
+});
+
+test('the aim of the lesson waits for the third step and then pays the victory', () => {
+  const game = tutorialGame();
+  let ended = null;
+  game.on((type, payload) => {
+    if (type === 'end') ended = payload;
+  });
+  assert.deepEqual(game.tutorial, { step: 1, done: false });
+  const sent = game.sendTroops('FR', 'BE');
+  assert.equal(sent.ok, true);
+  // Long enough for the column to arrive and the battle to resolve.
+  for (let i = 0; i < 400 && game.province('BE').owner !== 'FRA'; i += 1) game.update(0.1);
+  assert.equal(game.province('BE').owner, 'FRA', 'Belgium was taken');
+  assert.equal(game.state.status, 'playing', 'the results screen does not cut the lesson');
+  assert.equal(game.state.goal.progress, 4, 'but the aim already counts it');
+  assert.equal(ended, null);
+
+  assert.equal(game.setTutorialStep(3), true);
+  assert.deepEqual(game.tutorial, { step: 3, done: false });
+  assert.equal(game.finishTutorial(), true);
+  assert.deepEqual(game.tutorial, { step: 3, done: true });
+  assert.equal(game.state.status, 'goal');
+  assert.equal(ended?.result, 'goal');
+});
+
+test('finishing the lesson without the province does not fake a victory', () => {
+  const game = tutorialGame();
+  assert.equal(game.finishTutorial(), true);
+  assert.equal(game.state.status, 'playing', 'the aim is still open');
+  assert.equal(game.state.goal.progress, 3);
+  // Once the province is taken the ordinary goal check closes the match.
+  game.state.provinces.BE.owner = 'FRA';
+  game.update(0.1);
+  assert.equal(game.state.status, 'goal');
+});
+
+test('ordinary matches have no lesson state at all', () => {
+  assert.equal(makeGame().state.tutorial, null);
+  assert.equal(makeGame().setTutorialStep(2), false);
+  assert.equal(makeGame().finishTutorial(), false);
+});
+
+test('a saved lesson resumes on the same step', () => {
+  const game = tutorialGame();
+  game.setTutorialStep(2);
+  const restored = Game.deserialize(game.serialize(), map);
+  assert.equal(restored.tutorial.step, 2);
+  assert.equal(restored.tutorial.done, false);
 });

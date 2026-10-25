@@ -68,6 +68,9 @@ export class Game {
       nextAssaultId: 1,
       nextLogId: 1,
       playerAggro: false,
+      // К4: the lesson counts its three steps itself, and the aim of the match
+      // waits for them (see #checkGoal). Null in every ordinary scenario.
+      tutorial: sc.tutorial ? { step: 1, done: false } : null,
       rng: this.rng.s,
     };
 
@@ -2761,6 +2764,45 @@ export class Game {
     }
   }
 
+  // ---------------------------------------------------------------- tutorial
+
+  /**
+   * К4: the lesson's current step (1 — перетащить армию, 2 — ответить на
+   * предложение, 3 — нажать «Приказ»). Kept on the state so a reloaded page
+   * resumes the same step, and so the aim can wait for it.
+   */
+  get tutorial() {
+    return this.state.tutorial ?? null;
+  }
+
+  setTutorialStep(step) {
+    const t = this.state.tutorial;
+    if (!t || t.done) return false;
+    const next = Math.max(1, Math.min(3, Math.round(Number(step) || 1)));
+    if (next === t.step) return false;
+    t.step = next;
+    this.#log(`Обучение: шаг ${next} из 3`, 'info');
+    this.#emit('tutorialStep', { step: next });
+    return true;
+  }
+
+  /**
+   * The third step is done: the lesson is over, and the aim is checked right
+   * away. If the target province is already ours, this is the victory the
+   * tutorial promised; if the march is still on the road, the aim stays open
+   * and completes on arrival like in any other match.
+   */
+  finishTutorial() {
+    const t = this.state.tutorial;
+    if (!t || t.done) return false;
+    t.done = true;
+    t.step = 3;
+    this.#log('Обучение пройдено: армия, договор и приказ', 'good');
+    this.#emit('tutorialDone', {});
+    this.#checkGoal();
+    return true;
+  }
+
   /** К2: the aim of a short match, built by the same code as the preview. */
   #buildGoal(state = this.state) {
     return buildGoal({
@@ -2778,6 +2820,10 @@ export class Game {
     if (!goal || s.status !== 'playing') return;
     const owned = this.#provinceCount(s.nationId);
     goal.progress = Math.min(owned, goal.target);
+    // К4: in the lesson the province is taken as step one, so the aim stays
+    // open until «Приказ» is pressed — otherwise the results screen interrupts
+    // step two of a three-step tutorial. finishTutorial() re-runs this check.
+    if (s.tutorial && !s.tutorial.done) return;
     if (owned < goal.target) {
       goal.holdSince = null;
       return;

@@ -674,6 +674,79 @@ const world1939 = {
 
 SCENARIOS.push(concertAtlantic, eve1939Atlantic, mosaicAtlantic, civil1861, world1939);
 
+/**
+ * К4: the first three minutes of the game. Three provinces, one short march and
+ * an aim a newcomer can repeat from memory: take Belgium. The neighbours are
+ * real nations with real armies, but they are calm and the map is at peace
+ * until the player's own war — a lesson interrupted by somebody else's war
+ * teaches «this game is chaos», which is exactly what round 27 asked to fix.
+ *
+ * `tutorial: true` switches on three things in the app: the match starts on its
+ * own, the aim waits for the three steps of the lesson, and the scenario is not
+ * listed in the menu (it is a door, not a room).
+ */
+const tutorial = {
+  id: 'tutorial',
+  theatre: 'europe',
+  tutorial: true,
+  title: 'Первые шаги',
+  era: '1815',
+  startYear: 1815,
+  startMonth: 6,
+  monthsPerSecond: 0.25,
+  difficulty: 'Низко',
+  // Three provinces in, one province out: «Взять Бельгию» is 0/1, not 0/6.
+  // Five minutes on the clock, while the lesson itself takes about forty
+  // seconds: a first-timer is allowed to stare at the map, read the pill twice
+  // and drag a couple of times without the very first match expiring under him.
+  goal: { kind: 'capture', add: 1, limit: 300, text: 'Взять Бельгию' },
+  blurb: 'Три минуты и один поход: возьмите Бельгию и посмотрите, из чего состоит партия.',
+  nations: [
+    {
+      id: 'FRA',
+      army: 1.6,
+      name: 'Королевство Франция', short: 'Франция', color: '#5a4fa8', capital: 'FR',
+      provinces: ['FR', 'LU', 'CH'], ai: { aggression: 0.15, eco: 1.0 },
+    },
+    {
+      id: 'ESP',
+      army: 0.8,
+      name: 'Королевство Испания', short: 'Испания', color: '#9a6a20', capital: 'ES',
+      provinces: ['ES', 'PT'], ai: { aggression: 0.15, eco: 1.0 },
+    },
+    {
+      id: 'ITA',
+      army: 0.8,
+      name: 'Королевство Италия', short: 'Италия', color: '#4f8b63', capital: 'IT',
+      provinces: ['IT', 'SI'], ai: { aggression: 0.15, eco: 1.0 },
+    },
+    {
+      id: 'PRU',
+      army: 0.9,
+      name: 'Королевство Пруссия', short: 'Пруссия', color: '#4c5548', capital: 'DE',
+      provinces: ['DE'], ai: { aggression: 0.15, eco: 1.0 },
+    },
+    {
+      id: 'GBR',
+      army: 0.9,
+      name: 'Британская империя', short: 'Британия', color: '#b04a4a', capital: 'GB',
+      provinces: ['GB', 'IE'], ai: { aggression: 0.15, eco: 1.0 },
+    },
+  ],
+  // Belgium is the lesson: a light garrison, no fort, and not a nation, so the
+  // first march cannot turn into a war with a great power.
+  neutrals: [{ province: 'BE', garrison: 0.45, fort: 0 }],
+  balance: { aiAggression: 0.2, aiEco: 0.9, neutralStrength: 0.7 },
+};
+
+SCENARIOS.push(tutorial);
+
+/** The lesson match, by id, for the app and the tests. */
+export const TUTORIAL_ID = 'tutorial';
+
+/** Scenarios a player may pick in the menu: everything but the lesson. */
+export const PLAYABLE_SCENARIOS = SCENARIOS.filter((scenario) => !scenario.tutorial);
+
 // Never two nations of the same hue on one map: on the Atlantic map the USA and
 // the French Third Republic were both blue, and Canada wore Britain's exact red.
 // Each scenario repairs only the pairs that actually clash. See palette.js.

@@ -2,7 +2,7 @@ import { World } from '../render/world.js';
 import { LabelLayer } from '../render/labels.js';
 import { ArrowLayer } from '../render/arrows.js';
 import { Game } from '../game/game.js';
-import { SCENARIOS, DOCTRINES, THEATRES, getScenario, hasScenario } from '../data/scenarios.js';
+import { SCENARIOS, PLAYABLE_SCENARIOS, TUTORIAL_ID, DOCTRINES, THEATRES, getScenario, hasScenario } from '../data/scenarios.js';
 import { BAL, UPGRADES, ORDERS } from '../game/balance.js';
 import { assignNeutralColors } from '../data/neutral.js';
 import { populationIndex } from '../data/population.js';
@@ -18,6 +18,7 @@ import {
 import { platform } from '../platform/yandex.js';
 import { sfx } from '../audio.js';
 import { icon } from './icons.js';
+import { TutorialUI } from './tutorial.js';
 import { buildGoal, goalProgressText } from '../game/goal.js';
 import { offerTitle, provincesCount, nationsCount, plural } from '../game/text.js';
 
@@ -27,6 +28,21 @@ const TIPS_KEY = 'crowns.tips.v1';
 const DIFFICULTY_LEVEL = { 'Низко': 1, 'Средне': 2, 'Высоко': 3 };
 // К2.2: the three stars, in the order `Game#score()` builds them.
 const STAR_LABELS = ['цель', 'земли', 'слово'];
+// К4: the lesson runs on its own rules and never writes them back into the
+// player's settings. Peace until the player's own war, a quiet AI, no automatic
+// helpers: the first drag and the first order must be the player's own.
+const TUTORIAL_RULES = {
+  aiStyle: 'calm',
+  peaceUntilFirstWar: true,
+  aiPassive: false,
+  neutrals: 'weak',
+  mode: 'goal',
+  startPaused: false,
+  autoPause: true,
+  autoBuild: false,
+  autoSend: false,
+};
+const TUTORIAL_DONE_TIP = 'tutorial-done';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -60,6 +76,7 @@ export class App {
     this.world.routeProvider = (from, to) => this.game?.routeBetween(from, to) ?? null;
     this.labels = new LabelLayer($('#labels'), this.map);
     this.labels.setVisible(false);
+    this.tutorialUI = new TutorialUI({ world: this.world, onSkip: () => this.#leaveTutorial() });
 
     this.screen = 'menu';
     this.game = null;
@@ -73,6 +90,9 @@ export class App {
     this.lastSpeed = 1;
     this.preferredRatio = 0.5;
     this.pressing = false;
+    // К4: null outside the lesson; otherwise 'drag' | 'capture' | 'offer' | 'order'.
+    this.tutorialPhase = null;
+    this.tutorialOfferTimer = null;
     this.offerSignature = '';
     this.hudTimer = 0;
     this.saveTimer = 10;
@@ -220,7 +240,7 @@ export class App {
    * first-timer into a one-province minor.
    */
   #playNow() {
-    const scenario = SCENARIOS.find((s) => (s.theatre ?? 'europe') === this.mapMode) ?? SCENARIOS[0];
+    const scenario = PLAYABLE_SCENARIOS.find((s) => (s.theatre ?? 'europe') === this.mapMode) ?? PLAYABLE_SCENARIOS[0];
     sfx.select();
     this.scenario = scenario;
     const ranked = scenario.nations
@@ -234,7 +254,8 @@ export class App {
   #buildMenu() {
     const list = $('#scenario-list');
     list.innerHTML = '';
-    for (const scenario of SCENARIOS.filter((s) => (s.theatre ?? 'europe') === this.mapMode)) {
+    // The lesson is a door, not a room: it is never offered as a scenario card.
+    for (const scenario of PLAYABLE_SCENARIOS.filter((s) => (s.theatre ?? 'europe') === this.mapMode)) {
       const level = DIFFICULTY_LEVEL[scenario.difficulty] ?? 2;
       const dots = Array.from({ length: 3 }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
       const best = Math.max(0, Math.min(3, Number(this.settings.stars?.[scenario.id]) || 0));
@@ -282,6 +303,10 @@ export class App {
 
   showMenu() {
     this.game = null;
+    this.tutorialPhase = null;
+    clearTimeout(this.tutorialOfferTimer);
+    this.tutorialUI?.hide();
+    $('#screen-game')?.classList.remove('is-tutorial');
     this.autoFrom = null;
     this.panelFolded = false;
     clearTimeout(this.panelFoldTimer);
@@ -634,9 +659,10 @@ export class App {
 
   // ---------------------------------------------------------------- game lifecycle
 
-  startGame() {
+  startGame(overrides = {}) {
     if (!this.selectedNation) return;
-    const rules = normalizeRules(this.pendingRules);
+    // The lesson passes its own rules and leaves the player's settings alone.
+    const rules = normalizeRules(overrides.rules ?? this.pendingRules);
     const game = new Game({
       scenarioId: this.scenario.id,
       nationId: this.selectedNation,
@@ -647,7 +673,7 @@ export class App {
     });
     game.setSendRatio(this.preferredRatio);
     this.#attachGame(game);
-    this.pendingRules = normalizeRules(rules);
+    if (!overrides.rules) this.pendingRules = normalizeRules(rules);
     this.#enterGameScreen();
     // The opening pause is for a first look at the map. A scenario the player
     // already finished is familiar, so it starts on its own — К1.1.
@@ -660,6 +686,7 @@ export class App {
       this.lastSpeed = 1;
       this.setSpeed(1);
     }
+    if (this.game.state.tutorial) this.#beginTutorial();
   }
 
   #attachGame(game) {
@@ -683,6 +710,7 @@ export class App {
         if (payload.to === game.state.nationId) {
           sfx.capture();
           this.#toast(`Провинция ${game.provinceName(payload.provinceId)} взята`, 'good');
+          this.#tutorialEvent('capture');
           if (this.selectedProvince === payload.provinceId) this.#renderProvincePanel();
           this.#tip(
             'capture',
@@ -738,9 +766,11 @@ export class App {
         this.#renderOffers();
         // An offer has a countdown and only the player can answer it.
         this.#autoPause(null, { force: true });
+        this.#tutorialEvent('offer');
       }
       if (type === 'offerClosed') {
         this.#renderOffers();
+        this.#tutorialEvent('offerClosed');
         if (payload.accepted) {
           const kind = payload.offer?.kind;
           this.#toast(kind === 'tribute' ? 'Дань получена: мир с уступкой' : 'Мир заключён: перемирие', 'good');
@@ -866,6 +896,7 @@ export class App {
    */
   #onboard() {
     this.onboardTimers?.forEach(clearTimeout);
+    if (this.game?.state.tutorial) return;
     const timers = [];
     timers.push(
       setTimeout(() => {
@@ -903,21 +934,35 @@ export class App {
     const timeout = result === 'timeout';
     const won = victory || goalMet;
     const goalText = this.game.state.goal?.text ?? '';
+    const tutorial = Boolean(game.state.tutorial);
+    if (tutorial) this.#markTutorialDone();
     $('#end-emblem').innerHTML = icon(timeout ? 'clock' : victory || goalMet ? 'crown' : 'sword', 36);
     const theatre = THEATRES[this.scenario?.theatre ?? 'europe'];
     const atlantic = theatre?.id === 'atlantic';
     const genitive = atlantic ? 'Атлантики' : 'Европы';
-    $('#end-eyebrow').textContent = victory
-      ? atlantic
-        ? 'Два берега ваши'
-        : 'Европа ваша'
-      : goalMet
+    $('#end-eyebrow').textContent = tutorial
+      ? 'Обучение пройдено'
+      : victory
+        ? atlantic
+          ? 'Два берега ваши'
+          : 'Европа ваша'
+        : goalMet
         ? 'Цель выполнена'
         : timeout
           ? 'Время вышло'
           : 'Держава пала';
-    $('#end-title').textContent = victory ? 'Победа' : goalMet ? 'Цель выполнена' : timeout ? 'Время вышло' : 'Поражение';
-    $('#end-text').textContent = victory
+    $('#end-title').textContent = tutorial
+      ? 'Готово'
+      : victory
+        ? 'Победа'
+        : goalMet
+          ? 'Цель выполнена'
+          : timeout
+            ? 'Время вышло'
+            : 'Поражение';
+    $('#end-text').textContent = tutorial
+      ? 'Армия, договор и приказ — это вся игра. Бельгия ваша. Дальше настоящая партия: игра сама покупает улучшения и шлёт излишки, вы двигаете армии и решаете, с кем воевать.'
+      : victory
       ? `Каждая провинция ${genitive} под вашей короной. Полное завоевание — единственный способ победить, и у вас это получилось.`
       : goalMet
         ? `${goalText} — сделано за ${this.#durationText(this.game.state.time)}. Дальше можно взять всю карту в режиме «Завоевание».`
@@ -977,15 +1022,172 @@ export class App {
             .join('')}`;
       });
     });
+    $('#btn-again').textContent = tutorial ? 'Дальше: настоящая партия' : 'Сыграть ещё';
+    this.tutorialUI.hide();
+    $('#screen-game')?.classList.remove('is-tutorial');
     $('#screen-end').classList.remove('hidden');
     if (won) sfx.victory();
     else sfx.defeat();
-    setTimeout(() => platform.showInterstitial(), 1600);
+    // An ad in the minute after the first tap is how a new player leaves.
+    if (!tutorial) setTimeout(() => platform.showInterstitial(), 1600);
   }
 
   #restart() {
     if (!this.scenario || !this.selectedNation) return;
+    // «Сыграть ещё» after the lesson must start the game, not repeat the lesson.
+    if (this.scenario.tutorial) {
+      this.#markTutorialDone();
+      this.#playNow();
+      return;
+    }
     this.startGame();
+  }
+
+  // ---------------------------------------------------------------- обучение (К4)
+
+  /**
+   * Called once the platform has had its say (a cloud save may exist): the
+   * lesson is for a player who has never seen the game, so a save or a finished
+   * lesson cancels it. The flag lives in `crowns.tips.v1` next to the other
+   * one-time tips, as the plan requires.
+   */
+  ready() {
+    if (!this.#shouldTutorial()) return;
+    this.#startTutorial();
+  }
+
+  #shouldTutorial() {
+    if (this.seenTips.has(TUTORIAL_DONE_TIP)) return false;
+    let saved = this.#readSave();
+    // A save from the lesson itself (the page was reloaded mid-lesson, and
+    // `beforeunload` wrote it) is not a reason to skip the teaching: the match
+    // is three minutes old, so the lesson starts over instead of resuming as an
+    // unexplained scenario with a clock.
+    if (saved?.game?.state?.tutorial) {
+      try {
+        localStorage.removeItem(SAVE_KEY);
+      } catch {
+        /* storage may be unavailable */
+      }
+      saved = null;
+      this.hasSave = false;
+      $('#btn-continue')?.classList.add('hidden');
+    }
+    if (saved) return false;
+    this.hasSave = false;
+    if ((this.settings.played?.length ?? 0) > 0) return false;
+    return hasScenario(TUTORIAL_ID);
+  }
+
+  #startTutorial() {
+    this.scenario = getScenario(TUTORIAL_ID);
+    this.selectedNation = 'FRA';
+    this.doctrine = 'coin';
+    this.mapMode = 'europe';
+    this.setTheatre('europe');
+    // Own rules, not the player's: a lesson must not rewrite the settings of
+    // the match that follows it.
+    this.startGame({ rules: TUTORIAL_RULES });
+  }
+
+  #markTutorialDone() {
+    if (this.seenTips.has(TUTORIAL_DONE_TIP)) return;
+    this.seenTips.add(TUTORIAL_DONE_TIP);
+    try {
+      localStorage.setItem(TIPS_KEY, JSON.stringify([...this.seenTips]));
+    } catch {
+      /* storage may be unavailable: the lesson still will not repeat this session */
+    }
+  }
+
+  /** First step: the hand, the pill and the camera on both ends of the gesture. */
+  #beginTutorial() {
+    this.tutorialPhase = 'drag';
+    this.game.setTutorialStep(1);
+    $('#screen-game').classList.add('is-tutorial');
+    this.tutorialUI.show(1, 'Зажмите Францию и отпустите на Бельгии');
+    this.tutorialUI.note('Войска пойдут сами — бой решится по прибытии', 'info');
+    this.tutorialUI.setHand('FR', 'BE');
+    // A golden ring, the same one the nation picker uses: the hand shows the
+    // gesture, the ring shows the destination.
+    this.world.setAccent(['BE']);
+    // The ordinary camera frames the realm; the lesson needs the target too, and
+    // Belgium is a small country: «where do I let go» has to be answered by the
+    // picture, not by the hint text on top of it.
+    this.world.focusNation(['FR', 'BE', 'LU'], 0.62);
+  }
+
+  /** The three steps. Any of them may be skipped by simply doing it earlier. */
+  #tutorialEvent(kind) {
+    const game = this.game;
+    if (!game?.state.tutorial || game.state.tutorial.done) return;
+    if (this.screen !== 'game') return;
+    if (kind === 'drag' && this.tutorialPhase === 'drag') {
+      this.tutorialPhase = 'capture';
+      this.game.setTutorialStep(1);
+      this.tutorialUI.clearHand();
+      this.world.setAccent([]);
+      this.tutorialUI.show(1, 'Колонна в походе — дальше она дойдёт сама');
+      // The offer must not depend on a battle the player may have picked badly.
+      clearTimeout(this.tutorialOfferTimer);
+      this.tutorialOfferTimer = setTimeout(() => this.#tutorialOffer(), 12000);
+    }
+    if (kind === 'capture' && this.tutorialPhase === 'capture') {
+      clearTimeout(this.tutorialOfferTimer);
+      this.tutorialOfferTimer = setTimeout(() => this.#tutorialOffer(), 900);
+    }
+    if (kind === 'offer' && this.tutorialPhase === 'offer') {
+      this.tutorialUI.highlight('#offer-card .offer-row');
+    }
+    if (kind === 'offerClosed' && this.tutorialPhase === 'offer') {
+      this.#tutorialAfterOffer();
+    }
+    if (kind === 'order' && this.tutorialPhase === 'order') {
+      this.tutorialPhase = null;
+      this.tutorialUI.hide();
+      this.#markTutorialDone();
+      // The aim of the lesson is checked last, so the results screen does not
+      // interrupt step two of three.
+      this.game.finishTutorial();
+    }
+  }
+
+  /** Step two: a scripted pact offer from a neighbour who has nothing to lose. */
+  #tutorialOffer() {
+    clearTimeout(this.tutorialOfferTimer);
+    this.tutorialOfferTimer = null;
+    const game = this.game;
+    if (!game?.state.tutorial || game.state.tutorial.done) return;
+    if (this.tutorialPhase !== 'capture') return;
+    this.tutorialPhase = 'offer';
+    game.setTutorialStep(2);
+    this.tutorialUI.show(2, 'Вам предлагают пакт о ненападении — решать вам');
+    const neighbours = ['ESP', 'ITA', 'PRU', 'GBR'].filter((id) => game.state.nations[id]?.alive);
+    const offered = neighbours.some((id) => game.offerPeace(id, 'pact').ok);
+    if (!offered) this.#tutorialAfterOffer();
+  }
+
+  /** Step three: the one button the whole game is built around. */
+  #tutorialAfterOffer() {
+    const game = this.game;
+    if (!game?.state.tutorial || game.state.tutorial.done) return;
+    this.tutorialPhase = 'order';
+    game.setTutorialStep(3);
+    this.tutorialUI.show(3, 'Нажмите «Приказ»: игра сама выберет, что нужнее');
+    this.tutorialUI.highlight('#btn-order');
+    // An offer pauses the match; the lesson resumes it without a second click.
+    if (game.state.speed === 0) this.setSpeed(this.lastSpeed || 1);
+  }
+
+  /** «Другая партия»: leave the lesson for the menu, and never force it again. */
+  #leaveTutorial() {
+    clearTimeout(this.tutorialOfferTimer);
+    this.tutorialOfferTimer = null;
+    this.tutorialPhase = null;
+    this.tutorialUI.hide();
+    $('#screen-game').classList.remove('is-tutorial');
+    this.#markTutorialDone();
+    this.showMenu();
   }
 
   // ---------------------------------------------------------------- screens
@@ -1165,6 +1367,7 @@ export class App {
     this.#toast(`${fmt(result.amount)} в походе${result.sea ? ' морем' : ''}${hop}${transit}`, 'good');
     this.world.setValidTargets([]);
     this.world.setSelected(from);
+    this.#tutorialEvent('drag');
     // Sending troops must not pop the province card over the map every time.
     if (!document.querySelector('#province-panel').classList.contains('hidden')) this.#renderProvincePanel();
     this.#updateHud();
@@ -1224,6 +1427,17 @@ export class App {
   #hover(provinceId) {
     this.hoveredProvince = provinceId || null;
     if (this.world.dragFrom) {
+      this.#tooltip(null);
+      return;
+    }
+    // The hover card is a rectangle of numbers: under a treaty offer (which
+    // covers the same corner of the map) it was clipped to two words, and in
+    // the lesson it competes with the one instruction the player must read.
+    if (this.game?.state.tutorial && !this.game.state.tutorial.done) {
+      this.#tooltip(null);
+      return;
+    }
+    if (!$('#offer-card')?.classList.contains('hidden')) {
       this.#tooltip(null);
       return;
     }
@@ -1333,8 +1547,21 @@ export class App {
     spirit.classList.toggle('is-low', morale <= 40);
     spirit.classList.toggle('is-tired', exhaustion >= 45);
     this.#updateFocus();
-    $('#hud-progress-text').textContent = `${progress.owned}/${progress.total}`;
-    $('#hud-progress-fill').style.width = `${(progress.share * 100).toFixed(1)}%`;
+    // In a goal match the bar counts the aim, not the whole map: «3 из 4» next to
+    // a goal line that says the same thing is one story, while «3/43» above it
+    // was a second, contradictory one.
+    const goal = game.state.goal;
+    const goalMatch = Boolean(goal && goal.limit > 0);
+    const barShare = goalMatch ? Math.min(1, goal.progress / Math.max(1, goal.target)) : progress.share;
+    $('#hud-progress-text').textContent = goalMatch
+      ? `${Math.min(goal.progress, goal.target)}/${goal.target}`
+      : `${progress.owned}/${progress.total}`;
+    $('#hud-progress-fill').style.width = `${(barShare * 100).toFixed(1)}%`;
+    $('.progress-wrap')?.classList.toggle('is-goal', goalMatch);
+    $('.progress-wrap')?.setAttribute(
+      'title',
+      goalMatch ? `Цель партии: ${goal.text}` : 'Прогресс завоевания: сколько провинций карты ваши',
+    );
 
     for (const button of $('#speed-group').children) {
       const speed = Number(button.dataset.speed);
@@ -1377,7 +1604,9 @@ export class App {
     }
     const left = Math.max(0, Math.ceil(goal.limit - this.game.state.time));
     const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-    const progress = goalProgressText(goal);
+    // A named aim («Взять Бельгию») is already exact: «4 из 4» next to it is a
+    // second sentence about the same thing.
+    const progress = goal.count === false ? '' : goalProgressText(goal);
     // «Цель: взять ещё 6 провинций» — lower case after the colon.
     const aim = goal.text.charAt(0).toLowerCase() + goal.text.slice(1);
     const html = `${icon('flag', 13)}<span class="goal-aim-line">Цель: ${aim}</span><span class="goal-count">${progress}</span><span class="goal-clock">${icon('clock', 12)}${clock}</span>`;
@@ -2031,7 +2260,9 @@ export class App {
   #updateFocus() {
     const game = this.game;
     const chip = $('#btn-focus');
-    if (!game) {
+    // The lesson has no ambition chain: «Фокус выполнен» in the first seconds of
+    // the game would be a lie.
+    if (!game || game.state.tutorial) {
       chip.classList.add('hidden');
       return;
     }
@@ -2195,6 +2426,7 @@ export class App {
     }
     sfx.coin();
     this.#updateHud();
+    this.#tutorialEvent('order');
   }
 
   /**
@@ -2316,6 +2548,12 @@ export class App {
   }
 
   #toast(text, kind = 'info') {
+    // In the lesson the pill is the only narrator: a second floating layer of
+    // messages over a map the player is still learning to read is noise.
+    if (this.screen === 'game' && this.game?.state.tutorial && !this.game.state.tutorial.done) {
+      this.tutorialUI.note(text, kind);
+      return;
+    }
     const toast = document.createElement('div');
     toast.className = `toast ${kind}`;
     toast.textContent = text;
@@ -3405,7 +3643,11 @@ export class App {
         this.game.update(dt * (this.game.state.speed ?? 0));
       }
       this.#syncColors();
-      this.labels.update(this.world, this.game, this.selectedProvince, this.world.hovered);
+      // The lesson's target must keep its name even when a bigger neighbour
+      // claims the space: «отпустите на Бельгии» over an unlabelled province is
+      // the one instruction in the game that cannot be guessed.
+      const lessonTarget = this.tutorialPhase === 'drag' ? 'BE' : null;
+      this.labels.update(this.world, this.game, this.selectedProvince, this.world.hovered, lessonTarget);
       this.#syncArmies();
 
       this.hudTimer -= dt;
@@ -3424,6 +3666,7 @@ export class App {
         this.#syncNow();
       }
     }
+    if (this.screen === 'game') this.tutorialUI.frame(now);
     this.world.render();
     requestAnimationFrame(this.loop);
   }

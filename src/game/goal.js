@@ -26,10 +26,17 @@ export function buildGoal({ scenario, nationId, owners, mode = 'goal' }) {
     seconds: hold ? (def.seconds ?? 180) : 0,
     holdSince: null,
     progress: owned,
-    limit: mode === 'conquest' ? 0 : GOAL_LIMIT,
-    text: hold
-      ? `Удержать ${plural(target, 'провинцию', 'провинции', 'провинций')} ${Math.round((def.seconds ?? 180) / 60)} мин`
-      : `Взять ещё ${plural(target - owned, 'провинцию', 'провинции', 'провинций')}`,
+    // A scenario may shorten the clock (the tutorial is three minutes) or name
+    // the aim itself («Взять Бельгию»), because a lesson is about one province,
+    // not about «ещё 1 провинция».
+    limit: mode === 'conquest' ? 0 : (def.limit ?? GOAL_LIMIT),
+    // A hand-written aim counts itself in words; the counted form gets «N из M».
+    count: !def.text,
+    text:
+      def.text ??
+      (hold
+        ? `Удержать ${plural(target, 'провинцию', 'провинции', 'провинций')} ${Math.round((def.seconds ?? 180) / 60)} мин`
+        : `Взять ещё ${plural(target - owned, 'провинцию', 'провинции', 'провинций')}`),
   };
 }
 
