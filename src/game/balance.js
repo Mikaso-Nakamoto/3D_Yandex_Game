@@ -74,6 +74,10 @@ export const BAL = {
   aiPeaceChance: 0.12,
   warWearyMargin: 2.1,
   counterAttack: 0.05, // odds of the defender counter-attacking the attacker's home province
+  // К6.1: after «второй шанс» the AI leaves the reborn realm alone for this
+  // long. Without it the second chance lasted as long as the enemy column that
+  // had just taken the capital needed to turn around.
+  reviveGrace: 25,
   counterAttackMargin: 0.35, // share of the defender's surviving garrison that marches
   desertionBelow: 25, // morale level at which soldiers start slipping away
   desertionRate: 0.004, // share of the garrison lost per second at zero morale

@@ -2051,20 +2051,29 @@ kbd {
   text-align: center;
   max-width: 460px;
   /* К5 added two lines of meta (daily, stars, record, achievements, the
-     scenario it opened) and the buttons fell off a 720 px screen: the card
-     scrolls inside itself instead of growing the page. */
+     scenario it opened) and the buttons fell off a 720 px screen. К6 added a
+     third button, so the card is now a column: the story scrolls, the buttons
+     are always at the bottom and nothing is drawn under them. */
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - 32px);
+  overflow: hidden;
+}
+
+.end-body {
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(217, 180, 90, 0.4) transparent;
+  padding-right: 2px;
 }
 
 .end-card .end-actions {
-  position: sticky;
-  bottom: 0;
+  flex: 0 0 auto;
   padding-top: 10px;
-  background: linear-gradient(180deg, rgba(13, 21, 33, 0) 0%, rgba(13, 21, 33, 0.96) 40%);
+  margin-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .end-emblem {
@@ -2115,8 +2124,30 @@ kbd {
 
 .end-actions {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.end-buttons {
+  display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* «Сыграть ещё» на две строки — это кнопка, которая сломалась: подпись всегда
+   в одну строку, кнопки переносятся целиком. */
+.end-buttons .btn {
+  white-space: nowrap;
+}
+
+/* «Второй шанс» is the offer of this screen, so it takes its own row above the
+   pair instead of squeezing «Сыграть ещё» into two lines. */
+.end-buttons .btn.reward {
+  flex: 1 0 100%;
+  /* The offer goes first: a full-width row below the pair would push «В меню»
+     to a third row, and three rows of buttons is a menu, not a result. */
+  order: -1;
 }
 
 /* ---------------------------------------------------------------- responsive */
@@ -5794,6 +5825,64 @@ kbd {
   margin-bottom: 6px;
 }
 
+/* ---------------------------------------------------------------- К6: реклама */
+
+/* The rewarded «ускорить приказы» tile sits with the other orders but is not
+   one of them: gold tint, play icon, and the price written where the others
+   write «45 золота». */
+.order-ad {
+  border-color: rgba(217, 180, 90, 0.42);
+  background: linear-gradient(180deg, rgba(217, 180, 90, 0.16), rgba(9, 16, 27, 0.92));
+}
+
+.order-ad:hover:not(:disabled) {
+  border-color: rgba(217, 180, 90, 0.75);
+  background: linear-gradient(180deg, rgba(217, 180, 90, 0.26), rgba(9, 16, 27, 0.92));
+}
+
+.order-ad .o-cost {
+  color: var(--gold);
+}
+
+/* The second chance is the only gold button on the defeat screen: a reward the
+   player has to recognise before pressing it. */
+.btn.reward {
+  position: relative;
+  border: 1px solid rgba(217, 180, 90, 0.55);
+  background: linear-gradient(180deg, rgba(217, 180, 90, 0.22), rgba(217, 180, 90, 0.1));
+  color: var(--ink);
+  padding-left: 34px;
+}
+
+.btn.reward:hover:not(:disabled) {
+  border-color: rgba(217, 180, 90, 0.9);
+  background: linear-gradient(180deg, rgba(217, 180, 90, 0.32), rgba(217, 180, 90, 0.16));
+}
+
+.btn.reward .reward-tag {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--gold);
+}
+
+.end-ad-note {
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* К6.1: the grace after «второй шанс» is good news, and it should read so. */
+.now-bar.good {
+  color: #bfe6c6;
+  border-color: rgba(126, 200, 143, 0.5);
+  background: rgba(16, 38, 26, 0.86);
+}
+
 /* 3.2 / 3.4: the automatic helpers are named on the card, not hidden. */
 .pp-auto-tag {
   margin-left: 6px;
@@ -6245,6 +6334,80 @@ kbd {
   }
 }
 
+/* К6: на 720 px по высоте итог обязан влезть целиком вместе с третьей кнопкой.
+   Семь чисел в четыре колонки — две строки вместо трёх, а картинка и отступы
+   отдают ещё сорок пикселей. */
+@media (max-height: 820px) {
+  .end-emblem {
+    font-size: 34px;
+    margin-bottom: 6px;
+  }
+
+  .end-card p {
+    margin-bottom: 10px;
+  }
+
+  .end-stars {
+    gap: 18px;
+    margin-bottom: 10px;
+  }
+
+  .end-stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .end-score {
+    margin: 8px 0 2px;
+  }
+
+  .end-meta {
+    margin-bottom: 8px;
+  }
+}
+
+/* К6.5: пока открыта карточка провинции, подсказки и «Сейчас» уходят в
+   свободную полосу справа от неё, а не ложатся на цифры, которые игрок только
+   что попросил. Карточка на обычном экране — 344 px, на коротком — 288 px. */
+#app.has-panel .toasts,
+#app.has-panel .now-bar {
+  left: 372px;
+  transform: none;
+  max-width: none;
+}
+
+#app.has-panel .now-bar {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+@media (max-height: 620px) {
+  #app.has-panel .toasts,
+  #app.has-panel .now-bar {
+    left: 306px;
+    right: 12px;
+    transform: none;
+    max-width: none;
+  }
+
+  #app.has-panel .toasts {
+    align-items: center;
+  }
+
+  #app.has-panel .now-bar {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+  }
+
+  .game-screen.has-panel .toast {
+    font-size: 12px;
+    padding: 6px 12px;
+    white-space: normal;
+  }
+}
+
 /* The results card on a short landscape screen: the stat grid is the part that
    can give up room, the buttons must stay visible without scrolling. */
 @media (max-height: 620px) {
@@ -6383,14 +6546,17 @@ kbd {
      would pair «звёзды» with «очки» into one tall row. Columns let each half
      keep its own rhythm. */
   .end-card {
-    column-count: 2;
-    column-gap: 22px;
-    column-fill: balance;
     max-width: 700px;
     text-align: left;
   }
 
-  .end-card > * {
+  .end-body {
+    column-count: 2;
+    column-gap: 22px;
+    column-fill: balance;
+  }
+
+  .end-body > * {
     break-inside: avoid;
   }
 
@@ -6411,9 +6577,125 @@ kbd {
   }
 
   .end-card .end-actions {
-    position: static;
-    background: none;
-    padding-top: 0;
+    padding-top: 8px;
+    margin-top: 6px;
+  }
+
+  .end-buttons {
     justify-content: flex-start;
+  }
+
+  /* One row of buttons here: the screen is short, not narrow. */
+  .end-buttons .btn.reward {
+    flex: 0 1 auto;
+    order: 0;
+  }
+
+  /* К6.5: 844×390 — карточка провинции обязана влезать целиком. Прокрутки
+     внутри неё нет: заголовок, полоса гарнизона, строки и улучшения сжимаются
+     на три десятка пикселей, а не прячут третье улучшение под край экрана. */
+  .province-panel {
+    padding: 7px 9px;
+    bottom: 4px;
+    /* От HUD до нижнего края: высота строки HUD считается в #syncSafeArea, а не
+       угадывается числом. */
+    max-height: calc(100% - var(--hud-bottom, 76px) - 4px);
+  }
+
+  /* «Развитие провинции» над тремя кнопками — подпись, которую на телефоне
+     можно не читать: сами кнопки называют и улучшение, и цену. */
+  .pp-section:not(.pp-section-inline) {
+    display: none;
+  }
+
+  .march-note,
+  .defense-note {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  /* К6.5: на коротком экране колонка приказов стоит справа (104 px), поэтому
+     подсказки держатся от неё подальше. */
+  #app.has-panel .toasts,
+  #app.has-panel .now-bar {
+    right: 116px;
+  }
+
+  #app.has-panel .toast {
+    font-size: 11px;
+    padding: 5px 10px;
+    white-space: normal;
+  }
+
+  .pp-head {
+    padding-bottom: 3px;
+  }
+
+  .pp-name {
+    font-size: 14px;
+  }
+
+  .pp-meter {
+    margin: 4px 0 4px;
+  }
+
+  .meter-head {
+    margin-bottom: 3px;
+  }
+
+  .pp-rows {
+    padding: 3px 0;
+  }
+
+  .pp-row {
+    padding: 1px 0;
+    font-size: 11px;
+  }
+
+  .pp-section {
+    margin: 5px 0 3px;
+    font-size: 9px;
+  }
+
+  .pp-upgrades {
+    gap: 3px;
+  }
+
+  .upg {
+    padding: 3px 8px;
+  }
+
+  .upg .u-sub {
+    font-size: 9.5px;
+    line-height: 1.15;
+  }
+
+  /* К6.5: пальцем, а не мышью. Пауза, скорости, приказы и доли получают
+     площадь, которую видно и легко нажать; четыре скорости в один ряд
+     остаются в HUD. */
+  .speed-btn {
+    min-width: 40px;
+    height: 34px;
+  }
+
+  #btn-pause-menu {
+    width: 40px;
+    height: 34px;
+  }
+
+  .order-main {
+    min-height: 44px;
+  }
+
+  .order-more {
+    min-width: 40px;
+  }
+
+  #ratio-group button {
+    min-height: 32px;
+  }
+
+  .log-toggle {
+    min-height: 30px;
   }
 }

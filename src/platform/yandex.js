@@ -129,6 +129,41 @@ export const platform = {
     }
   },
 
+  /** Is rewarded video available at all? A browser without the SDK says no. */
+  hasRewarded() {
+    return Boolean(this.ysdk?.adv?.showRewardedVideo);
+  },
+
+  /**
+   * К6: rewarded video. Resolves true only when the ad was watched to the end
+   * and the SDK granted the reward; a refusal, an error, a closed tab or a
+   * missing SDK are all `false`, and the caller must stay playable without it.
+   */
+  showRewarded() {
+    if (!this.hasRewarded()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      try {
+        this.ysdk.adv.showRewardedVideo({
+          callbacks: {
+            onRewarded: () => done(true),
+            onClose: () => done(false),
+            onError: () => done(false),
+          },
+        });
+      } catch {
+        done(false);
+      }
+      // A player who closed the tab mid-ad must not freeze the button forever.
+      setTimeout(() => done(false), 60000);
+    });
+  },
+
   /**
    * К5.5: «Первая победа», «Три звезды», «Без потерь», «Задача дня». The ids are
    * the ones the achievement list in the Yandex console must carry (docs/

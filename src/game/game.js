@@ -88,6 +88,11 @@ export class Game {
       // К5: the daily card that this match is playing for, so a reloaded page
       // still knows that finishing it is worth a check mark.
       daily: this.dailyId ? { id: this.dailyId, scenarioId: this.scenario.id, done: false } : null,
+      // К6.1/6.2: rewarded video is a favour the player asks for, once per
+      // match: one second chance and one cooldown skip. Kept in the state so a
+      // reload cannot farm a second one.
+      ads: { revive: false, speedup: false },
+      reviveGrace: 0,
       rng: this.rng.s,
     };
 
@@ -159,6 +164,15 @@ export class Game {
     }
 
     state.stats.peak = this.#provinceCount(nationId, state);
+    // К6.1: «второй шанс» pays 30 % of the army the realm had at its strongest,
+    // and the opening army counts — a match lost in the first seconds, before
+    // the first economy tick, must not come back with eight men.
+    for (const n of Object.values(state.nations)) {
+      let own = 0;
+      for (const p of Object.values(state.provinces)) if (p.owner === n.id) own += p.garrison;
+      for (const a of state.armies) if (a.owner === n.id) own += a.troops;
+      n.armyPeak = own;
+    }
     state.goal = this.#buildGoal(state);
     // К3.4: the capital's surplus marches out on its own. A player who never
     // drags an arrow still sees columns leave and arrive — the map has to move
@@ -2161,6 +2175,10 @@ export class Game {
       nation.income = income;
       nation.manpowerRate = manpower;
       nation.pop = pop;
+      // К6.1: «второй шанс» returns 30 % of the army the realm ever had, so the
+      // size of that army has to be remembered. One comparison per nation a
+      // second is cheaper than any bookkeeping of losses.
+      nation.armyPeak = Math.max(nation.armyPeak ?? 0, this.armyTotal(nation.id));
       nation.gold += income * dt;
       const cap = BAL.manpowerCapBase + pop * BAL.manpowerCapPop;
       nation.manpower = Math.min(cap, nation.manpower + manpower * dt);
@@ -2779,6 +2797,68 @@ export class Game {
       nation.ai.nextThink = BAL.aiThinkBase / Math.max(0.35, aggression) + this.rng.range(0, 1.4);
       aiThink(this, nation);
     }
+  }
+
+  // ---------------------------------------------------------------- реклама (К6)
+
+  /** Can the realm come back at all? Only after a defeat, and only once. */
+  canRevive() {
+    const s = this.state;
+    if (s.status !== 'defeat') return false;
+    if (s.ads?.revive) return false;
+    const me = s.nations[s.nationId];
+    return Boolean(me && !me.alive);
+  }
+
+  /**
+   * К6.1 «второй шанс»: the capital comes back with 30 % of the army the realm
+   * ever had, and 25 seconds of quiet in which nobody attacks the reborn state.
+   * The lands stay with whoever took them — this is a chance, not a rollback,
+   * and the aim of the match is untouched.
+   */
+  revive(fraction = 0.3) {
+    const s = this.state;
+    if (!this.canRevive()) return { ok: false, reason: 'Второй шанс недоступен' };
+    const me = s.nations[s.nationId];
+    const capital = s.provinces[me.capital];
+    if (!capital) return { ok: false, reason: 'Столицы нет на карте' };
+    const garrison = Math.max(
+      BAL.minSend * 2,
+      Math.min(this.garrisonCeiling(me.capital), Math.round((me.armyPeak ?? 0) * fraction)),
+    );
+    capital.owner = me.id;
+    capital.garrison = garrison;
+    capital.fort = Math.max(1, capital.fort);
+    me.alive = true;
+    me.eliminated = false;
+    me.morale = Math.max(me.morale ?? BAL.moraleStart, BAL.moraleStart);
+    me.exhaustion = Math.min(me.exhaustion ?? 0, 40);
+    s.status = 'playing';
+    s.ads = { ...(s.ads ?? {}), revive: true };
+    s.reviveGrace = s.time + BAL.reviveGrace;
+    this.#log(`Второй шанс: ${this.provinceName(me.capital)} возвращается с ${Math.round(garrison)} чел.`, 'good');
+    this.#emit('revive', { provinceId: me.capital, garrison });
+    return { ok: true, provinceId: me.capital, garrison };
+  }
+
+  /** К6.2: one rewarded video per match clears every order cooldown. */
+  canSkipCooldown() {
+    const s = this.state;
+    if (s.status !== 'playing') return false;
+    if (s.ads?.speedup) return false;
+    const o = this.ordersOf(s.nationId) ?? {};
+    return ['mobilize', 'tax', 'march'].some((kind) => s.time < (o[`${kind}Ready`] ?? 0));
+  }
+
+  skipOrderCooldown() {
+    if (!this.canSkipCooldown()) return { ok: false, reason: 'Приказы уже готовы' };
+    const s = this.state;
+    const o = this.ordersOf(s.nationId);
+    for (const kind of ['mobilize', 'tax', 'march']) o[`${kind}Ready`] = s.time;
+    s.ads = { ...(s.ads ?? {}), speedup: true };
+    this.#log('Приказы готовы: ускорение за рекламу', 'info');
+    this.#emit('ordersReady', {});
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------- tutorial

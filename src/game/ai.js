@@ -403,6 +403,8 @@ function attack(game, nation, owned) {
     if (enemy?.isPlayer) {
       if (rules.peaceUntilFirstWar && !state.playerAggro) continue;
       if (state.time < 120 && !state.playerAggro) continue;
+      // К6.1: the seconds after «второго шанса» belong to the player.
+      if (state.time < (state.reviveGrace ?? 0)) continue;
       const alreadyFighting = game.hasFoughtRecently(nation.id, plan.owner);
       if (!alreadyFighting && game.activeAttackers(plan.owner) >= coalitionLimit(state)) continue;
     }

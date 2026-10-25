@@ -210,3 +210,27 @@ export function earnedAchievements({ status, stats = {}, starCount = 0, daily = 
 export function achievementById(id) {
   return ACHIEVEMENTS.find((a) => a.id === id) ?? null;
 }
+
+// ---------------------------------------------------------------- реклама (К6)
+
+/**
+ * К6.3/6.4: when the automatic (interstitial) ad may be shown.
+ *
+ * - the first three finished matches are ad-free: a newcomer is still learning
+ *   what the game is, and an ad in the minute after the first tap is how they
+ *   stop learning it;
+ * - then no more than one ad per two matches.
+ *
+ * `matches` is how many matches the player has finished, `lastAd` the number at
+ * which the previous ad was shown (−1 = never).
+ */
+export function interstitialAllowed({ matches = 0, lastAd = -1, adsEnabled = true } = {}) {
+  if (!adsEnabled) return false;
+  if (matches < 3) return false;
+  return matches - lastAd >= 2;
+}
+
+/** Rewarded video follows the same «no ads for a newcomer» rule (К6.4). */
+export function rewardedAllowed({ matches = 0, adsEnabled = true } = {}) {
+  return Boolean(adsEnabled) && matches >= 3;
+}

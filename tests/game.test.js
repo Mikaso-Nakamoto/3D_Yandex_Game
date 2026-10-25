@@ -21,6 +21,8 @@ import {
   describeDaily,
   earnedAchievements,
   achievementById,
+  interstitialAllowed,
+  rewardedAllowed,
 } from '../src/game/progress.js';
 
 const map = JSON.parse(readFileSync(new URL('../src/data/map.json', import.meta.url), 'utf8'));
@@ -2980,4 +2982,96 @@ test('achievements are earned once and only by a finished match', () => {
     'daily',
   ]);
   assert.equal(achievementById('first_win').title, 'Первая победа');
+});
+
+// ---------------------------------------------------------------- реклама (К6)
+
+test('второй шанс возвращает столицу, но не земли', () => {
+  const game = makeGame();
+  // The peak is remembered by the economy: one tick before the fall, when the
+  // realm still holds its army.
+  game.update(0.05);
+  const peak = game.player.armyPeak;
+  assert.ok(peak > 0);
+  game.player.gold = 0;
+  game.province('FR').owner = 'PRU';
+  game.province('FR').garrison = 1;
+  game.update(0.05);
+  assert.equal(game.state.status, 'defeat');
+  assert.equal(game.canRevive(), true);
+  const result = game.revive();
+  assert.equal(result.ok, true);
+  assert.equal(game.state.status, 'playing');
+  assert.equal(game.player.alive, true);
+  assert.equal(game.province('FR').owner, 'FRA');
+  // 30 % of the army the realm ever had, not of what is left (nothing is).
+  assert.ok(result.garrison >= Math.round(peak * 0.3));
+  assert.equal(game.state.reviveGrace, game.state.time + BAL.reviveGrace);
+  // Lands taken before the defeat stay taken: this is a chance, not a rollback.
+  const held = Object.values(game.state.provinces).filter((p) => p.owner === 'FRA');
+  assert.equal(held.length, 1);
+  assert.equal(held[0].id, 'FR');
+});
+
+test('второй шанс выдаётся один раз и только после поражения', () => {
+  const game = makeGame();
+  assert.equal(game.canRevive(), false, 'пока партия идёт, шанса нет');
+  game.province('FR').owner = 'PRU';
+  game.province('FR').garrison = 1;
+  game.update(0.05);
+  assert.equal(game.revive().ok, true);
+  game.province('FR').owner = 'PRU';
+  game.province('FR').garrison = 1;
+  game.update(0.05);
+  assert.equal(game.state.status, 'defeat');
+  assert.equal(game.canRevive(), false, 'второй раз реклама не предлагается');
+  assert.equal(game.revive().ok, false);
+});
+
+test('передышка после второго шанса удерживает ИИ от атаки', () => {
+  // The real engine, not a hand-made plan: five minutes of the same match with
+  // and without the grace. In the reference run the AI attacks the player twice
+  // by the second minute, so a silent run is the rule doing its work.
+  const debug = globalThis.__AIDEBUG;
+  const attacksOnPlayer = (grace) => {
+    globalThis.__AIDEBUG = [];
+    const game = new Game({
+      scenarioId: 'eve1939',
+      nationId: 'GER',
+      doctrineId: 'coin',
+      map,
+      seed: 5,
+      rules: { peaceUntilFirstWar: false, autoBuild: false, autoSend: false },
+    });
+    game.state.reviveGrace = grace ? 1000 : 0;
+    for (let i = 0; i < 1200; i += 1) game.update(0.25);
+    const count = globalThis.__AIDEBUG.filter((entry) => entry.owner === 'GER').length;
+    globalThis.__AIDEBUG = debug;
+    return count;
+  };
+  assert.equal(attacksOnPlayer(true), 0);
+  assert.ok(attacksOnPlayer(false) > 0, 'без передышки ИИ снова нападает — правило работает');
+});
+
+test('ускорение за рекламу снимает кулдаун один раз', () => {
+  const game = makeGame();
+  game.player.gold = 500;
+  assert.equal(game.castOrder('mobilize').ok, true);
+  assert.equal(game.canSkipCooldown(), true);
+  assert.equal(game.skipOrderCooldown().ok, true);
+  assert.equal(game.canSkipCooldown(), false, 'второй раз за партию нельзя');
+  assert.equal(game.castOrder('tax').ok, true, 'приказы снова доступны');
+});
+
+test('порог рекламы: первые три партии без рекламы, дальше не чаще раза в две', () => {
+  assert.equal(interstitialAllowed({ matches: 1 }), false);
+  assert.equal(interstitialAllowed({ matches: 2 }), false);
+  assert.equal(interstitialAllowed({ matches: 3 }), true);
+  assert.equal(interstitialAllowed({ matches: 3, lastAd: 3 }), false);
+  assert.equal(interstitialAllowed({ matches: 4, lastAd: 3 }), false);
+  assert.equal(interstitialAllowed({ matches: 5, lastAd: 3 }), true);
+  assert.equal(interstitialAllowed({ matches: 9, lastAd: -1, adsEnabled: false }), false);
+  assert.equal(rewardedAllowed({ matches: 1 }), false);
+  assert.equal(rewardedAllowed({ matches: 3 }), true);
+  assert.equal(rewardedAllowed({ matches: 3, adsEnabled: false }), false);
 });

@@ -27,9 +27,11 @@ import {
   dayKey,
   describeDaily,
   earnedAchievements,
+  interstitialAllowed,
   isDailyFresh,
   isUnlocked,
   normalizeStars,
+  rewardedAllowed,
   starTotals,
   theatreOrder,
   unlockSource,
@@ -241,6 +243,9 @@ export class App {
       daily: this.settings.daily ?? null,
       dailyDone: Number(this.settings.dailyDone) || 0,
       achievements: this.settings.achievements ?? {},
+      // К6: the same ad gate on every device — a second browser must not hand
+      // a newcomer another three ad-free matches.
+      matches: Number(this.settings.matches) || 0,
     };
   }
 
@@ -273,6 +278,7 @@ export class App {
       else if (meta.daily.done && !mine.done) this.settings.daily = { ...mine, done: true };
     }
     this.settings.dailyDone = Math.max(Number(this.settings.dailyDone) || 0, Number(meta.dailyDone) || 0);
+    this.settings.matches = Math.max(Number(this.settings.matches) || 0, Number(meta.matches) || 0);
     this.settings.achievements = { ...(meta.achievements ?? {}), ...(this.settings.achievements ?? {}) };
     this.#saveSettings();
     this.#buildMenu();
@@ -1115,6 +1121,23 @@ export class App {
     const played = new Set(Array.isArray(this.settings.played) ? this.settings.played : []);
     played.add(game.state.scenarioId);
     this.settings.played = [...played].slice(-20);
+    // К6.3/6.4: the match counter decides when an interstitial may appear. The
+    // lesson is not a match: a newcomer finishes three real ones before seeing
+    // any ad at all, and after that no more than one ad per two matches.
+    const adMatches = Number(this.settings.matches) || 0;
+    const adLast = Number.isFinite(Number(this.settings.lastAd)) ? Number(this.settings.lastAd) : -1;
+    let showAd = false;
+    if (!game.state.tutorial) {
+      this.settings.matches = adMatches + 1;
+      showAd = interstitialAllowed({ matches: this.settings.matches, lastAd: adLast });
+    }
+    // A defeat that offers «второй шанс» gets no interstitial: the rewarded
+    // video is the offer of this screen, and two ads on one screen is how a
+    // player learns to close the tab. The interstitial waits for the next end.
+    if (showAd && game.canRevive?.() && rewardedAllowed({ matches: this.settings.matches, adsEnabled: platform.hasRewarded() })) {
+      showAd = false;
+    }
+    if (showAd) this.settings.lastAd = this.settings.matches;
     this.#saveSettings();
     game.state.speed = 0;
     this.#clearArmies();
@@ -1274,8 +1297,69 @@ export class App {
     $('#screen-end').classList.remove('hidden');
     if (won) sfx.victory();
     else sfx.defeat();
-    // An ad in the minute after the first tap is how a new player leaves.
-    if (!tutorial) setTimeout(() => platform.showInterstitial(), 1600);
+    // An ad in the minute after the first tap is how a new player leaves, so
+    // the first three matches are ad-free and the next ones see one ad each
+    // two matches at most (К6.3/6.4).
+    this.#updateReviveButton();
+    if (showAd) setTimeout(() => platform.showInterstitial(), 1600);
+  }
+
+  /**
+   * К6.1: the second chance, honest about its price. The button exists only
+   * when the realm can actually come back, when the SDK has a rewarded video
+   * and when the newcomer window is over — a dead button on a defeat screen is
+   * worse than no button.
+   */
+  #updateReviveButton() {
+    const button = $('#btn-revive');
+    const note = $('#end-ad-note');
+    if (!button || !note) return;
+    const game = this.game;
+    const ready =
+      Boolean(game?.canRevive?.()) &&
+      rewardedAllowed({ matches: Number(this.settings.matches) || 0, adsEnabled: platform.hasRewarded() });
+    button.classList.toggle('hidden', !ready);
+    note.classList.toggle('hidden', !ready);
+    button.disabled = false;
+    const text = button.querySelector('[data-revive-text]');
+    if (text) text.textContent = 'Второй шанс';
+  }
+
+  async #offerRevive() {
+    const game = this.game;
+    const button = $('#btn-revive');
+    if (!game || !button || button.disabled) return;
+    button.disabled = true;
+    const text = button.querySelector('[data-revive-text]');
+    if (text) text.textContent = 'Реклама…';
+    const granted = await platform.showRewarded();
+    if (!granted) {
+      // A refusal or a broken ad costs nothing but the try.
+      button.disabled = false;
+      if (text) text.textContent = 'Второй шанс';
+      this.#toast('Реклама не загрузилась — второй шанс не потрачен', 'info');
+      return;
+    }
+    const result = game.revive();
+    if (!result.ok) {
+      this.#toast(result.reason || 'Второй шанс недоступен', 'info');
+      return;
+    }
+    $('#screen-end').classList.add('hidden');
+    this.#updateReviveButton();
+    this.#resumeAfterRevive(result.provinceId);
+  }
+
+  /** Back into the match: same speed, same camera, the capital in hand. */
+  #resumeAfterRevive(provinceId) {
+    this.#clearArmies();
+    this.hintTimer = 0;
+    this.setSpeed(this.lastSpeed || 1);
+    platform.gameplayStart();
+    this.save();
+    this.world.focusOn?.(provinceId);
+    this.#toast('Столица возвращается: 25 секунд на передышку', 'good');
+    this.#updateHud();
   }
 
   /**
@@ -1985,7 +2069,15 @@ export class App {
       button.classList.toggle('active-buff', buffActive);
       button.disabled = cooldown > 0 || game.player.gold < cost || state.status !== 'playing';
     };
-    for (const button of $('#order-list')?.children ?? []) paint(button, button.dataset.order);
+    for (const button of $('#order-list')?.children ?? []) {
+      if (button.dataset.order) paint(button, button.dataset.order);
+    }
+    const ad = $('#btn-order-ad');
+    if (ad) {
+      const ready = Boolean(game.canSkipCooldown()) && rewardedAllowed({ matches: Number(this.settings.matches) || 0, adsEnabled: platform.hasRewarded() });
+      ad.classList.toggle('hidden', !ready);
+      ad.disabled = !ready;
+    }
 
     // The big button follows the game's own advice.
     const main = $('#btn-order');
@@ -2023,8 +2115,15 @@ export class App {
    */
   #syncHint(panel = $('#province-panel')) {
     const hint = $('#hint-bar');
-    if (!hint || !panel) return;
-    hint.classList.toggle('muted', !panel.classList.contains('hidden'));
+    const open = Boolean(panel) && !panel.classList.contains('hidden');
+    hint?.classList.toggle('muted', open);
+    // К6.5: on a 844×390 window a toast in the middle of the screen lay down on
+    // top of the province card. The screen knows the card is open, so the pills
+    // step aside instead of covering the numbers the player just asked for.
+    $('#screen-game')?.classList.toggle('has-panel', open && this.screen === 'game');
+    // The toast stack lives outside #screen-game (it is a sibling of every
+    // screen), so the flag that moves it has to sit on #app.
+    $('#app')?.classList.toggle('has-panel', open && this.screen === 'game');
   }
 
   /**
@@ -2040,6 +2139,12 @@ export class App {
     const me = s.nationId;
     const name = (id) => s.nations[id]?.short ?? '—';
     const finalTo = (a) => (a.path ? a.path[a.path.length - 1] : a.to);
+    // К6.1: the seconds bought by «второй шанс» are the one thing worth saying
+    // louder than an incoming column — nobody is coming, and that is the point.
+    const grace = Math.ceil((s.reviveGrace ?? 0) - s.time);
+    if (grace > 0) {
+      return { text: `Передышка после второго шанса · ${grace} с`, kind: 'good' };
+    }
     const offer = s.offers?.[0];
     if (offer) {
       const what =
@@ -2672,10 +2777,12 @@ export class App {
       button.type = 'button';
       button.className = 'order';
       button.dataset.order = order.id;
-      button.title = order.description;
+      // Полное имя живёт в подсказке: «Всеобщая мобилизация» в плитке 96 px
+      // рвалась посередине слова, а «Мобилизация» — это тот же приказ.
+      button.title = `${order.name}. ${order.description}`;
       button.innerHTML = `
         <span class="o-icon">${icon(order.icon, 16)}</span>
-        <span class="o-name">${order.name}</span>
+        <span class="o-name">${order.shortName ?? order.name}</span>
         <span class="o-cost">${BAL.orderGold[order.id]} золота</span>
         <span class="o-cd hidden"></span>`;
       button.addEventListener('click', () => {
@@ -2684,6 +2791,20 @@ export class App {
       });
       list.appendChild(button);
     }
+    // К6.2: one rewarded video clears the cooldown. It sits at the end of the
+    // list and says what it costs, so the offer is never a surprise; the button
+    // is hidden whenever it would do nothing.
+    const ad = document.createElement('button');
+    ad.type = 'button';
+    ad.className = 'order order-ad hidden';
+    ad.id = 'btn-order-ad';
+    ad.title = 'Снять кулдаун всех приказов за рекламу — один раз за партию';
+    ad.innerHTML = `
+      <span class="o-icon">${icon('play', 16)}</span>
+      <span class="o-name">Ускорить</span>
+      <span class="o-cost">реклама</span>`;
+    ad.addEventListener('click', () => this.#offerSpeedup());
+    list.appendChild(ad);
     $('#btn-order').addEventListener('click', () => this.#castOrder(this.orderSuggestion?.kind ?? 'tax'));
     $('#btn-order-more').addEventListener('click', () => this.#toggleOrderList());
   }
@@ -2697,6 +2818,32 @@ export class App {
     more.setAttribute('aria-expanded', String(open));
     more.classList.toggle('is-open', open);
     if (open) sfx.click();
+  }
+
+  /** К6.2: the rewarded video behind «ускорить приказы». */
+  async #offerSpeedup() {
+    const game = this.game;
+    const button = $('#btn-order-ad');
+    if (!game || !button || button.disabled) return;
+    if (!game.canSkipCooldown()) {
+      this.#toast('Приказы уже готовы', 'info');
+      return;
+    }
+    button.disabled = true;
+    const granted = await platform.showRewarded();
+    if (!granted) {
+      button.disabled = false;
+      this.#toast('Реклама не загрузилась — приказы не тронуты', 'info');
+      return;
+    }
+    const result = game.skipOrderCooldown();
+    this.#toggleOrderList(false);
+    if (!result.ok) {
+      this.#toast(result.reason ?? 'Приказы уже готовы', 'info');
+      return;
+    }
+    sfx.coin();
+    this.#updateHud();
   }
 
   #castOrder(kind) {
@@ -3772,6 +3919,7 @@ export class App {
       $('#screen-end').classList.add('hidden');
       this.#restart();
     });
+    $('#btn-revive').addEventListener('click', () => this.#offerRevive());
     $('#btn-end-menu').addEventListener('click', () => {
       $('#screen-end').classList.add('hidden');
       this.showMenu();
