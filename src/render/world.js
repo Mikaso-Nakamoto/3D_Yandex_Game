@@ -254,9 +254,11 @@ export class World {
 
   #buildWater() {
     // The sea must outrun the camera on the cylinder: at the far zoom the world
-    // is a period wide, and a 420-unit square left a dark wedge at the top of
-    // the screen where the plane ended.
-    const size = Math.max(420, (this.period ?? this.map.width) * 3, this.map.height * 3);
+    // is a period wide, and a small square leaves a dark wedge at the top of the
+    // screen where the plane ends. The plane's own edge also read as a long
+    // straight line across the ocean, so it now reaches well past the horizon
+    // the camera can show.
+    const size = Math.max(900, (this.period ?? this.map.width) * 6, this.map.height * 6);
     const geo = new THREE.PlaneGeometry(size, size);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x0a1826,
@@ -268,15 +270,17 @@ export class World {
     water.position.y = -0.62;
     this.scene.add(water);
 
-    // Faint rings give the sea some depth without textures.
+    // Faint rings give the sea some depth without textures. They must stay a
+    // whisper: zoomed in on a coastline they used to read as stray grey arcs
+    // lying across the water.
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0x16324a,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.14,
       side: THREE.DoubleSide,
     });
     for (let i = 1; i <= 3; i += 1) {
-      const ring = new THREE.Mesh(new THREE.RingGeometry(i * 26, i * 26 + 0.08, 96), ringMat);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(i * 26, i * 26 + 0.06, 96), ringMat);
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = -0.6;
       this.scene.add(ring);
