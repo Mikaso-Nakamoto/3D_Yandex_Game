@@ -25,16 +25,17 @@ function play(scenarioId, nationId, { ratio = 0.6, odds = 0.45, seed = 4242 } = 
     nationId,
     map: MAPS[scenario.theatre ?? 'europe'],
     seed,
-    rules: { mode: 'goal' },
+    rules: { mode: 'goal', autoBuild: true, autoSend: true },
   });
   let next = 0;
   while (game.state.status === 'playing' && game.state.time < 4000) {
     game.update(0.1);
     if (game.state.time < next) continue;
     next = game.state.time + 1.5;
-    game.castOrder('mobilize');
-    game.castOrder('tax');
-    game.castOrder('march');
+    // К3.3: exactly what a player does now — press the one order the game
+    // recommends, then drag arrows where the odds look good.
+    const advice = game.suggestOrder();
+    if (advice?.ready) game.castOrder(advice.kind);
     for (const province of Object.values(game.state.provinces)) {
       if (province.owner !== nationId || province.garrison < 60) continue;
       const targets = (game.byId[province.id].neighbors ?? [])

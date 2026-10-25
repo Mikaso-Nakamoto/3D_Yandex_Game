@@ -66,6 +66,9 @@ export class App {
     this.scenario = null;
     this.selectedNation = null;
     this.doctrine = 'coin';
+    // К3.5: the doctrine picker is folded on the nation screen — one line with
+    // the current choice, the three cards on demand.
+    this.doctrineOpen = false;
     this.selectedProvince = null;
     this.lastSpeed = 1;
     this.preferredRatio = 0.5;
@@ -210,6 +213,24 @@ export class App {
 
   // ---------------------------------------------------------------- menu
 
+  /**
+   * «Играть»: the recommended pairing of the chosen theatre, no questions.
+   * The scenario is the first of the theatre; the nation is the strongest one
+   * («Просто» on the nation screen), because the one-tap path must not drop a
+   * first-timer into a one-province minor.
+   */
+  #playNow() {
+    const scenario = SCENARIOS.find((s) => (s.theatre ?? 'europe') === this.mapMode) ?? SCENARIOS[0];
+    sfx.select();
+    this.scenario = scenario;
+    const ranked = scenario.nations
+      .map((nation) => ({ nation, army: this.#nationPreview(nation).army }))
+      .sort((a, b) => b.army - a.army);
+    this.selectedNation = ranked[0]?.nation.id ?? scenario.nations[0].id;
+    this.setTheatre(scenario.theatre ?? 'europe');
+    this.startGame();
+  }
+
   #buildMenu() {
     const list = $('#scenario-list');
     list.innerHTML = '';
@@ -322,6 +343,7 @@ export class App {
     this.selectedNation = null;
     this.selectedProvince = null;
     this.doctrine = 'coin';
+    this.doctrineOpen = false;
     this.#setScreen('nation');
     $('#nation-era').textContent = this.scenario.era;
     $('#nation-scenario').textContent = this.scenario.title;
@@ -544,10 +566,17 @@ export class App {
         <p class="goal-aim">${this.#goalPreview(nation)}</p>
         <p class="goal-best">${this.#starsLine(this.settings.stars?.[this.scenario.id])}</p>
       </div>
-      <div class="detail-doctrine">
-        <div class="eyebrow">Доктрина <span class="eyebrow-note">действует всю партию</span></div>
-        <div id="doctrine-list" class="doctrine-list"></div>
-        <p class="doctrine-note">${doctrine.description}</p>
+      <div class="detail-doctrine ${this.doctrineOpen ? 'is-open' : ''}">
+        <button type="button" class="doctrine-sum" data-doctrine-toggle aria-expanded="${this.doctrineOpen ? 'true' : 'false'}">
+          <span class="eyebrow">Доктрина</span>
+          <b>${doctrine.name}</b>
+          <span class="doctrine-switch">${this.doctrineOpen ? 'скрыть' : 'сменить'}</span>
+        </button>
+        <div class="doctrine-body">
+          <div class="eyebrow-note">действует всю партию</div>
+          <div id="doctrine-list" class="doctrine-list"></div>
+          <p class="doctrine-note">${doctrine.description}</p>
+        </div>
       </div>
       <div class="detail-rules">
         <span class="rules-label">Правила</span>
@@ -657,7 +686,7 @@ export class App {
           if (this.selectedProvince === payload.provinceId) this.#renderProvincePanel();
           this.#tip(
             'capture',
-            'Провинция ваша. Клик по ней — мануфактура, казармы, крепость и гарнизон',
+            'Провинция ваша. Улучшения игра покупает сама — клик по провинции, если хотите решить самому',
           );
         } else if (payload.from === game.state.nationId) {
           sfx.loss();
@@ -694,6 +723,11 @@ export class App {
           const who = game.state.nations[payload.attacker]?.short ?? 'Противник';
           this.#toast(`${who}: ${fmt(payload.amount)} → ${game.provinceName(payload.to)}`, 'bad');
         }
+      }
+      if (type === 'autoWar') {
+        // К3.4: the helper may start a campaign in a capture-goal match. That
+        // is the one automatic action the player must see, so it says so once.
+        this.#toast(`Начался поход на ${payload.enemy ?? 'соседа'}`, 'bad');
       }
       if (type === 'passage' && payload.by === game.state.nationId && payload.broken) {
         const who = game.state.nations[payload.with]?.short ?? 'Противник';
@@ -757,15 +791,27 @@ export class App {
     const barRect = bar?.getBoundingClientRect();
     const usable = barRect && barRect.width > 0 && barRect.height > 0;
     // The order buttons are a row at the bottom on a desktop and a column on
-    // the right on a phone; the map must stay out of whichever it is.
-    const column = usable && barRect.right > vw * 0.82 && barRect.height > barRect.width * 0.7;
+    // the right on a phone or a short window. The layout is a media query, so
+    // the geometry test («taller than wide») missed the single «Приказ» button
+    // of К3 and the map was squeezed above it as if it were a bottom bar.
+    const sideColumn = window.matchMedia('(max-width: 560px), (max-height: 520px)').matches;
+    const column =
+      usable &&
+      (sideColumn || (barRect.right > vw * 0.82 && barRect.height > barRect.width * 0.7));
     const right = column ? Math.max(0, Math.round(vw - barRect.left)) : 0;
     const hud = document.querySelector('.hud-top')?.getBoundingClientRect();
     const foot = document.querySelector('.hud-bottom')?.getBoundingClientRect();
     const footTop = usable && !column ? Math.min(vh, barRect.top) : vh;
     const footInset = foot && foot.height > 0 ? vh - foot.top : vh;
+    // One number drives everything that hangs from the top: the map's safe
+    // band, the goal line, the hint pill and the toasts.
+    const hudBottom = hud && hud.height > 0 ? Math.round(hud.bottom) : 0;
+    if (hudBottom !== this.hudBottom) {
+      this.hudBottom = hudBottom;
+      document.documentElement.style.setProperty('--hud-bottom', `${hudBottom}px`);
+    }
     this.world.setSafeArea({
-      top: hud && hud.height > 0 ? Math.round(hud.bottom) : 0,
+      top: hudBottom,
       right,
       bottom: Math.max(0, Math.round(vh - Math.min(footTop, footInset))),
     });
@@ -830,7 +876,7 @@ export class App {
     timers.push(
       setTimeout(() => {
         if (this.screen !== 'game') return;
-        this.#hint('Договоры и войны — в «Державах», вкладка «Переговоры»');
+        this.#hint('Договоры и войны — меню паузы → «Обстановка» → «Переговоры» (клавиша R)');
       }, 20000),
     );
     this.onboardTimers = timers;
@@ -1323,6 +1369,8 @@ export class App {
     // floating buttons on the same pixel is how the province card got covered.
     const show = inMatch && this.game.state.speed > 0;
     line.classList.toggle('hidden', !show);
+    // The hint and the toasts sit right under the goal line while it is up.
+    document.documentElement.style.setProperty('--goal-extra', show ? '34px' : '0px');
     if (!show) {
       this.goalLineText = '';
       return;
@@ -1410,8 +1458,7 @@ export class App {
     if (!this.game) return;
     const game = this.game;
     const state = game.state;
-    for (const button of $('#orders-bar').children) {
-      const kind = button.dataset.order;
+    const paint = (button, kind) => {
       const cooldown = state.orders[`${kind}Ready`] - state.time;
       const buffActive =
         (kind === 'tax' && state.time < state.orders.taxUntil) ||
@@ -1426,7 +1473,37 @@ export class App {
       }
       button.classList.toggle('active-buff', buffActive);
       button.disabled = cooldown > 0 || game.player.gold < cost || state.status !== 'playing';
+    };
+    for (const button of $('#order-list')?.children ?? []) paint(button, button.dataset.order);
+
+    // The big button follows the game's own advice.
+    const main = $('#btn-order');
+    if (!main) return;
+    const advice = game.suggestOrder();
+    this.orderSuggestion = advice;
+    if (!advice) {
+      main.disabled = true;
+      return;
     }
+    const order = ORDERS[advice.kind];
+    const iconSlot = main.querySelector('[data-main-icon]');
+    const iconName = order.icon;
+    if (iconSlot.dataset.icon !== iconName) {
+      iconSlot.dataset.icon = iconName;
+      iconSlot.innerHTML = icon(iconName, 16);
+    }
+    // A narrow column gets the short name: «Всеобщая мобилизация» is a
+    // paragraph on a phone, and a clipped «Военный …» names nothing.
+    const compact = window.matchMedia('(max-width: 560px), (max-height: 520px)').matches;
+    main.querySelector('[data-main-name]').textContent = compact ? order.shortName ?? order.name : order.name;
+    const cost = `${BAL.orderGold[advice.kind]} золота`;
+    main.querySelector('[data-main-sub]').textContent = advice.ready
+      ? `${advice.reason} · ${cost}`
+      : `через ${Math.ceil(advice.cooldown)} с · ${cost}`;
+    main.querySelector('[data-main-cost]').textContent = '';
+    main.disabled = !advice.ready || state.status !== 'playing';
+    main.classList.toggle('is-waiting', !advice.ready);
+    paint(main, advice.kind);
   }
 
   /**
@@ -1662,6 +1739,7 @@ export class App {
                 const tone = odds.chance >= 0.85 ? 'good' : odds.chance >= 0.5 ? 'warn' : 'bad';
                 const grown = odds.defense > odds.defenseNow * 1.02;
                 return `<div class="pp-row"><span>Шанс взять</span><b class="odds ${tone}">${chance}%</b></div>
+                  <div class="pp-row"><span>Бой</span><b class="muted">решается сам при прибытии</b></div>
                   <div class="pp-row"><span>Уйдёт в бой</span><b>${fmt(odds.troops)} чел. · ${game.provinceName(odds.from)}</b></div>
                   <div class="pp-row"><span>Оборона к прибытию</span><b>${fmt(odds.defense)}${
                     grown ? ` <span class="muted">(сейчас ${fmt(odds.defenseNow)})</span>` : ''
@@ -1716,7 +1794,7 @@ export class App {
       <p class="pp-hint">${
         isMine
           ? `Перетащите войска на соседнюю провинцию, чтобы усилить её или атаковать: уйдёт ${Math.round(game.state.sendRatio * 100)}% гарнизона (${fmt(game.sendableTroops(province.id))} чел.). Можно отправлять сразу в несколько сторон — из провинции уйдёт столько отрядов, сколько вы прикажете.`
-          : `Оборона ${fmt(defense)}: ${fmt(breakdown.effective)} боевых войск × ${breakdown.fortMul.toFixed(2)} крепость × ${breakdown.doctrineMul.toFixed(2)} доктрина × ${breakdown.moraleMul.toFixed(2)} дух. Шанс — для доли ${Math.round(game.state.sendRatio * 100)}% и с учётом пополнения защитника в пути.`
+          : `Бой решается сам, когда колонна дойдёт: ничего нажимать не нужно. Оборона ${fmt(defense)}: ${fmt(breakdown.effective)} боевых войск × ${breakdown.fortMul.toFixed(2)} крепость × ${breakdown.doctrineMul.toFixed(2)} доктрина × ${breakdown.moraleMul.toFixed(2)} дух. Шанс — для доли ${Math.round(game.state.sendRatio * 100)}% и с учётом пополнения защитника в пути.`
       }</p>
     `;
     this.#markPanelOverflow(panel);
@@ -1817,11 +1895,13 @@ export class App {
     if (!orders.length && !picking) return '';
     const rows = orders
       .map((order) => {
-        const target = game.provinceName(order.to);
+        // К3.4: the capital order has no fixed destination — it follows the
+        // front, so the card names the rule instead of a province.
+        const target = order.roam ? 'на слабого соседа' : game.provinceName(order.to);
         const amount = game.autoAmount(order);
         return `<div class="pp-auto-row">
           <div class="pp-auto-head">
-            <b>→ ${target}</b>
+            <b>→ ${target}${order.roam ? '<span class="pp-auto-tag">сама</span>' : ''}</b>
             <button class="pp-auto-del" data-auto-del="${order.id}" title="Удалить приказ">✕</button>
           </div>
           <div class="pp-auto-steps">
@@ -1839,7 +1919,7 @@ export class App {
               <b>${fmt(order.keep)}</b>
               <button type="button" data-auto-step="${order.id}" data-field="keep" data-delta="10">+</button>
             </span>
-            <span class="pp-auto-now">уйдёт ${fmt(amount)}</span>
+            <span class="pp-auto-now">${amount >= 4 ? `уйдёт ${fmt(amount)}` : 'копит людей'}</span>
           </div>
         </div>`;
       })
@@ -2048,9 +2128,32 @@ export class App {
       <div class="fc-actions"><button type="button" class="btn ghost" data-fc-close>Скрыть</button></div>`;
   }
 
+  /**
+   * К3.3: one button instead of three. The game names the order that answers
+   * the current situation («колонна врага на подходе» → мобилизация), and the
+   * press is the confirmation. The three separate orders stay one tap away
+   * behind «…» for players who want to choose themselves — they share the
+   * cooldowns, so nothing is gained by saving the tap, only control.
+   */
   #buildOrders() {
     const bar = $('#orders-bar');
-    bar.innerHTML = '';
+    bar.innerHTML = `
+      <div class="order-list hidden" id="order-list"></div>
+      <div class="order-row">
+        <button type="button" class="order order-main" id="btn-order">
+          <span class="o-icon" data-main-icon>${icon('tax', 16)}</span>
+          <span class="o-body">
+            <span class="o-name" data-main-name>Приказ</span>
+            <span class="o-sub" data-main-sub>что нужнее сейчас</span>
+          </span>
+          <span class="o-cost" data-main-cost></span>
+          <span class="o-cd hidden"></span>
+        </button>
+        <button type="button" class="order-more" id="btn-order-more" title="Все приказы" aria-expanded="false">
+          ${icon('menu', 14)}
+        </button>
+      </div>`;
+    const list = $('#order-list');
     for (const order of Object.values(ORDERS)) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -2062,9 +2165,25 @@ export class App {
         <span class="o-name">${order.name}</span>
         <span class="o-cost">${BAL.orderGold[order.id]} золота</span>
         <span class="o-cd hidden"></span>`;
-      button.addEventListener('click', () => this.#castOrder(order.id));
-      bar.appendChild(button);
+      button.addEventListener('click', () => {
+        this.#castOrder(order.id);
+        this.#toggleOrderList(false);
+      });
+      list.appendChild(button);
     }
+    $('#btn-order').addEventListener('click', () => this.#castOrder(this.orderSuggestion?.kind ?? 'tax'));
+    $('#btn-order-more').addEventListener('click', () => this.#toggleOrderList());
+  }
+
+  #toggleOrderList(force = null) {
+    const list = $('#order-list');
+    const more = $('#btn-order-more');
+    if (!list || !more) return;
+    const open = force ?? list.classList.contains('hidden');
+    list.classList.toggle('hidden', !open);
+    more.setAttribute('aria-expanded', String(open));
+    more.classList.toggle('is-open', open);
+    if (open) sfx.click();
   }
 
   #castOrder(kind) {
@@ -2376,7 +2495,7 @@ export class App {
     else if (result.accepted) {
       this.#toast(result.kind === 'peace' ? `Мир с ${name}` : `Пакт с ${name}`, 'good');
       sfx.select();
-      this.#tip('pact', 'Договоры и войны — в «Державах», вкладка «Переговоры»');
+      this.#tip('pact', 'Договоры и войны — меню паузы → «Обстановка» → «Переговоры» (клавиша R)');
     } else this.#toast(`${name}: отказ. Сила и усталость решают — попробуйте позже`, 'bad');
     this.#afterDiplomacy();
   }
@@ -2428,7 +2547,7 @@ export class App {
     this.#renderRankings();
   }
 
-  /** «Державы» and «Переговоры» are tabs: both lists do not fit one screen. */
+  /** «Обстановка»: «Державы» and «Переговоры» are tabs of one window. */
   #applyRankTab() {
     const tab = this.rankTab ?? 'nations';
     for (const button of document.querySelectorAll('#rank-tabs [data-rank-tab]')) {
@@ -2676,7 +2795,11 @@ export class App {
     // The AI settings were only reachable after picking a nation, which made
     // «Агрессивность ИИ» look like it kept disappearing. The menu has its own
     // way in now, and the rules modal works without a selected nation.
-    $('#btn-menu-rules').addEventListener('click', () => this.#openRules());
+    // «Играть» — the one-tap path of К3.5: the current theatre's first scenario
+    // with its first nation, straight into the match. The scenario cards stay
+    // for anyone who wants to choose; the pause menu keeps the rules.
+    $('#btn-play-now').addEventListener('click', () => this.#playNow());
+    $('#btn-menu-rules')?.addEventListener('click', () => this.#openRules());
     $('#btn-howto').addEventListener('click', () => {
       sfx.click();
       $('#modal-howto').classList.remove('hidden');
@@ -2712,6 +2835,13 @@ export class App {
     $('#nation-detail').addEventListener('click', (event) => {
       if (event.target.closest('[data-open-rules]')) {
         this.#openRules();
+        return;
+      }
+      const doctToggle = event.target.closest('[data-doctrine-toggle]');
+      if (doctToggle) {
+        sfx.click();
+        this.doctrineOpen = !this.doctrineOpen;
+        this.#renderNationDetail();
         return;
       }
       const mode = event.target.closest('[data-goal-mode]');
@@ -2817,7 +2947,9 @@ export class App {
     this.#wireLogDock();
     this.#wireLogFilters();
     $('#btn-pause-menu').addEventListener('click', () => this.openPause());
-    $('#btn-rankings').addEventListener('click', () => this.#openRankings());
+    // К3.5: «Державы» left the HUD — the pause menu and R still open the same
+    // window, so the button is optional here.
+    $('#btn-rankings')?.addEventListener('click', () => this.#openRankings());
     $('#rank-tabs').addEventListener('click', (event) => {
       const button = event.target.closest('[data-rank-tab]');
       if (!button) return;
@@ -2973,10 +3105,17 @@ export class App {
         const order = this.game.autoOrders().find((o) => o.id === Number(autoStep.dataset.autoStep));
         if (order) {
           const delta = Number(autoStep.dataset.delta);
-          const next = { ...order };
-          if (autoStep.dataset.field === 'when') next.when = Math.max(order.keep + 10, order.when + delta);
-          else next.keep = Math.max(10, Math.min(order.when - 10, order.keep + delta));
-          this.game.addAuto(order.from, order.to, next.when, next.keep);
+          if (order.roam) {
+            // A roaming order has no destination to re-create it with; the
+            // numbers live in the same object the simulation reads.
+            if (autoStep.dataset.field === 'when') order.when = Math.max(order.keep + 10, order.when + delta);
+            else order.keep = Math.max(10, Math.min(order.when - 10, order.keep + delta));
+          } else {
+            const next = { ...order };
+            if (autoStep.dataset.field === 'when') next.when = Math.max(order.keep + 10, order.when + delta);
+            else next.keep = Math.max(10, Math.min(order.when - 10, order.keep + delta));
+            this.game.addAuto(order.from, order.to, next.when, next.keep);
+          }
           this.#renderProvincePanel();
           this.#armPanelFold();
         }
@@ -3079,9 +3218,34 @@ export class App {
       this.settings.tips = event.target.checked;
       this.#saveSettings();
     });
+    // К3.2 / К3.4: the two helpers that make a match playable without micro.
+    // They are part of the match rules, so the switch works mid-match and the
+    // choice is remembered for the next one.
+    $('#toggle-autobuild').addEventListener('change', (event) => {
+      const on = event.target.checked;
+      this.pendingRules = normalizeRules({ ...this.pendingRules, autoBuild: on });
+      this.settings.rules = this.pendingRules;
+      if (this.game) this.game.setRules({ autoBuild: on });
+      this.#saveSettings();
+    });
+    $('#toggle-autosend').addEventListener('change', (event) => {
+      const on = event.target.checked;
+      this.pendingRules = normalizeRules({ ...this.pendingRules, autoSend: on });
+      this.settings.rules = this.pendingRules;
+      if (this.game) {
+        this.game.setRules({ autoSend: on });
+        if (on) this.game.enableAutoSend();
+        else this.game.disableAutoSend();
+        if (this.selectedProvince) this.#renderProvincePanel();
+      }
+      this.#saveSettings();
+    });
     $('#toggle-sound').checked = this.settings.sound;
     $('#toggle-labels').checked = this.settings.labels;
     $('#toggle-tips').checked = this.settings.tips !== false;
+    const autos = normalizeRules(this.pendingRules);
+    $('#toggle-autobuild').checked = autos.autoBuild;
+    $('#toggle-autosend').checked = autos.autoSend;
     sfx.setEnabled(this.settings.sound);
 
     $('#btn-again').addEventListener('click', () => {
@@ -3207,6 +3371,9 @@ export class App {
 
   openPause() {
     if (!this.game || this.screen !== 'game') return;
+    // The switches show the rules of *this* match, not the saved defaults.
+    $('#toggle-autobuild').checked = this.game.state.rules.autoBuild !== false;
+    $('#toggle-autosend').checked = this.game.state.rules.autoSend !== false;
     if (this.game.state.speed > 0) this.lastSpeed = this.game.state.speed;
     this.game.setSpeed(0);
     this.save();

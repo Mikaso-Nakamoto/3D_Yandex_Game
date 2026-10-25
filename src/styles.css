@@ -207,8 +207,8 @@ body {
 
 .toasts {
   position: absolute;
-  /* Below the hint / «Сейчас» pill (56 px + 26 px): the two used to touch. */
-  top: 96px;
+  /* Below the hint / «Сейчас» pill: the two used to touch. */
+  top: calc(var(--hud-bottom, 56px) + 46px + var(--goal-extra, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
@@ -1108,7 +1108,9 @@ body {
 }
 
 .progress-bar {
-  width: 110px;
+  /* 84 px, not 110: with the six chips of К3 the header fits one row on a
+     1280-wide laptop instead of wrapping the menu to a second line. */
+  width: 84px;
   height: 5px;
   border-radius: 99px;
   background: rgba(255, 255, 255, 0.1);
@@ -1129,9 +1131,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.hud-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .speed-group {
   display: flex;
-  margin-left: auto;
   border-radius: 9px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -1888,7 +1896,10 @@ body {
 
 .hint-bar {
   position: absolute;
-  top: 56px;
+  /* `--hud-bottom` is measured in #syncSafeArea: the HUD is one row on a
+     laptop and two on a narrow window, and the pill used to sit under the
+     second row on one of them and on top of it on the other. */
+  top: calc(var(--hud-bottom, 56px) + 6px + var(--goal-extra, 0px));
   left: 50%;
   transform: translateX(-50%);
   font-size: 11px;
@@ -2191,6 +2202,14 @@ kbd {
 
   .send-ratio {
     bottom: 68px;
+  }
+}
+
+/* A 900 px window in compact mode cannot fit eight chips on one row: the
+   progress is the least urgent number, and the goal line carries it anyway. */
+@media (max-height: 520px) and (max-width: 1000px) {
+  .progress-wrap {
+    display: none;
   }
 }
 
@@ -3092,6 +3111,18 @@ kbd {
 
 /* ---------------------------------------------------------------- short landscape phones */
 
+/* Short landscape windows wide enough to keep the journal: the ratio control
+   used to sit in that corner and landed on the last journal lines. It steps up
+   over the dock. Narrower windows hide the journal entirely (max-width: 900),
+   so there the old bottom-left placement still applies. */
+@media (max-height: 560px) and (orientation: landscape) and (min-width: 901px) {
+  .send-ratio {
+    left: auto;
+    right: 8px;
+    bottom: 184px;
+  }
+}
+
 @media (max-height: 560px) and (orientation: landscape) {
   .province-panel {
     left: 8px;
@@ -3758,7 +3789,7 @@ kbd {
    pill is hidden — an incoming column must be visible without opening a card. */
 .now-bar {
   position: absolute;
-  top: 56px;
+  top: calc(var(--hud-bottom, 56px) + 6px + var(--goal-extra, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 4;
@@ -4010,14 +4041,6 @@ kbd {
     height: auto;
     max-height: none;
     padding: 8px 9px;
-  }
-
-  /* The ratio control used to sit under the card, which cost the card 36 px of
-     height and hid the third upgrade. Right side is free and thumb-friendly. */
-  .send-ratio {
-    left: auto;
-    right: 8px;
-    bottom: 8px;
   }
 
   .pp-head {
@@ -5394,7 +5417,7 @@ kbd {
 .goal-line {
   position: absolute;
   left: 12px;
-  top: 54px;
+  top: calc(var(--hud-bottom, 56px) + 6px);
   z-index: 3;
   display: inline-flex;
   align-items: center;
@@ -5570,28 +5593,65 @@ kbd {
   margin: 0 auto;
 }
 
-/* A goal match keeps a permanent line under the HUD, so the centred hint and
-   the toasts step down by its height once, at the start of the match. */
-.game-screen.has-goal .hint-bar,
-.game-screen.has-goal .now-bar {
-  top: 90px;
-}
-
-.game-screen.has-goal .toasts {
-  top: 126px;
-}
-
 @media (max-height: 520px) {
-  /* Compact landscape: the top strip has no room for a second row, but the
-     bottom centre is free whenever the clock runs (the pill is its neighbour
-     and only shows while paused). */
+  /* Compact landscape: the bottom edge already holds the ratio pills and the
+     «Играть» pill, so the goal line sits right under the HUD on the left. */
   .goal-line {
-    top: auto;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
+    top: calc(var(--hud-bottom, 56px) + 4px);
+    left: 8px;
     font-size: 10.5px;
-    max-width: calc(100vw - 40px);
+    max-width: calc(100vw - 190px);
+  }
+
+  /* The order bar is a right-hand column here; the single button must shrink
+     with it instead of being clipped to «В…». */
+  .orders-bar .order-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .orders-bar {
+    --order-main-w: 104px;
+  }
+
+  .order-main {
+    padding: 6px 6px;
+    gap: 5px;
+  }
+
+  /* «Военный налог» in 104 px: the compact mode drops the icon instead and
+     gives the words the whole width — a two-line label was clipped anyway. */
+  .order-main .o-icon {
+    display: none;
+  }
+
+  .order-main .o-name {
+    font-size: 10.5px;
+    /* One line: the button is 27 px high in this mode and a second line was
+       simply clipped. «Налог» fits, «Военный налог» does not — hence the short
+       names in ORDERS, chosen from the layout, not from the CSS. */
+    white-space: nowrap;
+  }
+
+  .order-main .o-sub {
+    display: none;
+  }
+
+
+
+  .order-more {
+    width: 104px;
+    height: 22px;
+  }
+
+  .order-list {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 104px;
+  }
+
+  .order-list .order {
+    width: 104px;
   }
 
   .game-screen.has-goal .hint-bar,
@@ -5601,5 +5661,182 @@ kbd {
 
   .game-screen.has-goal .toasts {
     top: 84px;
+  }
+}
+
+/* ---------------------------------------------------------------- К3: один палец */
+
+/* 3.3: one «Приказ» and a caret that unfolds the three individual orders. */
+.order-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.order-main {
+  /* One number per layout, set by the media queries below: a later `width` in a
+     base rule used to beat every compact override, and the button was drawn
+     232 px wide inside a 112 px column. */
+  width: var(--order-main-w, 232px);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  padding: 8px 11px;
+  border-color: rgba(217, 180, 90, 0.42);
+  background: linear-gradient(180deg, rgba(38, 30, 16, 0.95), rgba(9, 16, 27, 0.95));
+}
+
+.order-main:hover:not(:disabled) {
+  border-color: rgba(217, 180, 90, 0.75);
+}
+
+.order-main .o-icon {
+  flex: none;
+}
+
+.order-main .o-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.order-main .o-name {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-main .o-sub {
+  font-size: 9.5px;
+  line-height: 1.2;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-main .o-cost {
+  margin: 0 0 0 auto;
+  flex: none;
+  font-size: 10.5px;
+}
+
+.order-main.is-waiting {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(9, 16, 27, 0.9);
+}
+
+.order-more {
+  width: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(9, 16, 27, 0.9);
+  color: var(--ink-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.order-more:hover,
+.order-more.is-open {
+  color: var(--gold);
+  border-color: rgba(217, 180, 90, 0.45);
+}
+
+.order-list {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+/* 3.2 / 3.4: the automatic helpers are named on the card, not hidden. */
+.pp-auto-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: rgba(217, 180, 90, 0.16);
+  color: var(--gold);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+/* 3.5: the doctrine picker is one line until the player asks for more. */
+.doctrine-sum {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.doctrine-sum b {
+  font-size: 12px;
+}
+
+.doctrine-switch {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--gold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.doctrine-body {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.detail-doctrine.is-open .doctrine-body {
+  display: flex;
+}
+
+@media (max-height: 520px) {
+  .order-main {
+    padding: 6px 8px;
+  }
+
+  .order-main .o-name {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 560px) {
+  /* A right-hand column cannot hold a 214 px button: the main order grows to
+     the column and the caret sits under it. */
+  .orders-bar .order-row {
+    flex-direction: column;
+  }
+
+  .orders-bar {
+    --order-main-w: 108px;
+  }
+
+  .order-more {
+    width: 100%;
+    height: 24px;
+  }
+
+  .order-list {
+    flex-direction: column;
+    margin-bottom: 5px;
   }
 }

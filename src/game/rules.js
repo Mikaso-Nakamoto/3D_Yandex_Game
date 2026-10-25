@@ -17,6 +17,13 @@ export const DEFAULT_RULES = {
   // К2: «goal» — короткая партия с целью и лимитом в восемь минут, «conquest» —
   // прежняя победа по всей карте, без часов. Режим выбирается до партии.
   mode: 'goal',
+  // К3.2: the game buys the improvements itself («самое дешёвое, что окупается
+  // за минуту»). A casual player should never open a province card to be able
+  // to win; the switch lives in the pause menu.
+  autoBuild: true,
+  // К3.4: the capital's surplus marches out on its own at 80 % of the norm,
+  // towards a weak neighbour. Same switch, same reason.
+  autoSend: true,
 };
 
 // `label` is the word next to the selector («Спокойная»), `short` the same word
@@ -53,6 +60,8 @@ export function normalizeRules(rules = {}) {
   merged.startPaused = Boolean(merged.startPaused);
   merged.autoPause = Boolean(merged.autoPause);
   merged.mode = merged.mode === 'conquest' ? 'conquest' : 'goal';
+  merged.autoBuild = Boolean(merged.autoBuild);
+  merged.autoSend = Boolean(merged.autoSend);
   return merged;
 }
 

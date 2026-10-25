@@ -140,6 +140,10 @@ export class Game {
 
     state.stats.peak = this.#provinceCount(nationId, state);
     state.goal = this.#buildGoal(state);
+    // К3.4: the capital's surplus marches out on its own. A player who never
+    // drags an arrow still sees columns leave and arrive — the map has to move
+    // without them, or the game is a spreadsheet with a flag on it.
+    if (this.rules.autoSend) this.#seedAutoSend(state);
 
     // Historical focus chains are built last: they look at who owns what, and
     // an ambition the nation already fulfils is skipped.
@@ -709,6 +713,90 @@ export class Game {
     return true;
   }
 
+  /**
+   * К3.4: one standing order on the capital, added when the match starts.
+   * `roam` means «pick a target yourself» — the order has no fixed province, so
+   * it follows the front instead of marching into the same wall forever.
+   */
+  #seedAutoSend(state = this.state) {
+    const me = state.nations[state.nationId];
+    if (!me) return null;
+    const from = state.provinces[me.capital];
+    if (!from || from.owner !== me.id) return null;
+    if ((state.autos ?? []).some((order) => order.from === me.capital)) return null;
+    const norm = Math.max(20, this.#maxGarrison(from, state));
+    const order = {
+      id: state.nextAutoId ?? 1,
+      from: me.capital,
+      to: null,
+      roam: true,
+      when: Math.round(norm * 0.8),
+      keep: Math.round(norm * 0.5),
+      norm,
+      // The first half-minute belongs to the player: an army that marches out
+      // of the capital before the map has even stopped turning reads as a bug,
+      // not as help.
+      notBefore: state.time + 45,
+    };
+    state.nextAutoId = (state.nextAutoId ?? 1) + 1;
+    state.autos = [...(state.autos ?? []), order];
+    return order;
+  }
+
+  /** Adds the default capital order to a match already under way (pause menu). */
+  enableAutoSend() {
+    const order = this.#seedAutoSend();
+    if (order) this.#log('Автоотправка: столица шлёт излишек на слабого соседа', 'auto');
+    return order;
+  }
+
+  /** Removes every automatic (roam) order — the pause-menu switch. */
+  disableAutoSend() {
+    this.state.autos = (this.state.autos ?? []).filter((order) => !order.roam);
+  }
+
+  /**
+   * Where a roaming order should march now.
+   *
+   * Free targets are neutral land and anyone we are already fighting, and only
+   * where the odds are decent — below a coin flip the column would just feed
+   * the defender.
+   *
+   * A *new* war is a different matter. It is allowed only in a match whose aim
+   * is to take provinces, and only against a clearly weaker neighbour (three
+   * men for every defender), because the goal the player picked already says
+   * «берите провинции». Treaties are never touched: a pact or a truce is a
+   * promise, and one of the three stars is named «слово».
+   */
+  #roamTarget(order) {
+    const s = this.state;
+    const me = s.nationId;
+    const from = s.provinces[order.from];
+    if (!from || from.owner !== me) return null;
+    const amount = Math.max(0, Math.floor(from.garrison - order.keep));
+    if (amount < BAL.minSend) return null;
+    const ratio = Math.min(1, amount / Math.max(1, from.garrison));
+    const takingLand = s.goal?.kind === 'capture' || s.goal?.kind === 'hold';
+    let best = null;
+    let newWar = null;
+    for (const id of this.neighbors(order.from)) {
+      const target = s.provinces[id];
+      if (!target || target.owner === me) continue;
+      const odds = this.attackOdds(order.from, id, ratio);
+      if (!odds) continue;
+      const atWar = !target.owner || this.hasWar(me, target.owner);
+      if (atWar) {
+        if (odds.chance >= 0.5 && (!best || odds.chance > best.chance)) best = { id, chance: odds.chance };
+        continue;
+      }
+      if (!takingLand || this.hasTruce(me, target.owner)) continue;
+      if (odds.chance >= 0.7 && (!newWar || odds.chance > newWar.chance)) newWar = { id, chance: odds.chance };
+    }
+    const pick = best ?? newWar;
+    if (!pick) return null;
+    return { id: pick.id, newWar: !best };
+  }
+
   /** Visible for tests: how many men one order would send right now. */
   autoAmount(order) {
     const from = this.state.provinces[order.from];
@@ -721,20 +809,25 @@ export class Game {
     for (const order of this.autoOrders()) {
       const from = s.provinces[order.from];
       if (!from || from.owner !== s.nationId) continue;
+      if (order.notBefore != null && s.time < order.notBefore) continue;
       if (from.garrison < order.when) continue;
       const amount = Math.floor(from.garrison - order.keep);
       if (amount < BAL.minSend) continue;
       // One column per order at a time: the next one leaves after this arrives.
       if (s.armies.some((army) => army.autoId === order.id)) continue;
-      const adjacent = this.neighbors(order.from).includes(order.to);
-      const route = adjacent ? null : this.routeBetween(order.from, order.to);
+      // A roaming order picks its destination each time it fires.
+      const roam = order.roam ? this.#roamTarget(order) : null;
+      const toId = order.roam ? roam?.id : order.to;
+      if (!toId) continue;
+      const adjacent = this.neighbors(order.from).includes(toId);
+      const route = adjacent ? null : this.routeBetween(order.from, toId);
       const ratio = amount / Math.max(1, from.garrison);
       const before = from.garrison;
       let sent = 0;
       if (route) {
         sent = this.#launchRoute(s.nationId, route, ratio, {});
       } else {
-        sent = this.launchArmy(s.nationId, order.from, order.to, ratio);
+        sent = this.launchArmy(s.nationId, order.from, toId, ratio);
       }
       if (sent <= 0) continue;
       const army = s.armies[s.armies.length - 1];
@@ -756,10 +849,17 @@ export class Game {
         }
       }
       this.#log(
-        `Автоотправка: ${this.provinceName(order.from)} → ${this.provinceName(order.to)} (${Math.round(army?.troops ?? sent)} из ${Math.round(before)})`,
+        `Автоотправка: ${this.provinceName(order.from)} → ${this.provinceName(toId)} (${Math.round(army?.troops ?? sent)} из ${Math.round(before)})`,
         'auto',
       );
-      this.#emit('auto', { from: order.from, to: order.to, amount: sent });
+      this.#emit('auto', { from: order.from, to: toId, amount: sent });
+      // A war started by the helper must never be a surprise: the HUD says it
+      // in one line, and the journal keeps it.
+      if (roam?.newWar) {
+        const enemy = s.nations[s.provinces[toId]?.owner]?.short ?? 'соседа';
+        this.#log(`Автоотправка начинает поход на ${enemy}`, 'war');
+        this.#emit('autoWar', { to: toId, owner: s.provinces[toId]?.owner, enemy });
+      }
     }
   }
 
@@ -1997,6 +2097,7 @@ export class Game {
     s.time += dt;
     s.months += dt * this.scenario.monthsPerSecond;
     this.#economy(dt);
+    this.#autoBuild();
     this.#morale(dt);
     this.#tickOffers();
     this.#reinforce(dt);
@@ -2045,6 +2146,123 @@ export class Game {
       nation.manpower = Math.min(cap, nation.manpower + manpower * dt);
       nation.manpowerCap = cap;
     }
+  }
+
+  /**
+   * К3.2: the treasury buys improvements on its own, by one written rule —
+   * «the cheapest thing that pays for itself within a minute».
+   *
+   * Only a factory has a gold return, so it is the only purchase measured in
+   * seconds. A fort or barracks on the frontier has no income at all, but it
+   * still pays: it is bought once the treasury can afford two of them, which is
+   * the same «не в убыток» idea expressed in the only currency defence has —
+   * blood instead of gold. Everything else is a decision the player may make
+   * by hand; the automatic buyer never touches the last 15 gold, so an order
+   * is always affordable.
+   */
+  #autoBuild() {
+    const s = this.state;
+    const player = this.player;
+    if (!player?.alive || s.status !== 'playing') return;
+    if (!s.rules?.autoBuild) return;
+    if (s.time < (this.nextAutoBuild ?? 0)) return;
+    this.nextAutoBuild = s.time + 2.5;
+    const RESERVE = 15;
+    const incomeMul = 1 + doctrineMod(player.doctrine, 'income');
+    const candidates = [];
+    for (const p of Object.values(s.provinces)) {
+      if (p.owner !== player.id) continue;
+      const frontier = this.#isFrontier(p, s);
+      for (const kind of ['factory', 'barracks', 'fort']) {
+        const level = p[kind] ?? 0;
+        if (level >= BAL.maxLevel) continue;
+        const cost = BAL.upgradeCosts[kind][level];
+        if (player.gold < cost + RESERVE) continue;
+        let payback = Infinity;
+        if (kind === 'factory') {
+          const gain = (BAL.incomeBase + p.pop * BAL.incomePop) * BAL.factoryIncome * incomeMul;
+          payback = gain > 0 ? cost / gain : Infinity;
+        } else if (frontier && player.gold >= cost * 2.5 + RESERVE) {
+          // Defence never «окупается» in gold; the threshold above stands in
+          // for that so a rich treasury does not sit on a bare border.
+          payback = 60;
+        }
+        if (payback <= 60) candidates.push({ id: p.id, kind, cost, payback });
+      }
+    }
+    if (!candidates.length) return;
+    candidates.sort((a, b) => a.payback - b.payback || a.cost - b.cost);
+    const pick = candidates[0];
+    const result = this.upgrade(pick.id, pick.kind);
+    if (!result.ok) return;
+    this.#log(
+      `Автостройка: ${UPGRADES[pick.kind].name.toLowerCase()} в «${this.provinceName(pick.id)}» — ${pick.cost} золота`,
+      'auto',
+    );
+    this.#emit('autoBuild', { provinceId: pick.id, kind: pick.kind, cost: pick.cost });
+  }
+
+  /** A province that has a land border with someone we are not at peace with. */
+  #isFrontier(p, s = this.state) {
+    for (const id of this.byId[p.id]?.neighbors ?? []) {
+      const other = s.provinces[id];
+      if (!other || other.owner === p.owner) continue;
+      if (!other.owner || this.hasWar(p.owner, other.owner)) return true;
+      // An unclaimed neighbour or a nation with no treaty of any kind is a
+      // border that can become a front this minute.
+      if (!this.hasTruce(p.owner, other.owner)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * К3.3: which of the three orders is worth casting right now.
+   *
+   * The player presses one button; the game reads the same state it shows in
+   * the HUD — a column aimed at us, a war, gold in the treasury, troops on the
+   * road — and names the order that answers it. Cooldowns still exist, so the
+   * answer comes with the number of seconds left when nothing is ready.
+   */
+  suggestOrder() {
+    const s = this.state;
+    const player = this.player;
+    if (!player || s.status !== 'playing') return null;
+    const o = this.ordersOf(s.nationId) ?? {};
+    const ready = (kind) => s.time >= (o[`${kind}Ready`] ?? 0) && player.gold >= BAL.orderGold[kind];
+    const cooldown = (kind) => Math.max(0, (o[`${kind}Ready`] ?? 0) - s.time);
+    const finalTo = (a) => (a.path ? a.path[a.path.length - 1] : a.to);
+    const incoming = s.armies.filter(
+      (a) => a.owner !== s.nationId && s.provinces[finalTo(a)]?.owner === s.nationId,
+    ).length;
+    const mine = s.armies.filter((a) => a.owner === s.nationId).length;
+    const wars = this.warsOf(s.nationId).length;
+    const score = { mobilize: -1, tax: -1, march: -1 };
+    const reason = {};
+    if (ready('mobilize')) {
+      score.mobilize =
+        (incoming ? 70 : 0) + (wars ? 20 : 0) + (player.manpower > (player.manpowerCap ?? 0) * 0.2 ? 15 : 0);
+      reason.mobilize = incoming ? 'колонна врага на подходе' : wars ? 'война: нужны люди' : 'пополнить гарнизоны';
+    }
+    if (ready('tax')) {
+      score.tax = 35 + (player.gold < 40 ? 20 : 0) + (wars ? 8 : 0);
+      reason.tax = `двойной доход на ${Math.round(BAL.buffDuration.tax)} с`;
+    }
+    if (ready('march')) {
+      score.march = 25 + (mine ? 20 : 0) + (incoming ? 15 : 0);
+      reason.march = mine ? 'колонны идут быстрее' : 'армии ускорены';
+    }
+    let best = null;
+    for (const kind of ['mobilize', 'tax', 'march']) {
+      if (score[kind] < 0) continue;
+      if (!best || score[kind] > score[best]) best = kind;
+    }
+    if (!best) {
+      // Nothing ready: name the one that returns first, so the button is never
+      // a dead rectangle with no explanation.
+      const soonest = ['mobilize', 'tax', 'march'].sort((a, b) => cooldown(a) - cooldown(b))[0];
+      return { kind: soonest, ready: false, cooldown: cooldown(soonest), reason: 'перезарядка' };
+    }
+    return { kind: best, ready: true, cooldown: 0, reason: reason[best], cost: BAL.orderGold[best] };
   }
 
   /** Morale drifts back to neutral; war weariness cools down in quiet times. */

@@ -15,9 +15,22 @@ const atlanticMap = JSON.parse(readFileSync(new URL('../src/data/map-atlantic.js
 const worldMap = JSON.parse(readFileSync(new URL('../src/data/map-world.json', import.meta.url), 'utf8'));
 const MAPS = { europe: map, atlantic: atlanticMap, world: worldMap };
 const mapFor = (scenario) => MAPS[scenario.theatre ?? 'europe'];
+// К3 added two automatic helpers to every match (auto-build and the capital's
+// auto-send). Tests are about one mechanic at a time, so the background help is
+// off here unless a test asks for it: otherwise half the suite measures «what
+// the capital did on its own» instead of what it intended to check.
+const AUTO_ON = { autoBuild: false, autoSend: false };
 const makeGame = (opts = {}) => {
-  const { ai = false, ...rest } = opts;
-  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', doctrineId: 'coin', map, seed: 42, ...rest });
+  const { ai = false, rules = {}, ...rest } = opts;
+  const game = new Game({
+    scenarioId: 'concert',
+    nationId: 'FRA',
+    doctrineId: 'coin',
+    map,
+    seed: 42,
+    rules: { ...AUTO_ON, ...rules },
+    ...rest,
+  });
   // Combat/economy tests run without AI interference; AI has its own test below.
   if (!ai) for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
   return game;
@@ -115,7 +128,7 @@ test('troops can be ordered through the realm to a distant province', () => {
 });
 
 test('a planned column passes through and leaves the requested garrison', () => {
-  const game = new Game({ scenarioId: 'concert', nationId: 'RUS', map, seed: 11 });
+  const game = new Game({ scenarioId: 'concert', nationId: 'RUS', map, seed: 11, rules: AUTO_ON });
   for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
   game.state.nations.RUS.manpower = 0;
   const route = game.routeBetween('RU', 'LT');
@@ -2646,4 +2659,97 @@ test('an old save without a goal gets one on load', () => {
   const restored = Game.deserialize(save, map);
   assert.ok(restored.state.goal, 'the aim is rebuilt');
   assert.equal(restored.state.goal.limit, 480);
+});
+
+// ------------------------------------------------------- К3: один палец, ноль микро
+
+test('a new match starts with one automatic order on the capital', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed: 42, rules: { autoSend: true } });
+  const orders = game.autoOrders();
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0].from, 'FR', 'the capital');
+  assert.equal(orders[0].roam, true, 'it picks its own target');
+  assert.ok(orders[0].when > orders[0].keep, 'it keeps a reserve');
+  // The opening half-minute is the player's.
+  assert.ok(orders[0].notBefore >= 45);
+});
+
+test('the capital sends its surplus to a weak neighbour and never breaks a pact', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed: 42, rules: { autoSend: true } });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  const order = game.autoOrders()[0];
+  order.notBefore = 0;
+  // Take every neutral off France's border, then sign with the only neighbour
+  // left: the capital must not move a man.
+  for (const id of game.neighbors('FR')) {
+    const province = game.state.provinces[id];
+    if (!province || province.owner === 'FRA') continue;
+    province.owner = 'ESP';
+  }
+  game.state.relations[Game.pairKey('FRA', 'ESP')] = { truceUntil: 999, kind: 'pact' };
+  game.state.provinces.FR.garrison = game.maxGarrison('FR');
+  game.update(0.5);
+  assert.equal(
+    game.state.armies.filter((a) => a.owner === 'FRA').length,
+    0,
+    'a pact is a decision, not an accident',
+  );
+  // A war makes the same column legal — and it marches at the enemy, not at a
+  // random neighbour.
+  game.state.provinces.DE.owner = 'PRU';
+  game.state.provinces.DE.garrison = 5;
+  game.state.relations[Game.pairKey('FRA', 'PRU')] = { truceUntil: 0, warSince: 0 };
+  game.state.provinces.FR.garrison = game.maxGarrison('FR');
+  let launched = null;
+  game.on((type, payload) => {
+    if (type === 'auto') launched = payload;
+  });
+  game.update(0.5);
+  assert.ok(launched, 'the order fired');
+  assert.equal(launched.from, 'FR');
+  assert.equal(game.state.provinces[launched.to].owner, 'PRU', 'the target is the enemy');
+});
+
+test('auto-build buys the cheapest improvement that pays back within a minute', () => {
+  const game = makeGame({ rules: { autoBuild: true } });
+  const fr = game.state.provinces.FR;
+  game.player.gold = 400;
+  const before = { factory: fr.factory, fort: fr.fort, barracks: fr.barracks };
+  for (let i = 0; i < 40; i += 1) game.update(0.1);
+  const after = { factory: fr.factory, fort: fr.fort, barracks: fr.barracks };
+  assert.ok(
+    after.factory > before.factory || after.fort > before.fort || after.barracks > before.barracks,
+    'something was built',
+  );
+  assert.ok(game.player.gold > 15, 'the reserve for orders is kept');
+  // The switch really switches it off.
+  const off = makeGame({ rules: { autoBuild: false } });
+  off.player.gold = 400;
+  for (let i = 0; i < 40; i += 1) off.update(0.1);
+  assert.equal(off.state.provinces.FR.factory, 0);
+  assert.equal(off.state.provinces.FR.fort, fr.fort === 0 ? 0 : off.state.provinces.FR.fort);
+});
+
+test('the suggested order answers the situation and names a reason', () => {
+  const game = makeGame();
+  const first = game.suggestOrder();
+  assert.ok(first && Object.keys({ mobilize: 1, tax: 1, march: 1 }).includes(first.kind));
+  assert.equal(first.ready, true);
+  assert.ok(first.reason.length > 3, 'the button explains itself');
+  // An enemy column on its way beats «двойной доход».
+  game.state.orders.mobilizeReady = 0;
+  game.player.gold = 500;
+  game.player.manpower = game.player.manpowerCap;
+  game.launchArmy('PRU', 'DE', 'FR', 0.9);
+  const underAttack = game.suggestOrder();
+  assert.equal(underAttack.kind, 'mobilize');
+  assert.match(underAttack.reason, /колонна/);
+  // With every cooldown running the answer is «wait», with a number.
+  game.state.orders.mobilizeReady = game.state.time + 30;
+  game.state.orders.taxReady = game.state.time + 5;
+  game.state.orders.marchReady = game.state.time + 50;
+  const waiting = game.suggestOrder();
+  assert.equal(waiting.ready, false);
+  assert.equal(waiting.kind, 'tax', 'the one that returns first');
+  assert.ok(waiting.cooldown > 0);
 });

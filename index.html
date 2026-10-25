@@ -41,9 +41,9 @@
           </div>
           <div id="scenario-list" class="scenario-list"></div>
           <div class="menu-actions">
+            <button id="btn-play-now" class="btn primary">Играть</button>
             <button id="btn-continue" class="btn ghost hidden">Продолжить партию</button>
             <button id="btn-howto" class="btn ghost">Как играть</button>
-            <button id="btn-menu-rules" class="btn ghost">Настройки партии</button>
           </div>
         </div>
         <div class="menu-foot">
@@ -124,21 +124,21 @@
             <span class="ico" data-icon="flag"></span>
             <span class="chip-label-inline" id="hud-focus">Фокус</span>
           </button>
-          <button id="btn-rankings" class="chip chip-button" title="Сводка по державам">
-            <span class="ico" data-icon="list"></span>
-            <span class="chip-label-inline">Державы</span>
-          </button>
           <button id="btn-speed-play" class="resume-btn hidden" type="button" title="Снять паузу (Пробел)">
             <span class="ico" data-icon="play"></span>
             <span>Играть</span>
           </button>
-          <div class="speed-group" id="speed-group">
-            <button data-speed="0" class="speed-btn" title="Пауза (Пробел)" data-icon="pause"></button>
-            <button data-speed="1" class="speed-btn active">1×</button>
-            <button data-speed="2" class="speed-btn">2×</button>
-            <button data-speed="3" class="speed-btn" title="Промотать затишье">3×</button>
+          <!-- Speed and «Меню» wrap to the right of their own row instead of the
+               menu dropping alone to the left edge under the nation chip. -->
+          <div class="hud-right">
+            <div class="speed-group" id="speed-group">
+              <button data-speed="0" class="speed-btn" title="Пауза (Пробел)" data-icon="pause"></button>
+              <button data-speed="1" class="speed-btn active">1×</button>
+              <button data-speed="2" class="speed-btn">2×</button>
+              <button data-speed="3" class="speed-btn" title="Промотать затишье">3×</button>
+            </div>
+            <button id="btn-pause-menu" class="btn-icon" title="Меню" data-icon="menu"></button>
           </div>
-          <button id="btn-pause-menu" class="btn-icon" title="Меню" data-icon="menu"></button>
         </header>
 
         <!-- К2: цель партии и часы. Видна на любом зуме, под HUD слева. -->
@@ -188,9 +188,11 @@
           <div>
             <h3>1. Цель — вся карта</h3>
             <p>
-              Выберите эпоху и державу; доктрина даёт бонус на всю партию.
-              Победа одна: забрать все провинции. Половина карты — только
-              преимущество.
+              Кнопка «Играть» сразу начинает партию за сильнейшую державу
+              выбранной эпохи. Хотите другую страну, доктрину или режим
+              «Завоевание» — выберите её в списке. Обычная партия идёт до цели
+              и не дольше восьми минут; «Завоевание» — прежняя победа по всей
+              карте, без часов.
             </p>
             <h3>2. Двигайте войска</h3>
             <p>
@@ -201,9 +203,11 @@
             </p>
             <h3>3. Развивайте земли</h3>
             <p>
-              Клик по своей провинции — мануфактура, крепость, казармы и
-              автоотправка. Гарнизон набирается сам из рекрутов, излишек сверх
-              нормы виден золотым «+N» на карте.
+              Улучшения игра покупает сама — то, что окупается за минуту, и
+              крепости на границе. Клик по своей провинции открывает
+              мануфактуру, крепость, казармы и автоотправку, если хотите решать
+              самому. Гарнизон набирается сам из рекрутов, излишек сверх нормы
+              виден золотым «+N» на карте.
             </p>
           </div>
           <div>
@@ -215,7 +219,7 @@
             </p>
             <h3>5. Договаривайтесь — или нарушайте слово</h3>
             <p>
-              Пакт о ненападении и право прохода — в «Державах» → «Переговоры»
+              Пакт о ненападении и право прохода — в меню паузы → «Обстановка» → «Переговоры» (или клавиша R)
               или в карточке чужой провинции. По чужой земле идти медленнее, а
               нападение на того, кто пустил, рвёт договор; нарушителям верят
               меньше.
@@ -230,7 +234,7 @@
         </div>
         <div class="hotkeys">
           <span><kbd>Пробел</kbd> пауза</span>
-          <span><kbd>1</kbd><kbd>2</kbd><kbd>4</kbd> скорость</span>
+          <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> скорость</span>
           <span><kbd>M</kbd> мобилизация, <kbd>T</kbd> налог, <kbd>F</kbd> марш</span>
           <span><kbd>Tab</kbd> доля войск, <kbd>R</kbd> обстановка</span>
           <span><kbd>Esc</kbd> меню</span>
@@ -297,6 +301,14 @@
         <button class="btn ghost" id="btn-menu">Выйти в меню</button>
         <p class="rules-summary" id="pause-rules-summary"></p>
         <div class="settings-row">
+          <label class="switch" title="Игра сама покупает улучшения, которые окупаются за минуту">
+            <input type="checkbox" id="toggle-autobuild" checked />
+            <span>Автостройка</span>
+          </label>
+          <label class="switch" title="Столица шлёт излишек гарнизона на слабого соседа">
+            <input type="checkbox" id="toggle-autosend" checked />
+            <span>Автоотправка</span>
+          </label>
           <label class="switch">
             <input type="checkbox" id="toggle-sound" checked />
             <span>Звук</span>

@@ -192,18 +192,23 @@ export const ORDERS = {
   mobilize: {
     id: 'mobilize',
     name: 'Всеобщая мобилизация',
+    // The main button is one line on a narrow layout: «Мобилизация», not
+    // «Всеобщая мобилизация» cut to six letters.
+    shortName: 'Мобилизация',
     icon: 'mobilize',
     description: 'Сразу добавить войска во все провинции за рекрутов — даже сверх нормы, до 145 %',
   },
   tax: {
     id: 'tax',
     name: 'Военный налог',
+    shortName: 'Налог',
     icon: 'tax',
     description: `Двойной доход на ${BAL.buffDuration.tax} секунд`,
   },
   march: {
     id: 'march',
     name: 'Форсированный марш',
+    shortName: 'Марш',
     icon: 'march',
     description: `+60% к скорости армий на ${BAL.buffDuration.march} секунд`,
   },
