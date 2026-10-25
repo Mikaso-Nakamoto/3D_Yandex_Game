@@ -1,4 +1,5 @@
 import { getScenario, THEATRE_GENITIVE } from '../data/scenarios.js';
+import { buildGoal } from './goal.js';
 import { BAL, UPGRADES, ORDERS, doctrineMod } from './balance.js';
 import { Rng } from './rng.js';
 import { aiThink, assignDoctrine } from './ai.js';
@@ -53,7 +54,7 @@ export class Game {
       log: [],
       rules: this.rules,
       orders: { mobilizeReady: 0, taxReady: 0, marchReady: 0, taxUntil: 0, marchUntil: 0 },
-      stats: { battles: 0, captured: 0, lostProvinces: 0, battlesWon: 0, peak: 0, recruited: 0, deserted: 0 },
+      stats: { battles: 0, captured: 0, lostProvinces: 0, battlesWon: 0, peak: 0, recruited: 0, deserted: 0, pactsBroken: 0 },
       sendRatio: 0.5,
       relations: {},
       offers: [],
@@ -138,6 +139,7 @@ export class Game {
     }
 
     state.stats.peak = this.#provinceCount(nationId, state);
+    state.goal = this.#buildGoal(state);
 
     // Historical focus chains are built last: they look at who owns what, and
     // an ambition the nation already fulfils is skipped.
@@ -1468,6 +1470,10 @@ export class Game {
     const breaker = this.state.nations[byId];
     const victim = this.state.nations[withId];
     if (breaker) breaker.oathbreaks = (breaker.oathbreaks ?? 0) + 1;
+    // К2.2: «слово державы» — одна из трёх звёзд партии.
+    if (byId === this.state.nationId && kind === 'pact') {
+      this.state.stats.pactsBroken = (this.state.stats.pactsBroken ?? 0) + 1;
+    }
     this.#adjustExhaustion(byId, 8);
     if (byId === this.state.nationId) this.state.playerAggro = true;
     this.#log(
@@ -2537,6 +2543,48 @@ export class Game {
     }
   }
 
+  /** К2: the aim of a short match, built by the same code as the preview. */
+  #buildGoal(state = this.state) {
+    return buildGoal({
+      scenario: this.scenario,
+      nationId: state.nationId,
+      owners: Object.fromEntries(Object.values(state.provinces).map((p) => [p.id, p.owner])),
+      mode: this.rules.mode,
+    });
+  }
+
+  /** True when the aim of the match is reached; sets `status` itself. */
+  #checkGoal() {
+    const s = this.state;
+    const goal = s.goal;
+    if (!goal || s.status !== 'playing') return;
+    const owned = this.#provinceCount(s.nationId);
+    goal.progress = Math.min(owned, goal.target);
+    if (owned < goal.target) {
+      goal.holdSince = null;
+      return;
+    }
+    if (goal.kind === 'capture') {
+      this.#finishGoal();
+      return;
+    }
+    if (goal.holdSince == null) goal.holdSince = s.time;
+    if (s.time - goal.holdSince >= goal.seconds) this.#finishGoal();
+  }
+
+  #finishGoal() {
+    const s = this.state;
+    if (s.status !== 'playing') return;
+    s.status = 'goal';
+    this.#log(`Цель выполнена: ${s.goal.text}`, 'good');
+    this.#emit('end', {
+      result: 'goal',
+      goal: s.goal.text,
+      owned: this.#provinceCount(s.nationId),
+      total: Object.keys(s.provinces).length,
+    });
+  }
+
   #checkEnd() {
     const s = this.state;
     if (s.status !== 'playing') return;
@@ -2552,6 +2600,18 @@ export class Game {
       this.#log(`Победа: ${THEATRE_GENITIVE[this.scenario.theatre] ?? 'Европы'} под вашей короной`, 'good');
       this.#emit('end', { result: 'victory', owned, total });
       return;
+    }
+    // К2: a short match has an aim and a clock. Both are checked before defeat,
+    // so a player who reached the aim on the last second still wins the match.
+    if (s.goal?.limit) {
+      this.#checkGoal();
+      if (s.status !== 'playing') return;
+      if (s.time >= s.goal.limit) {
+        s.status = 'timeout';
+        this.#log(`Время вышло: ${s.goal.text}`, 'war');
+        this.#emit('end', { result: 'timeout', goal: s.goal.text, owned, total });
+        return;
+      }
     }
     this.#refreshNation(player.id);
     if (!player.alive) {
@@ -2604,14 +2664,24 @@ export class Game {
         speedBonus,
     );
     const victory = s.status === 'victory';
+    const reached = victory || s.status === 'goal';
+    // К2.2: three stars from data the match already has — the aim, the land
+    // kept, the word kept. No new counters to maintain.
+    const stars = [
+      { key: 'aim', label: 'цель достигнута', ok: reached },
+      { key: 'kept', label: 'ни одной провинции не потеряно', ok: (stats.lostProvinces ?? 0) === 0 },
+      { key: 'word', label: 'ни один пакт не разорван', ok: (stats.pactsBroken ?? 0) === 0 },
+    ];
     return {
-      total: Math.max(0, base + (victory ? 500 : 0)),
+      total: Math.max(0, base + (reached ? 500 : 0)),
       base,
       share,
       owned,
       speedBonus,
-      victory,
+      victory: reached,
       years,
+      stars,
+      starCount: stars.filter((star) => star.ok).length,
     };
   }
 
@@ -2633,6 +2703,12 @@ export class Game {
     game.state.nextAutoId = game.state.nextAutoId ?? 1;
     game.state.rules = normalizeRules(save.state.rules ?? {});
     game.rules = game.state.rules;
+    // Saves written before К2 have no aim: build one from the current rules so
+    // an old «продолжить» does not turn into a match without a finish line.
+    if (!game.state.goal) {
+      game.state.goal = game.#buildGoal(game.state);
+      game.state.status = game.state.status === 'playing' ? 'playing' : game.state.status;
+    }
     game.rng.s = save.rng >>> 0;
     return game;
   }

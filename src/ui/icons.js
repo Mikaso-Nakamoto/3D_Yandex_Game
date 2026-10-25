@@ -27,6 +27,10 @@ const PATHS = {
     '<path d="M12 21c3.8 0 6.5-2.4 6.5-5.7 0-2.3-1.3-3.9-2.6-5.3-1-1-2-2.2-2.1-4-1.6.7-2.7 2-3.1 3.6-.5-1-1.3-1.9-2.3-2.6.2 2.3-.9 3.5-1.9 4.8-.9 1.2-1.5 2.4-1.5 3.5C5.5 18.6 8.2 21 12 21Z"/>',
   arrowUp: '<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>',
   arrowDown: '<path d="M12 5v14"/><path d="m6 13 6 6 6-6"/>',
+  // Filled through CSS (`.star.is-on svg`) — a stroke-only star reads as an
+  // empty checkbox at 22 px.
+  star: '<path d="m12 3.2 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.7l6.1-.9Z"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/>',
 };
 
 export function icon(name, size = 16, className = 'ico') {

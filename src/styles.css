@@ -5386,3 +5386,220 @@ kbd {
 .pp-mini.danger:hover {
   background: rgba(196, 92, 74, 0.24);
 }
+
+/* ---------------------------------------------------------------- К2: цель партии */
+
+/* Top-left under the HUD: the province card lives at the bottom, the «Играть»
+   pill at the top-right, so this corner is free at every zoom. */
+.goal-line {
+  position: absolute;
+  left: 12px;
+  top: 54px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 260px));
+  padding: 6px 12px 6px 10px;
+  border-radius: 999px;
+  background: rgba(9, 16, 27, 0.9);
+  border: 1px solid rgba(217, 180, 90, 0.24);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  font-size: 11.5px;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.goal-line .ico {
+  color: var(--gold);
+  flex: none;
+}
+
+.goal-aim-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.goal-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.goal-clock {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+.goal-line.is-close .goal-clock {
+  color: #e8a3a3;
+}
+
+.goal-line.is-close {
+  border-color: rgba(200, 90, 90, 0.45);
+}
+
+/* Nation screen: the aim and the mode before the first move. */
+.detail-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(217, 180, 90, 0.06);
+  border: 1px solid rgba(217, 180, 90, 0.18);
+}
+
+.goal-modes {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+  align-self: flex-start;
+}
+
+.goal-mode {
+  border: none;
+  background: transparent;
+  color: var(--ink-dim);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.goal-mode.is-active {
+  background: rgba(217, 180, 90, 0.2);
+  color: var(--gold);
+}
+
+.goal-mode:hover:not(.is-active) {
+  color: var(--ink);
+}
+
+.goal-aim {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.goal-best {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mini-stars,
+.scenario-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mini-star {
+  color: rgba(255, 255, 255, 0.2);
+  display: inline-flex;
+}
+
+.mini-star.is-on {
+  color: var(--gold);
+}
+
+.mini-star svg {
+  fill: currentColor;
+  stroke-width: 1.2;
+}
+
+.scenario-stars {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 1;
+}
+
+/* End screen: three stars with names under them. */
+.end-stars {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  margin: 0 0 16px;
+}
+
+.end-star {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.22);
+}
+
+.end-star.is-on {
+  color: var(--gold);
+  filter: drop-shadow(0 0 10px rgba(217, 180, 90, 0.35));
+}
+
+.end-star svg {
+  fill: currentColor;
+  stroke-width: 1.3;
+}
+
+.star-label {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.end-emblem svg {
+  display: block;
+  margin: 0 auto;
+}
+
+/* A goal match keeps a permanent line under the HUD, so the centred hint and
+   the toasts step down by its height once, at the start of the match. */
+.game-screen.has-goal .hint-bar,
+.game-screen.has-goal .now-bar {
+  top: 90px;
+}
+
+.game-screen.has-goal .toasts {
+  top: 126px;
+}
+
+@media (max-height: 520px) {
+  /* Compact landscape: the top strip has no room for a second row, but the
+     bottom centre is free whenever the clock runs (the pill is its neighbour
+     and only shows while paused). */
+  .goal-line {
+    top: auto;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10.5px;
+    max-width: calc(100vw - 40px);
+  }
+
+  .game-screen.has-goal .hint-bar,
+  .game-screen.has-goal .now-bar {
+    top: 56px;
+  }
+
+  .game-screen.has-goal .toasts {
+    top: 84px;
+  }
+}

@@ -14,6 +14,9 @@ export const DEFAULT_RULES = {
   // The match also stops itself when something needs an answer: an enemy
   // column aimed at your land, a treaty offer, a fork in the focus chain.
   autoPause: true,
+  // К2: «goal» — короткая партия с целью и лимитом в восемь минут, «conquest» —
+  // прежняя победа по всей карте, без часов. Режим выбирается до партии.
+  mode: 'goal',
 };
 
 // `label` is the word next to the selector («Спокойная»), `short` the same word
@@ -49,6 +52,7 @@ export function normalizeRules(rules = {}) {
   merged.aiPassive = Boolean(merged.aiPassive);
   merged.startPaused = Boolean(merged.startPaused);
   merged.autoPause = Boolean(merged.autoPause);
+  merged.mode = merged.mode === 'conquest' ? 'conquest' : 'goal';
   return merged;
 }
 
@@ -73,6 +77,6 @@ export function describeRules(rules = {}) {
   const parts = [AI_STYLE[r.aiStyle].short + ' ИИ'];
   if (r.aiPassive) parts.push('без войн');
   else if (r.peaceUntilFirstWar) parts.push('мир до вашей войны');
-  parts.push('победа — вся карта');
+  parts.push(r.mode === 'conquest' ? 'победа — вся карта' : 'цель за 8 минут');
   return parts.join(' · ');
 }

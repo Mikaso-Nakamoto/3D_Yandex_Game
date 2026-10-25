@@ -2553,3 +2553,97 @@ test('the forecast counts help that is already in the air', () => {
   const short = game.projectedDefense('BE', 0.01);
   assert.ok(short < after, `too late to matter: ${short} vs ${after}`);
 });
+
+// ------------------------------------------------------------------ К2: цель партии
+
+test('a goal match carries an aim, a clock and a progress counter', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed: 42, rules: { mode: 'goal' } });
+  const goal = game.state.goal;
+  assert.equal(goal.kind, 'hold');
+  assert.equal(goal.target, 4, 'France starts with one province and must hold four');
+  assert.equal(goal.seconds, 180);
+  assert.equal(goal.limit, 480, 'eight minutes of match time');
+  assert.match(goal.text, /Удержать 4 провинции/);
+  // Conquest mode keeps the old rule: no clock, no aim.
+  const open = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed: 42, rules: { mode: 'conquest' } });
+  assert.equal(open.state.goal.limit, 0);
+});
+
+test('taking provinces completes a capture goal and ends the match', () => {
+  // eve1939 for Germany: «взять ещё 6 провинций».
+  const game = new Game({ scenarioId: 'eve1939', nationId: 'GER', map, seed: 42, rules: { mode: 'goal' } });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  const goal = game.state.goal;
+  assert.equal(goal.kind, 'capture');
+  assert.equal(goal.target, 10);
+  const ends = [];
+  game.on((type, payload) => {
+    if (type === 'end') ends.push(payload);
+  });
+  const free = Object.values(game.state.provinces).filter((p) => !p.owner).map((p) => p.id);
+  let given = 0;
+  for (const id of free) {
+    if (given >= 6) break;
+    game.state.provinces[id].owner = 'GER';
+    given += 1;
+  }
+  game.update(0.1);
+  assert.equal(game.state.status, 'goal');
+  assert.equal(ends.length, 1);
+  assert.equal(ends[0].result, 'goal');
+  assert.equal(game.score().victory, true, 'a reached aim counts as a won match');
+});
+
+test('a hold goal needs the provinces kept, not just taken', () => {
+  const game = new Game({ scenarioId: 'concert', nationId: 'FRA', map, seed: 42, rules: { mode: 'goal' } });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  const goal = game.state.goal;
+  const spare = ['IT', 'CH'];
+  for (const id of spare) if (game.state.provinces[id]) game.state.provinces[id].owner = 'FRA';
+  game.update(0.1);
+  assert.equal(game.state.status, 'playing', 'three provinces are not enough');
+  // Give the fourth and keep it for three minutes of match time.
+  const fourth = game.state.provinces.DE;
+  const previousOwner = fourth.owner;
+  fourth.owner = 'FRA';
+  game.update(0.1);
+  assert.equal(goal.holdSince !== null, true);
+  // Losing one province resets the timer.
+  fourth.owner = previousOwner;
+  game.update(0.1);
+  assert.equal(goal.holdSince, null, 'the clock restarts when the land is lost');
+});
+
+test('the clock ends a match without a defeat', () => {
+  const game = makeGame({ rules: { mode: 'goal' } });
+  for (const nation of game.nations) if (!nation.isPlayer) nation.ai.nextThink = 1e9;
+  const ends = [];
+  game.on((type, payload) => {
+    if (type === 'end') ends.push(payload);
+  });
+  game.update(game.state.goal.limit + 1);
+  assert.equal(game.state.status, 'timeout');
+  assert.equal(ends[0].result, 'timeout');
+  const score = game.score();
+  assert.equal(score.stars.length, 3);
+  assert.equal(score.stars[0].ok, false, 'the aim was not reached');
+  assert.equal(score.starCount, 2, 'no province lost and no pact broken');
+});
+
+test('a broken pact costs the third star', () => {
+  const game = makeGame();
+  const key = Game.pairKey('PRU', 'FRA');
+  game.state.relations[key] = { truceUntil: 999, kind: 'pact', warSince: null };
+  game.breakTruce('PRU', 'FRA');
+  assert.equal(game.state.stats.pactsBroken, 1);
+  assert.equal(game.score().stars.find((star) => star.key === 'word').ok, false);
+});
+
+test('an old save without a goal gets one on load', () => {
+  const game = makeGame();
+  const save = JSON.parse(JSON.stringify(game.serialize()));
+  delete save.state.goal;
+  const restored = Game.deserialize(save, map);
+  assert.ok(restored.state.goal, 'the aim is rebuilt');
+  assert.equal(restored.state.goal.limit, 480);
+});

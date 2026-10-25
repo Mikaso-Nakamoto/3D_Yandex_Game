@@ -18,12 +18,15 @@ import {
 import { platform } from '../platform/yandex.js';
 import { sfx } from '../audio.js';
 import { icon } from './icons.js';
+import { buildGoal, goalProgressText } from '../game/goal.js';
 import { offerTitle, provincesCount, nationsCount, plural } from '../game/text.js';
 
 const SAVE_KEY = 'crowns.save.v1';
 const SETTINGS_KEY = 'crowns.settings.v1';
 const TIPS_KEY = 'crowns.tips.v1';
 const DIFFICULTY_LEVEL = { 'Низко': 1, 'Средне': 2, 'Высоко': 3 };
+// К2.2: the three stars, in the order `Game#score()` builds them.
+const STAR_LABELS = ['цель', 'земли', 'слово'];
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -213,12 +216,17 @@ export class App {
     for (const scenario of SCENARIOS.filter((s) => (s.theatre ?? 'europe') === this.mapMode)) {
       const level = DIFFICULTY_LEVEL[scenario.difficulty] ?? 2;
       const dots = Array.from({ length: 3 }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
+      const best = Math.max(0, Math.min(3, Number(this.settings.stars?.[scenario.id]) || 0));
+      const starRow = best
+        ? `<span class="scenario-stars" title="Лучший результат">${Array.from({ length: 3 }, (_, i) => `<span class="mini-star ${i < best ? 'is-on' : ''}">${icon('star', 12)}</span>`).join('')}</span>`
+        : '';
       const card = document.createElement('button');
       card.className = 'scenario-card';
       card.type = 'button';
       card.dataset.scenario = scenario.id;
       card.innerHTML = `
         <div class="scenario-era">${scenario.era}</div>
+        ${starRow}
         <div class="scenario-title">${scenario.title}</div>
         <div class="scenario-desc">${scenario.blurb}</div>
         <div class="scenario-meta">
@@ -267,6 +275,9 @@ export class App {
     this.world.setValidTargets([]);
     this.setTheatre(this.mapMode);
     this.#frameMenuBackdrop();
+    // Stars earned in the match just finished belong on the scenario card the
+    // player sees when they come back.
+    this.#buildMenu();
     $('#province-panel').classList.add('hidden');
     platform.gameplayStop();
   }
@@ -463,6 +474,36 @@ export class App {
     return provinces.reduce((sum, id) => sum + this.#popOf(id), 0);
   }
 
+  /** The same sentence the game will use, built from scenario data. */
+  #goalPreview(nation) {
+    const owners = {};
+    for (const n of this.scenario.nations) for (const pid of n.provinces) owners[pid] = n.id;
+    const goal = buildGoal({
+      scenario: this.scenario,
+      nationId: nation.id,
+      owners,
+      mode: this.pendingRules.mode ?? 'goal',
+    });
+    if (this.pendingRules.mode === 'conquest') return 'Победа — вся карта. Часов нет, партия может идти долго.';
+    return `${goal.text}. Дальше — «время вышло» с итогом, а не поражение.`;
+  }
+
+  /** «3 мин 20 с» / «48 с» — for the match summary. */
+  #durationText(seconds) {
+    const total = Math.max(0, Math.round(seconds));
+    const min = Math.floor(total / 60);
+    if (!min) return `${total} с`;
+    return `${plural(min, 'минуту', 'минуты', 'минут')} ${total % 60} с`;
+  }
+
+  /** «Лучший результат: ★★☆» — the stars are stored per scenario. */
+  #starsLine(count) {
+    const stars = Math.max(0, Math.min(3, Number(count) || 0));
+    if (!stars) return 'Партия ещё не сыграна';
+    const row = Array.from({ length: 3 }, (_, i) => `<span class="mini-star ${i < stars ? 'is-on' : ''}">${icon('star', 12)}</span>`).join('');
+    return `Лучший результат: <span class="mini-stars">${row}</span>`;
+  }
+
   #renderNationDetail() {
     const detail = $('#nation-detail');
     const nation = this.scenario?.nations.find((n) => n.id === this.selectedNation);
@@ -493,6 +534,15 @@ export class App {
         <div class="ds"><span class="k">Доход</span><span class="v gold">+${preview.income.toFixed(1)}/с</span></div>
         <div class="ds"><span class="k">Армия</span><span class="v">${fmt(preview.army)}</span></div>
         <div class="ds"><span class="k">Рекруты</span><span class="v">+${(preview.recruits * 60).toFixed(0)}/мин</span></div>
+      </div>
+      <div class="detail-goal">
+        <div class="eyebrow">Цель <span class="eyebrow-note">${this.pendingRules.mode === 'conquest' ? 'вся карта' : 'до 8 минут'}</span></div>
+        <div class="goal-modes" role="group" aria-label="Режим партии">
+          <button type="button" data-goal-mode="goal" class="goal-mode ${this.pendingRules.mode === 'conquest' ? '' : 'is-active'}">Цель</button>
+          <button type="button" data-goal-mode="conquest" class="goal-mode ${this.pendingRules.mode === 'conquest' ? 'is-active' : ''}">Завоевание</button>
+        </div>
+        <p class="goal-aim">${this.#goalPreview(nation)}</p>
+        <p class="goal-best">${this.#starsLine(this.settings.stars?.[this.scenario.id])}</p>
       </div>
       <div class="detail-doctrine">
         <div class="eyebrow">Доктрина <span class="eyebrow-note">действует всю партию</span></div>
@@ -801,19 +851,49 @@ export class App {
     $('#btn-continue').classList.add('hidden');
     platform.gameplayStop();
 
+    // К2: a reached aim and the clock are both endings, and neither is a defeat.
     const victory = result === 'victory';
-    $('#end-emblem').textContent = victory ? '♛' : '☠';
+    const goalMet = result === 'goal';
+    const timeout = result === 'timeout';
+    const won = victory || goalMet;
+    const goalText = this.game.state.goal?.text ?? '';
+    $('#end-emblem').innerHTML = icon(timeout ? 'clock' : victory || goalMet ? 'crown' : 'sword', 36);
     const theatre = THEATRES[this.scenario?.theatre ?? 'europe'];
     const atlantic = theatre?.id === 'atlantic';
     const genitive = atlantic ? 'Атлантики' : 'Европы';
-    $('#end-eyebrow').textContent = victory ? (atlantic ? 'Два берега ваши' : 'Европа ваша') : 'Держава пала';
-    $('#end-title').textContent = victory ? 'Победа' : 'Поражение';
+    $('#end-eyebrow').textContent = victory
+      ? atlantic
+        ? 'Два берега ваши'
+        : 'Европа ваша'
+      : goalMet
+        ? 'Цель выполнена'
+        : timeout
+          ? 'Время вышло'
+          : 'Держава пала';
+    $('#end-title').textContent = victory ? 'Победа' : goalMet ? 'Цель выполнена' : timeout ? 'Время вышло' : 'Поражение';
     $('#end-text').textContent = victory
       ? `Каждая провинция ${genitive} под вашей короной. Полное завоевание — единственный способ победить, и у вас это получилось.`
-      : reason === 'eliminated'
-        ? 'Последнюю провинцию пришлось отдать. В следующий раз держите резервы в глубине и не открывайте все фронты сразу.'
-        : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
+      : goalMet
+        ? `${goalText} — сделано за ${this.#durationText(this.game.state.time)}. Дальше можно взять всю карту в режиме «Завоевание».`
+        : timeout
+          ? `Цель «${goalText}» не достигнута: ${this.game.state.goal?.progress ?? 0} из ${this.game.state.goal?.target ?? 0}. Это не поражение — очки считаются по землям и захватам.`
+          : reason === 'eliminated'
+            ? 'Последнюю провинцию пришлось отдать. В следующий раз держите резервы в глубине и не открывайте все фронты сразу.'
+            : 'Ваши земли разделили соседи. В следующий раз начните с укреплений и не открывайте все фронты сразу.';
     const stats = game.state.stats;
+    const score = game.score();
+    $('#end-stars').innerHTML = score.stars
+      .map(
+        (star, index) =>
+          `<div class="end-star ${star.ok ? 'is-on' : ''}" title="${star.label}">${icon('star', 26)}<span class="star-label">${STAR_LABELS[index]}</span></div>`,
+      )
+      .join('');
+    // Stars are a per-scenario record: they survive the end screen and the
+    // next launch, and only ever go up.
+    const stars = { ...(this.settings.stars ?? {}) };
+    stars[game.state.scenarioId] = Math.max(stars[game.state.scenarioId] ?? 0, score.starCount);
+    this.settings.stars = stars;
+    this.#saveSettings();
     $('#end-stats').innerHTML = `
       <div class="end-stat"><div class="k">Провинций</div><div class="v">${game.progress.owned}</div></div>
       <div class="end-stat"><div class="k">Захвачено</div><div class="v">${stats.captured}</div></div>
@@ -822,7 +902,6 @@ export class App {
       <div class="end-stat"><div class="k">Потеряно</div><div class="v">${stats.lostProvinces}</div></div>
       <div class="end-stat"><div class="k">Лет правления</div><div class="v">${Math.max(1, Math.round((game.state.months - this.scenario.startYear * 12) / 12))}</div></div>
       <div class="end-stat"><div class="k">Отбито атак</div><div class="v">${stats.battlesWon ?? 0}</div></div>`;
-    const score = game.score();
     $('#end-score').innerHTML = `
       <div class="score-line">
         <span class="score-label">Очки партии</span>
@@ -853,7 +932,7 @@ export class App {
       });
     });
     $('#screen-end').classList.remove('hidden');
-    if (victory) sfx.victory();
+    if (won) sfx.victory();
     else sfx.defeat();
     setTimeout(() => platform.showInterstitial(), 1600);
   }
@@ -1218,6 +1297,7 @@ export class App {
     // Paused and not in a menu: offer one obvious way to start the clock.
     const paused = game.state.speed === 0 && $('#modal-pause').classList.contains('hidden');
     $('#btn-speed-play').classList.toggle('hidden', !paused);
+    this.#updateGoalLine();
     this.#updateOrders();
     this.#renderOffers();
     if (this.selectedProvince) this.#renderProvincePanel();
@@ -1225,6 +1305,38 @@ export class App {
     // with the moment the pointer happened to stop.
     if (this.hoveredProvince) this.#hover(this.hoveredProvince);
     if (!$('#modal-rankings').classList.contains('hidden')) this.#renderRankings();
+  }
+
+  /**
+   * К2.4: «Цель: взять ещё 6 провинций · 2 из 6 · 4:12» under the HUD. Rebuilt
+   * only when the string changes — the HUD runs five times a second.
+   */
+  #updateGoalLine() {
+    const line = $('#goal-line');
+    if (!line || !this.game) return;
+    const goal = this.game.state.goal;
+    const inMatch = Boolean(goal && goal.limit > 0 && this.game.state.status === 'playing');
+    // The top strip gets crowded on a laptop, so a goal match moves the hint
+    // and the toasts down once, at the start, instead of fighting for space.
+    $('#screen-game').classList.toggle('has-goal', inMatch);
+    // While the clock is stopped the «Играть» pill owns this corner: two
+    // floating buttons on the same pixel is how the province card got covered.
+    const show = inMatch && this.game.state.speed > 0;
+    line.classList.toggle('hidden', !show);
+    if (!show) {
+      this.goalLineText = '';
+      return;
+    }
+    const left = Math.max(0, Math.ceil(goal.limit - this.game.state.time));
+    const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    const progress = goalProgressText(goal);
+    // «Цель: взять ещё 6 провинций» — lower case after the colon.
+    const aim = goal.text.charAt(0).toLowerCase() + goal.text.slice(1);
+    const html = `${icon('flag', 13)}<span class="goal-aim-line">Цель: ${aim}</span><span class="goal-count">${progress}</span><span class="goal-clock">${icon('clock', 12)}${clock}</span>`;
+    if (html === this.goalLineText) return;
+    this.goalLineText = html;
+    line.innerHTML = html;
+    line.classList.toggle('is-close', left <= 60);
   }
 
   #offerText(offer) {
@@ -2600,6 +2712,15 @@ export class App {
     $('#nation-detail').addEventListener('click', (event) => {
       if (event.target.closest('[data-open-rules]')) {
         this.#openRules();
+        return;
+      }
+      const mode = event.target.closest('[data-goal-mode]');
+      if (mode) {
+        sfx.click();
+        this.pendingRules = normalizeRules({ ...this.pendingRules, mode: mode.dataset.goalMode });
+        this.settings.rules = this.pendingRules;
+        this.#saveSettings();
+        this.#renderNationDetail();
         return;
       }
       const button = event.target.closest('#btn-start');
