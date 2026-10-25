@@ -1631,6 +1631,77 @@ body {
   opacity: 1;
 }
 
+/* Journal filters: «Мои», «Дипломатия», «Чужие». A war between two computer
+   empires is scenery, so the third chip starts off. */
+.log-filters {
+  display: flex;
+  gap: 4px;
+}
+
+.log-filter {
+  pointer-events: auto;
+  font-family: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(9, 16, 27, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  padding: 3px 9px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.log-filter:hover {
+  opacity: 0.9;
+}
+
+.log-filter.is-active {
+  color: var(--gold, #ffd98a);
+  border-color: rgba(255, 217, 138, 0.35);
+  opacity: 1;
+}
+
+.log-dock.is-collapsed .log-filters {
+  display: none;
+}
+
+/* «Играть» appears only while the clock is stopped and no menu is open. */
+.resume-btn {
+  /* Below the whole HUD row, right-aligned: the header is already full on a
+     laptop, and a button in the flex flow wrapped onto a second line over the
+     map on the left. */
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #0b1420;
+  background: linear-gradient(180deg, #ffd98a, #e8b95f);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 6px 14px 6px 11px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.resume-btn .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.resume-btn:hover {
+  filter: brightness(1.06);
+}
+
 .log-toggle .lt-closed {
   display: none;
 }
@@ -2200,6 +2271,17 @@ kbd {
   #btn-pause-menu {
     width: 32px;
     height: 28px;
+  }
+
+  /* On a phone-height window the HUD already wraps onto a second row, and the
+     pill under it landed on the action tiles. Bottom centre is free there and
+     sits under the thumb. */
+  .resume-btn {
+    position: fixed;
+    top: auto;
+    bottom: 10px;
+    right: 50%;
+    transform: translateX(50%);
   }
 
   .orders-bar {

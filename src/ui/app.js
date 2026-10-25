@@ -101,6 +101,8 @@ export class App {
     try {
       const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
       return {
+        // Unknown keys (`played`, later the star table) must survive a save.
+        ...raw,
         sound: raw.sound !== false,
         labels: raw.labels !== false,
         tips: raw.tips !== false,
@@ -568,10 +570,16 @@ export class App {
     this.#attachGame(game);
     this.pendingRules = normalizeRules(rules);
     this.#enterGameScreen();
-    if (rules.startPaused) {
+    // The opening pause is for a first look at the map. A scenario the player
+    // already finished is familiar, so it starts on its own — К1.1.
+    const repeat = Array.isArray(this.settings.played) && this.settings.played.includes(this.scenario.id);
+    if (rules.startPaused && !repeat) {
       this.lastSpeed = 1;
       this.setSpeed(0);
-      this.#toast('Партия ждёт вашего приказа. Снимите паузу, когда будете готовы', 'info');
+      this.#toast('Партия на паузе. Нажмите «Играть», когда осмотритесь', 'info');
+    } else if (this.game.state.speed === 0) {
+      this.lastSpeed = 1;
+      this.setSpeed(1);
     }
   }
 
@@ -586,6 +594,7 @@ export class App {
     this.colorSignature = '';
     this.#clearArmies();
     $('#log').innerHTML = '';
+    this.logEntries = [];
     game.state.log.length = 0;
 
     game.on((type, payload) => {
@@ -605,6 +614,11 @@ export class App {
           this.#toast(`Потеряна ${game.provinceName(payload.provinceId)}`, 'bad');
         }
       }
+      if (type === 'focusChoice' && payload.nationId === game.state.nationId) {
+        // A fork in the focus chain is a choice, not a notification.
+        this.#updateFocus();
+        this.#autoPause(null, { force: true });
+      }
       if (type === 'focus' && payload.nationId === game.state.nationId) {
         this.#toast(`Фокус выполнен: ${payload.step.name} (+${payload.step.gold} золота)`, 'good');
         sfx.select();
@@ -614,8 +628,18 @@ export class App {
         // A marching enemy is the one event that must not be missed because
         // the log is folded: a short toast, throttled so a big war does not
         // bury the screen.
+        // The column is on the road: give the player time to reinforce.
+        // Province names stay in the nominative, so the reason is built with an
+        // apposition in quotes («идёт на провинцию «Франция»»), not with a case
+        // the app cannot decline.
+        const paused = this.#autoPause(
+          `${game.state.nations[payload.attacker]?.short ?? 'Противник'} идёт на провинцию «${game.provinceName(payload.to)}»`,
+        );
+        // One message, not two: the pause toast already says who is marching
+        // where. The short toast stays for the marches that arrive while the
+        // game is running (a second column in the same war).
         const now = performance.now();
-        if (now - (this.lastIncomingToast ?? 0) > 1200) {
+        if (!paused && now - (this.lastIncomingToast ?? 0) > 1200) {
           this.lastIncomingToast = now;
           const who = game.state.nations[payload.attacker]?.short ?? 'Противник';
           this.#toast(`${who}: ${fmt(payload.amount)} → ${game.provinceName(payload.to)}`, 'bad');
@@ -628,6 +652,8 @@ export class App {
       if (type === 'offer') {
         sfx.click();
         this.#renderOffers();
+        // An offer has a countdown and only the player can answer it.
+        this.#autoPause(null, { force: true });
       }
       if (type === 'offerClosed') {
         this.#renderOffers();
@@ -635,20 +661,32 @@ export class App {
           const kind = payload.offer?.kind;
           this.#toast(kind === 'tribute' ? 'Дань получена: мир с уступкой' : 'Мир заключён: перемирие', 'good');
         }
-        else if (payload.expired) this.#toast('Предложение мира истекло', 'info');
+        // Expiry is written to the journal by the game; a toast for something
+        // the player deliberately ignored is noise.
       }
       if (type === 'truceBroken') {
-        const victim = this.game.state.nations[payload?.with];
-        const who = payload?.by && payload.by !== this.game.state.nationId ? victim?.short : null;
-        if (payload?.kind === 'pact') {
-          this.#toast(who ? `${who} разрывает пакт` : 'Пакт разорван — вам больше не верят', 'bad');
-        } else {
-          this.#toast(who ? `${who} нарушает перемирие` : 'Перемирие нарушено — усталость выросла', 'bad');
+        // Only treaties of the player are news. A pact broken between two
+        // computer empires used to pop up as «вам больше не верят», which was
+        // both wrong and noise.
+        const me = this.game.state.nationId;
+        const mine = payload?.by === me || payload?.with === me;
+        if (mine) {
+          const other = this.game.state.nations[payload.by === me ? payload.with : payload.by];
+          const who = other?.short;
+          if (payload?.kind === 'pact') {
+            this.#toast(who ? `${who} разрывает пакт` : 'Пакт разорван — вам больше не верят', 'bad');
+          } else {
+            this.#toast(who ? `${who} нарушает перемирие` : 'Перемирие нарушено — усталость выросла', 'bad');
+          }
         }
       }
       if (type === 'battle') {
+        const me = game.state.nationId;
+        // The sound is a cue for the player's own fight; a war two continents
+        // away used to rattle the speakers every second.
+        const mine = payload?.attacker === me || payload?.defender === me;
         const now = performance.now();
-        if (now - this.lastBattleSound > 700) {
+        if (mine && now - this.lastBattleSound > 700) {
           this.lastBattleSound = now;
           sfx.battle();
         }
@@ -750,6 +788,12 @@ export class App {
 
   #endGame({ result, reason, rival }) {
     const game = this.game;
+    // Remember that this scenario is no longer a discovery: the next run of it
+    // skips the opening pause instead of asking «Играть» again.
+    const played = new Set(Array.isArray(this.settings.played) ? this.settings.played : []);
+    played.add(game.state.scenarioId);
+    this.settings.played = [...played].slice(-20);
+    this.#saveSettings();
     game.state.speed = 0;
     this.#clearArmies();
     localStorage.removeItem(SAVE_KEY);
@@ -1171,6 +1215,9 @@ export class App {
       const speed = Number(button.dataset.speed);
       button.classList.toggle('active', speed === game.state.speed);
     }
+    // Paused and not in a menu: offer one obvious way to start the clock.
+    const paused = game.state.speed === 0 && $('#modal-pause').classList.contains('hidden');
+    $('#btn-speed-play').classList.toggle('hidden', !paused);
     this.#updateOrders();
     this.#renderOffers();
     if (this.selectedProvince) this.#renderProvincePanel();
@@ -1954,21 +2001,87 @@ export class App {
     });
   }
 
+  /**
+   * Journal filters. «Мои» and «Дипломатия» are on, «Чужие» is off: a war
+   * between two computer empires is scenery, not news. The choice sticks, so a
+   * player who wants the whole world keeps it on every match.
+   */
+  #wireLogFilters() {
+    const row = $('#log-filters');
+    if (!row) return;
+    this.logScopes = new Set(['own', 'diplo']);
+    try {
+      const saved = localStorage.getItem('crowns.logScopes');
+      if (saved) {
+        const list = JSON.parse(saved);
+        if (Array.isArray(list)) this.logScopes = new Set(list.filter((s) => ['own', 'diplo', 'foreign'].includes(s)));
+      }
+    } catch {
+      /* private mode: keep the defaults */
+    }
+    const apply = () => {
+      for (const button of row.children) {
+        button.classList.toggle('is-active', this.logScopes.has(button.dataset.scope));
+      }
+      this.#renderLog();
+    };
+    row.addEventListener('click', (event) => {
+      const button = event.target.closest('.log-filter');
+      if (!button) return;
+      const scope = button.dataset.scope;
+      if (this.logScopes.has(scope)) {
+        // Never leave the journal empty: the last enabled filter stays on.
+        if (this.logScopes.size === 1) return;
+        this.logScopes.delete(scope);
+      } else {
+        this.logScopes.add(scope);
+      }
+      try {
+        localStorage.setItem('crowns.logScopes', JSON.stringify([...this.logScopes]));
+      } catch {
+        /* ignore */
+      }
+      sfx.click();
+      apply();
+    });
+    apply();
+  }
+
   // ---------------------------------------------------------------- log & toasts
 
   #addLog(entry) {
-    const line = document.createElement('div');
-    line.className = `log-line ${entry.kind ?? 'info'}`;
-    const year = document.createElement('span');
-    year.className = 't';
-    year.textContent = entry.year ?? '';
-    const text = document.createElement('span');
-    text.className = 'x';
-    text.textContent = entry.text;
-    line.append(year, text);
+    this.logEntries = this.logEntries ?? [];
+    this.logEntries.push(entry);
+    if (this.logEntries.length > 50) this.logEntries.shift();
+    this.#renderLog();
+  }
+
+  /** Repaints the last visible lines for the current filter set. */
+  #renderLog() {
     const log = $('#log');
-    log.prepend(line);
-    while (log.children.length > 7) log.lastChild.remove();
+    if (!log) return;
+    const scopes = this.logScopes ?? new Set(['own', 'diplo']);
+    const visible = (this.logEntries ?? []).filter((entry) => scopes.has(entry.scope ?? 'own')).slice(-7);
+    log.innerHTML = '';
+    // The column is reversed in CSS (it grows upwards), so the newest line has
+    // to be the first child to sit at the bottom of the corner.
+    for (const entry of visible.slice().reverse()) {
+      const line = document.createElement('div');
+      line.className = `log-line ${entry.kind ?? 'info'}`;
+      const year = document.createElement('span');
+      year.className = 't';
+      year.textContent = entry.year ?? '';
+      const text = document.createElement('span');
+      text.className = 'x';
+      text.textContent = entry.text;
+      line.append(year, text);
+      log.appendChild(line);
+    }
+    // Wrapped «Чужие» lines push the pile past the corner: drop the oldest rows
+    // until the top one is whole instead of slicing it in half.
+    while (log.childElementCount > 1 && log.scrollHeight > log.clientHeight + 1) {
+      log.lastElementChild.remove();
+    }
   }
 
   #toast(text, kind = 'info') {
@@ -2038,6 +2151,12 @@ export class App {
         title: 'Нейтральные провинции',
         hint: 'Размер гарнизонов у ничейных земель. Применяется при старте партии.',
         options: Object.entries(NEUTRAL_STRENGTH).map(([value, cfg]) => ({ value, label: cfg.label })),
+      },
+      {
+        key: 'autoPause',
+        title: 'Автопауза на решениях',
+        hint: 'Партия сама остановится, когда к вашей земле идёт колонна, вам предлагают договор или открылась развилка фокуса. Так решение не проскочит мимо.',
+        options: onOff('autoPause', 'Включена', 'Выключена'),
       },
       {
         key: 'startPaused',
@@ -2559,6 +2678,11 @@ export class App {
         this.setSpeed(speed);
       });
     }
+    $('#btn-speed-play').addEventListener('click', () => {
+      if (!this.game) return;
+      sfx.select();
+      this.setSpeed(this.lastSpeed || 1);
+    });
     $('#offer-card').addEventListener('click', (event) => {
       const button = event.target.closest('[data-answer]');
       if (!button || !this.game) return;
@@ -2570,6 +2694,7 @@ export class App {
       this.#renderOffers();
     });
     this.#wireLogDock();
+    this.#wireLogFilters();
     $('#btn-pause-menu').addEventListener('click', () => this.openPause());
     $('#btn-rankings').addEventListener('click', () => this.#openRankings());
     $('#rank-tabs').addEventListener('click', (event) => {
@@ -2884,7 +3009,7 @@ export class App {
         this.setSpeed(this.game.state.speed === 0 ? this.lastSpeed : 0);
       } else if (event.key === '1') this.setSpeed(1);
       else if (event.key === '2') this.setSpeed(2);
-      else if (event.key === '4') this.setSpeed(4);
+      else if (event.key === '3') this.setSpeed(3);
       else if (event.key === 'Escape') this.openPause();
       else if (event.key === '+' || event.key === '=') this.world.zoomBy(1.12);
       else if (event.key === '-' || event.key === '_') this.world.zoomBy(0.89);
@@ -2924,9 +3049,39 @@ export class App {
 
   setSpeed(speed) {
     if (!this.game) return;
-    if (speed > 0) this.lastSpeed = speed;
-    this.game.setSpeed(speed);
+    // Three speeds, not four: at 4× the date flies past the messages the
+    // player is supposed to read. 3× is for skipping a quiet stretch.
+    const clamped = Math.max(0, Math.min(3, Math.round(Number(speed) || 0)));
+    if (clamped > 0) this.lastSpeed = clamped;
+    this.game.setSpeed(clamped);
     this.#updateHud();
+  }
+
+  /**
+   * Stops the clock when something needs an answer. Without this the enemy
+   * column reaches the province while the player is still reading the toast,
+   * and a treaty offer can expire unseen.
+   *
+   * `force` is for events the player must answer (offers, a focus fork); a
+   * marching column is throttled, otherwise one big war would pause the game
+   * every couple of seconds and feel broken.
+   */
+  #autoPause(reason = null, { force = false, throttle = 20000 } = {}) {
+    if (!this.game || this.screen !== 'game') return false;
+    if (!this.game.state.rules.autoPause) return false;
+    if (this.game.state.speed === 0) return false;
+    if (!$('#modal-pause').classList.contains('hidden')) return false;
+    const now = performance.now();
+    // `?? 0` would swallow the first pause of a match: performance.now() is
+    // still a few seconds old at that point, which reads as «paused recently».
+    if (!force && this.lastAutoPause != null && now - this.lastAutoPause < throttle) return false;
+    this.lastAutoPause = now;
+    this.lastAutoPauseReason = reason;
+    this.lastSpeed = this.game.state.speed;
+    this.game.setSpeed(0);
+    this.#updateHud();
+    if (reason) this.#toast(`Пауза: ${reason}`, 'warn');
+    return true;
   }
 
   openPause() {

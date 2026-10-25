@@ -7,7 +7,13 @@ export const DEFAULT_RULES = {
   aiEconomy: 'normal', // weak | normal | strong
   neutrals: 'normal', // weak | normal | strong
   victoryShare: 1, // kept for save compatibility; victory always needs the whole map
-  startPaused: false,
+  // A new match waits for the player: a browser game is opened in the middle of
+  // a day, not at a desk, and «the world moved while I read the rules» is the
+  // fastest way to lose a casual player.
+  startPaused: true,
+  // The match also stops itself when something needs an answer: an enemy
+  // column aimed at your land, a treaty offer, a fork in the focus chain.
+  autoPause: true,
 };
 
 // `label` is the word next to the selector («Спокойная»), `short` the same word
@@ -42,6 +48,7 @@ export function normalizeRules(rules = {}) {
   merged.peaceUntilFirstWar = Boolean(merged.peaceUntilFirstWar);
   merged.aiPassive = Boolean(merged.aiPassive);
   merged.startPaused = Boolean(merged.startPaused);
+  merged.autoPause = Boolean(merged.autoPause);
   return merged;
 }
 

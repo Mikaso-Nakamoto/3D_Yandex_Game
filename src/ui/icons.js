@@ -16,6 +16,7 @@ const PATHS = {
   manpower: '<circle cx="12" cy="7" r="3"/><path d="M5 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
+  play: '<path d="M8 5l11 7-11 7Z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   arrowLeft: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
   list: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',

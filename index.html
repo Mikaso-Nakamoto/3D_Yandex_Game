@@ -128,11 +128,15 @@
             <span class="ico" data-icon="list"></span>
             <span class="chip-label-inline">Державы</span>
           </button>
+          <button id="btn-speed-play" class="resume-btn hidden" type="button" title="Снять паузу (Пробел)">
+            <span class="ico" data-icon="play"></span>
+            <span>Играть</span>
+          </button>
           <div class="speed-group" id="speed-group">
             <button data-speed="0" class="speed-btn" title="Пауза (Пробел)" data-icon="pause"></button>
             <button data-speed="1" class="speed-btn active">1×</button>
             <button data-speed="2" class="speed-btn">2×</button>
-            <button data-speed="4" class="speed-btn">4×</button>
+            <button data-speed="3" class="speed-btn" title="Промотать затишье">3×</button>
           </div>
           <button id="btn-pause-menu" class="btn-icon" title="Меню" data-icon="menu"></button>
         </header>
@@ -147,6 +151,11 @@
             <span class="lt-open">Свернуть журнал</span>
             <span class="lt-closed">Журнал</span>
           </button>
+          <div class="log-filters" id="log-filters" role="group" aria-label="Что показывать в журнале">
+            <button type="button" class="log-filter is-active" data-scope="own">Мои</button>
+            <button type="button" class="log-filter is-active" data-scope="diplo">Дипломатия</button>
+            <button type="button" class="log-filter" data-scope="foreign">Чужие</button>
+          </div>
           <div class="log" id="log"></div>
         </div>
         <div class="send-ratio" id="send-ratio">

@@ -386,11 +386,17 @@ export class Game {
     for (const fn of this.listeners) fn(type, payload);
   }
 
-  #log(text, kind = 'info') {
+  /**
+   * `scope` decides which journal filter shows the line: «own» — your armies,
+   * your land, your money; «diplo» — treaties and offers; «foreign» — the rest
+   * of the world. The player reads the first two, the third is opt-in.
+   */
+  #log(text, kind = 'info', scope = 'own') {
     const entry = {
       id: this.state.nextLogId++,
       text,
       kind,
+      scope,
       months: this.state.months,
       year: Math.floor(this.state.months / 12),
     };
@@ -1131,6 +1137,7 @@ export class Game {
     this.#log(
       `Капитуляция: ${loser.short} — ${winner.short} получает ${moved} ${moved === 1 ? 'провинцию' : moved < 5 ? 'провинции' : 'провинций'}`,
       winner.isPlayer ? 'good' : 'war',
+      winner.isPlayer || loser.isPlayer ? 'diplo' : 'foreign',
     );
     this.#emit('capitulation', { loser: loserId, winner: winnerId, provinces: moved });
     this.#refreshNation(winnerId);
@@ -1161,7 +1168,7 @@ export class Game {
       s.relations[key].grudge = null;
       this.#adjustExhaustion(nationId, -BAL.peaceRelief * 0.5);
       this.#adjustExhaustion(other.id, -BAL.peaceRelief * 0.5);
-      this.#log(`Мир: ${nation.short} и ${other.short} прекращают войну`, 'war');
+      this.#log(`Мир: ${nation.short} и ${other.short} прекращают войну`, 'war', 'diplo');
       this.#emit('peace', { with: other.id, by: nationId, kind: 'peace', ai: true });
       return true;
     }
@@ -1436,6 +1443,10 @@ export class Game {
       // An ignored offer counts as a soft refusal: do not re-ask immediately.
       const from = s.nations[offer.from];
       if (from) from.offersFrom = s.time + BAL.offerCooldown;
+      // An ignored offer is journal news, not a pop-up: the player already saw
+      // the card and chose not to answer it. К1 keeps the screen quiet.
+      const kind = offer.kind === 'pact' ? 'пакт' : offer.kind === 'passage' ? 'проход' : 'мир';
+      this.#log(`${from?.short ?? 'Противник'}: предложение (${kind}) истекло`, 'war', 'diplo');
       this.#emit('offerClosed', { offer, accepted: false, expired: true });
     }
   }
@@ -2411,6 +2422,7 @@ export class Game {
             ? `${this.provinceName(target.id)}: ${s.nations[previousOwner]?.short ?? '—'} → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})${force}`
             : `${this.provinceName(target.id)}: независимая → ${attacker.short} (${Math.round(atkPower)} против ${Math.round(defPower)})${force}`,
           previousOwner === s.nationId ? 'bad' : attacker.isPlayer ? 'good' : 'war',
+          previousOwner === s.nationId || attacker.isPlayer ? 'own' : 'foreign',
         );
       }
       this.#emit('capture', {
@@ -2475,6 +2487,7 @@ export class Game {
         this.#log(
           `Отбита атака: ${this.provinceName(target.id)}${defender ? ` (${defender.short})` : ''} — ${Math.round(atkPower)} против ${Math.round(defPower)}`,
           defender?.isPlayer ? 'good' : 'war',
+          defender?.isPlayer || attacker.isPlayer ? 'own' : 'foreign',
         );
       }
       this.#emit('battle', { provinceId: target.id, attacker: owner, defender: target.owner, success: false, attack: Math.round(atkPower), defense: Math.round(defPower), roll, sent: troops, columns });
@@ -2502,7 +2515,7 @@ export class Game {
       if (nation.isPlayer) {
         this.#log('Ваша держава пала', 'bad');
       } else if (!nation.isPlayer) {
-        this.#log(`Держава «${nation.short}» уничтожена`, 'war');
+        this.#log(`Держава «${nation.short}» уничтожена`, 'war', 'foreign');
       }
       this.#emit('eliminated', { nationId });
     } else if (!nation.alive && alive) {
