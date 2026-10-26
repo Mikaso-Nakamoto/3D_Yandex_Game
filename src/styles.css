@@ -765,6 +765,13 @@ body {
   min-width: 0;
 }
 
+/* A squeezed tile used to lose its first line: in a column flex the name
+   shrank to zero and the card read «4 пров. · 168.0 млн» with no name at all.
+   Lines keep their height; the tile grows or the list scrolls. */
+.tile-body > * {
+  flex: none;
+}
+
 .tile-name {
   font-size: 13.5px;
   font-weight: 700;
@@ -803,6 +810,13 @@ body {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* A row cut in half by the sticky «Начать правление» reads as a broken card:
+   fade the edge while there is something below, as the province panel does. */
+.detail-scroll.has-more {
+  mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent 100%);
 }
 
 .detail-empty {
@@ -1179,7 +1193,9 @@ body {
   left: 12px;
   bottom: 12px;
   width: 344px;
-  max-height: calc(100% - 120px);
+  /* Up to the goal line, not over it: the card used to start at 108 px on a
+     1024×600 window and the goal string disappeared under its header. */
+  max-height: calc(100% - var(--hud-bottom, 56px) - 58px);
   overflow-y: auto;
   padding: 15px;
   z-index: 4;
@@ -1513,9 +1529,10 @@ body {
 .upg .u-sub {
   font-size: 10px;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* «+17 к гарнизону, быстрее пополнение» on one line was cut to «…поп…» on a
+     344 px card; two lines are cheaper than a lost word. */
+  white-space: normal;
+  line-height: 1.2;
 }
 
 .upg .u-cost {
@@ -1944,7 +1961,9 @@ body {
   overflow-y: auto;
   padding: 26px;
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(16, 27, 43, 0.98), rgba(8, 14, 24, 0.98));
+  /* Solid, not 98 %: a bright menu title behind an almost-opaque card still
+     reads through it, and «Как играть» became unreadable over the menu. */
+  background: linear-gradient(180deg, #101b2b, #080e18);
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow);
 }
@@ -2133,6 +2152,18 @@ kbd {
   gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+/* «Второй шанс» — своя строка во всю ширину, две обычные кнопки делят вторую
+   поровну. Раньше три подписи переносились по одной и блок рос втрое. */
+.end-buttons .btn.reward {
+  flex: 1 0 100%;
+}
+
+.end-buttons .btn:not(.reward) {
+  /* The pair shares the row when both labels fit and wraps to two rows when
+     they do not: shrinking them cut «Дальше: настоящая партия» mid-word. */
+  flex: 0 0 auto;
 }
 
 /* «Сыграть ещё» на две строки — это кнопка, которая сломалась: подпись всегда
@@ -2353,12 +2384,33 @@ kbd {
     position: absolute;
     left: auto;
     right: 8px;
-    top: 50%;
+    /* Под HUD, а не по центру правого края: развёрнутый список вырастает вверх
+       и на 844×390 наезжал на строку скоростей на 18 px. */
+    top: calc(var(--hud-bottom, 76px) + 6px);
     bottom: auto;
-    transform: translateY(-50%);
+    transform: none;
     flex-direction: column;
     gap: 5px;
     max-width: 112px;
+    max-height: calc(100% - var(--hud-bottom, 76px) - 12px);
+    /* The list scrolls, the button does not: on a 568 px wide phone five tiles
+       did not fit and the main order was the one that fell off. */
+    overflow: hidden;
+  }
+
+  .orders-bar .order-list {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .orders-bar .order-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .orders-bar .order-row {
+    flex: none;
   }
 
   .order {
@@ -2477,9 +2529,11 @@ kbd {
   }
 
   /* The HUD wraps to a second row on a landscape phone (nation, date, gold,
-     spirit, focus, «Державы», speed): 44 px put every toast on top of it. */
+     spirit, focus, «Державы», speed): 44 px put every toast on top of it. On
+     top of the goal line too — the toasts live outside the game screen, so the
+     gap is read from --goal-extra, which #updateGoalLine keeps in sync. */
   .toasts {
-    top: 84px;
+    top: calc(84px + var(--goal-extra, 0px));
   }
 
   .menu-screen {
@@ -2577,6 +2631,9 @@ kbd {
     max-height: 100%;
     overflow-y: auto;
     align-content: start;
+    /* Короткий экран: строки по содержимому и прокрутка, а не одиннадцать
+       рядов по 24 px, в которых подписи наезжают друг на друга. */
+    grid-auto-rows: max-content;
   }
 
   .nation-tile {
@@ -2607,15 +2664,15 @@ kbd {
     gap: 6px;
   }
 
-  /* Four stat cards in one row instead of a 2×2 block: on a 390 px tall screen
-     the saved 38 px are the difference between scrolling and not scrolling. */
+  /* 375 px tall: two cards per row. Four in a row gave each value 52 px, and
+     «168.0 млн» needs 58 — it ended with an ellipsis on the smallest screens. */
   .detail-stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: 1fr 1fr;
     gap: 4px;
   }
 
   .ds {
-    padding: 4px 6px;
+    padding: 3px 6px;
     gap: 0;
   }
 
@@ -3009,7 +3066,9 @@ kbd {
 
 .offer-card {
   position: absolute;
-  top: 104px;
+  /* #fitOfferCard resets this to the measured HUD: the strip wraps to a second
+     row on a laptop and to a third on a phone. */
+  top: calc(var(--hud-bottom, 94px) + 8px);
   left: 50%;
   transform: translateX(-50%);
   /* Above the transient toasts: an offer is a decision with a countdown, and a
@@ -3020,6 +3079,23 @@ kbd {
   gap: 6px;
   width: min(520px, calc(100vw - 32px));
   pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 180, 90, 0.4) transparent;
+}
+
+/* While a decision card is open the screen belongs to it: the goal line, the
+   toasts and the province card would otherwise be drawn under the same text. */
+#app.has-offer #goal-line,
+#app.has-offer #toasts,
+#app.has-offer #hint-bar,
+#app.has-offer #now-bar,
+#app.has-offer #province-panel,
+#app.has-route #toasts,
+#app.has-route #hint-bar {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .offer-row {
@@ -3150,7 +3226,7 @@ kbd {
 
 @media (max-height: 620px) {
   .offer-card {
-    top: 74px;
+    top: calc(var(--hud-bottom, 94px) + 8px);
   }
 }
 
@@ -3240,7 +3316,9 @@ kbd {
   }
 
   /* A 288 px card from the left edge and a centred control meet at ~640 px of a
-     667 px screen: on the narrowest landscape phones the pill goes right. */
+     667 px screen: on the narrowest landscape phones the pill goes right — but
+     left of the order column (142 px), otherwise the unfolded list and the
+     pills fight for the same bottom-right corner. */
   @media (max-width: 760px) {
     .send-ratio {
       left: auto;
@@ -3252,16 +3330,55 @@ kbd {
     }
   }
 
+  /* 620 px is where a 288 px card, a 186 px pill and a 142 px column stop
+     fitting side by side; below that the pills stay in the corner and the list
+     scrolls instead. */
+  @media (min-width: 620px) and (max-width: 760px) {
+    .send-ratio {
+      right: 142px;
+    }
+
+    /* «Играть» стоит по центру нижнего края и упиралось в ползунки, которые
+       теперь стоят левее: пауза поднимает кнопку над ними. */
+    .resume-btn {
+      bottom: 74px;
+    }
+  }
+
   .send-ratio .eyebrow {
     display: none;
   }
 
+  /* Полная ширина до колонки приказов: узкая карточка справа резала текст на
+     две строки, а третий оффер уезжал за нижний край. */
   .offer-card {
-    top: 56px;
-    width: min(460px, calc(100vw - 340px));
-    left: auto;
-    right: 12px;
+    top: calc(var(--hud-bottom, 76px) + 8px);
+    left: 8px;
+    right: 124px;
+    width: auto;
     transform: none;
+  }
+
+  #app.has-offer #send-ratio,
+  #app.has-route #send-ratio,
+  #app.has-route #province-panel,
+  #app.has-route #goal-line {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* План похода — нижний лист: карта сверху остаётся видимой, кнопки и
+     ползунки под ним не выживают. */
+  .route-card {
+    left: 8px;
+    right: 124px;
+    bottom: 8px;
+    top: auto;
+    transform: none;
+    width: auto;
+    max-height: calc(100% - var(--hud-bottom, 76px) - 24px);
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 }
 
@@ -3886,9 +4003,12 @@ kbd {
   display: none;
 }
 
-/* The onboarding pill yields to an open province card. */
+/* The onboarding pill yields to an open province card. It must not linger as
+   a half-transparent strip over the card while the fade runs, so it is taken
+   out of the layout the same frame. */
 .hint-bar.muted {
   opacity: 0 !important;
+  visibility: hidden;
   pointer-events: none;
 }
 
@@ -4102,9 +4222,21 @@ kbd {
    and the three upgrade rows with it. */
 
 @media (max-height: 560px) and (orientation: landscape) {
+  /* Строка цели живёт под HUD в том же левом углу, что и карточка провинции,
+     а карточка фокуса — оверлей над обеими: под ними её просто нет. */
+  #app.has-panel #goal-line,
+  #app.has-focus #goal-line,
+  #app.has-focus #province-panel,
+  /* «В поход» — про следующий марш, а не про выбор фокуса: ползунки уходят,
+     чтобы карточка заняла всю колонку до нижнего края. */
+  #app.has-focus #send-ratio {
+    opacity: 0;
+    pointer-events: none;
+  }
+
   .province-panel {
     /* Full column between the HUD and the bottom edge. */
-    top: 76px;
+    top: calc(var(--hud-bottom, 76px) + 2px);
     bottom: 8px;
     height: auto;
     max-height: none;
@@ -4455,13 +4587,18 @@ kbd {
 /* Very narrow landscape (small phones): there is no room between the card and
    the orders, so the planner is simply a small overlay. */
 @media (max-width: 700px) and (orientation: landscape) {
+  /* План похода — нижний лист до колонки приказов. Вверху он ложился на строку
+     цели и на саму колонку: карта остаётся сверху, лист снизу. */
   .route-card {
     left: 8px;
-    right: 8px;
-    top: 76px;
-    bottom: auto;
+    right: 124px;
+    top: auto;
+    bottom: 8px;
     transform: none;
     width: auto;
+    max-height: calc(100% - var(--hud-bottom, 76px) - 20px);
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 }
 
@@ -4613,6 +4750,11 @@ kbd {
   right: 12px;
   top: 84px;
   z-index: 7;
+  /* #setFocusCard gives it a height that fits the window; if the content is
+     still taller (a long chain on a phone), it scrolls inside instead of
+     pushing «Позже» out of the card. */
+  overflow-y: auto;
+  scrollbar-width: thin;
   width: min(320px, calc(100vw - 24px));
   padding: 12px 14px;
   border-radius: 14px;
@@ -4705,7 +4847,9 @@ kbd {
 
 @media (max-height: 560px) and (orientation: landscape) {
   .focus-card {
-    top: 84px;
+    /* Между HUD и ползунками доли: карточка фокуса перекрывала «В поход»
+       на 844×390. Высота ограничена, длинная цепочка прокручивается. */
+    top: calc(var(--hud-bottom, 76px) + 8px);
     right: 116px;
     width: min(300px, calc(100vw - 460px));
     padding: 9px 11px;
@@ -4724,9 +4868,13 @@ kbd {
 
 @media (max-width: 700px) and (orientation: landscape) {
   .focus-card {
-    right: 8px;
-    top: 76px;
-    width: min(300px, calc(100vw - 24px));
+    /* На 667×375 справа стоит колонка приказов, поэтому карточка фокуса идёт
+       по центру между ней и карточкой провинции. */
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    top: calc(var(--hud-bottom, 76px) + 6px);
+    width: min(320px, calc(100vw - 260px));
   }
 }
 
@@ -5273,7 +5421,7 @@ kbd {
   /* On a landscape phone the HUD wraps to a second row higher than on a
      monitor, so the offer has to start below it. */
   .offer-card {
-    top: 118px;
+    top: calc(var(--hud-bottom, 76px) + 8px);
   }
 
   #modal-rankings .modal-sub {
@@ -5727,8 +5875,8 @@ kbd {
     top: 56px;
   }
 
-  .game-screen.has-goal .toasts {
-    top: 84px;
+  #app.has-goal .toasts {
+    top: calc(84px + var(--goal-extra, 0px));
   }
 }
 
@@ -5795,6 +5943,11 @@ kbd {
   font-size: 10.5px;
 }
 
+/* An empty price still took its 9 px gap away from the name. */
+.order-main .o-cost:empty {
+  display: none;
+}
+
 .order-main.is-waiting {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(9, 16, 27, 0.9);
@@ -5823,6 +5976,28 @@ kbd {
   gap: 6px;
   justify-content: center;
   margin-bottom: 6px;
+}
+
+/* Карточка провинции (344) и журнал (300) делят низ не поровну, поэтому на
+   1280 развёрнутый ряд приказов, отцентрованный по экрану, задевал карточку
+   на 5 px. Сдвиг на 12 px ставит его в середину просвета. */
+@media (min-width: 1241px) {
+  .orders-bar {
+    left: calc(50% + 12px);
+  }
+}
+
+/* На ноутбучном окне (1024×600) развёрнутый ряд приказов шире просвета между
+   карточкой провинции и журналом. Ряд живёт секунду, поэтому на это время
+   карточки уходят, а не стоят под ним. */
+@media (min-height: 521px) and (max-width: 1240px) {
+  #app.orders-open #province-panel,
+  #app.orders-open #log-dock {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
 }
 
 /* ---------------------------------------------------------------- К6: реклама */
@@ -5940,8 +6115,10 @@ kbd {
     padding: 6px 8px;
   }
 
+  /* 104 px column: «Мобилизация» at 11 px was 86 px wide in a 77 px slot and
+     ended with an ellipsis. A tenth of a point fits it whole. */
   .order-main .o-name {
-    font-size: 11px;
+    font-size: 10.5px;
   }
 }
 
@@ -6599,7 +6776,7 @@ kbd {
     bottom: 4px;
     /* От HUD до нижнего края: высота строки HUD считается в #syncSafeArea, а не
        угадывается числом. */
-    max-height: calc(100% - var(--hud-bottom, 76px) - 4px);
+    max-height: calc(100% - var(--hud-bottom, 76px) - 8px);
   }
 
   /* «Развитие провинции» над тремя кнопками — подпись, которую на телефоне
@@ -6614,11 +6791,37 @@ kbd {
     line-height: 1.3;
   }
 
+  /* Карточка провинции здесь во всю высоту слева: строка цели уходит, иначе
+     из-под карточки торчал бы её хвост в 70 px. Карточка фокуса — тоже
+     оверлей, под ней ни цели, ни провинции не видно. */
+  #app.has-panel #goal-line,
+  #app.has-focus #goal-line,
+  #app.has-focus #province-panel {
+    opacity: 0;
+    pointer-events: none;
+  }
+
   /* К6.5: на коротком экране колонка приказов стоит справа (104 px), поэтому
      подсказки держатся от неё подальше. */
   #app.has-panel .toasts,
   #app.has-panel .now-bar {
     right: 116px;
+  }
+
+  /* Карточка фокуса занимает верх и центр: тост под ней просто не прочитать.
+     На время выбора фокуса лента уходит в свободный левый нижний угол. */
+  #app.has-focus .toasts {
+    top: auto;
+    bottom: 8px;
+    left: 8px;
+    right: auto;
+    transform: none;
+    align-items: flex-start;
+    max-width: calc(100% - 124px);
+  }
+
+  #app.has-focus .toast {
+    white-space: normal;
   }
 
   #app.has-panel .toast {
@@ -6697,5 +6900,14 @@ kbd {
 
   .log-toggle {
     min-height: 30px;
+  }
+}
+
+/* 667×375: карточка фокуса 320 px стоит по центру, свободного места под тост
+   не остаётся вовсе. На время выбора фокуса лента молчит: всё, что она бы
+   сказала, всё равно записано в журнал событий. */
+@media (max-height: 460px) and (max-width: 759px) {
+  #app.has-focus .toasts {
+    display: none;
   }
 }

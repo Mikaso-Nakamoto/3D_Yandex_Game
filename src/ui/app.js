@@ -506,7 +506,8 @@ export class App {
     this.autoFrom = null;
     this.panelFolded = false;
     clearTimeout(this.panelFoldTimer);
-    $('#focus-card').classList.add('hidden');
+    this.#setFocusCard(false);
+    $('#app')?.classList.remove('orders-open');
     $('#btn-focus').classList.add('hidden');
     this.selectedProvince = null;
     this.#setScreen('menu');
@@ -808,6 +809,19 @@ export class App {
       <button id="btn-start" class="btn primary">Начать правление</button>
     `;
     this.#renderDoctrinePicker();
+    // The nation card scrolls on short screens. Without a hint the row cut by
+    // the CTA looks like a broken layout, so the bottom fades while more is
+    // below — the same «has-more» the province panel uses.
+    const scroll = $('#nation-detail .detail-scroll');
+    if (scroll) {
+      const sync = () => {
+        const atEnd = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 2;
+        scroll.classList.toggle('has-more', scroll.scrollHeight > scroll.clientHeight + 2 && !atEnd);
+      };
+      scroll.addEventListener('scroll', sync, { passive: true });
+      new ResizeObserver(sync).observe(scroll);
+      sync();
+    }
   }
 
   #renderDoctrinePicker() {
@@ -1140,6 +1154,10 @@ export class App {
     if (showAd) this.settings.lastAd = this.settings.matches;
     this.#saveSettings();
     game.state.speed = 0;
+    // The end screen owns the window now: nothing may stay hidden behind an
+    // open order list or a focus card.
+    $('#app').classList.remove('orders-open');
+    this.#setFocusCard(false);
     this.#clearArmies();
     localStorage.removeItem(SAVE_KEY);
     this.hasSave = false;
@@ -1660,12 +1678,16 @@ export class App {
     this.routeRender = render;
     render();
     card.classList.remove('hidden');
+    // On a phone the sheet takes the bottom of the window: the goals, the toasts
+    // and «В поход» step aside so nothing is drawn on top of the plan.
+    $('#app')?.classList.add('has-route');
   }
 
   #closeRoutePlanner() {
     this.routePlanner = null;
     this.routeRender = null;
     $('#route-card').classList.add('hidden');
+    $('#app')?.classList.remove('has-route');
   }
 
   #dragDrop(from, to) {
@@ -1933,8 +1955,12 @@ export class App {
       const speed = Number(button.dataset.speed);
       button.classList.toggle('active', speed === game.state.speed);
     }
-    // Paused and not in a menu: offer one obvious way to start the clock.
-    const paused = game.state.speed === 0 && $('#modal-pause').classList.contains('hidden');
+    // Paused and not in a menu: offer one obvious way to start the clock. Any
+    // open modal owns the window — the pill used to hang over «Правила» and
+    // over the end screen, where there is nothing left to start.
+    const paused = game.state.speed === 0
+      && game.state.status === 'playing'
+      && document.querySelectorAll('.modal:not(.hidden)').length === 0;
     $('#btn-speed-play').classList.toggle('hidden', !paused);
     this.#updateGoalLine();
     this.#updateOrders();
@@ -1958,6 +1984,9 @@ export class App {
     // The top strip gets crowded on a laptop, so a goal match moves the hint
     // and the toasts down once, at the start, instead of fighting for space.
     $('#screen-game').classList.toggle('has-goal', inMatch);
+    // The toasts live outside the game screen, so the CSS cannot see `has-goal`
+    // on it — the same flag goes on the app root as well.
+    $('#app').classList.toggle('has-goal', inMatch);
     // While the clock is stopped the «Играть» pill owns this corner: two
     // floating buttons on the same pixel is how the province card got covered.
     const show = inMatch && this.game.state.speed > 0;
@@ -2001,12 +2030,43 @@ export class App {
       : `Перемирие ${Math.round(BAL.peaceTruce)} с. Обе стороны теряют усталость. Решение за вами — ${left} с.`;
   }
 
+  /**
+   * К6.6: the offer card is a decision, so it starts under the HUD and stops
+   * above the order bar and «В поход» instead of running off the bottom edge
+   * (three offers at 844×390 ended 41 px below the window). It scrolls inside
+   * when the nations are many.
+   */
+  #fitOfferCard() {
+    const card = $('#offer-card');
+    if (!card || card.classList.contains('hidden')) return;
+    const hud = $('.hud-top')?.getBoundingClientRect();
+    // In the lesson the pill owns the slot under the HUD and the offer card
+    // starts below it — otherwise the instruction «Вам предлагают пакт…»
+    // disappears under the card that asks the question.
+    const tutBar = $('#screen-game')?.classList.contains('is-tutorial') ? $('.tut-bar') : null;
+    const tut = tutBar && !tutBar.classList.contains('hidden') ? tutBar.getBoundingClientRect() : null;
+    const top = Math.round(Math.max(hud?.bottom ?? 0, tut?.bottom ?? 0) + 8);
+    card.style.top = `${top}px`;
+    const rect = card.getBoundingClientRect();
+    let limit = window.innerHeight - 8;
+    for (const sel of ['#orders-bar', '#send-ratio']) {
+      const el = $(sel);
+      if (!el) continue;
+      if (Number(getComputedStyle(el).opacity) <= 0.02) continue;
+      const box = el.getBoundingClientRect();
+      if (box.top <= top) continue;
+      if (rect.left < box.right && rect.right > box.left) limit = Math.min(limit, box.top - 8);
+    }
+    card.style.maxHeight = `${Math.max(120, Math.round(limit - top))}px`;
+  }
+
   #renderOffers() {
     const card = $('#offer-card');
     if (!card) return;
     const game = this.game;
     const offers = game?.state?.offers ?? [];
     if (!game || !offers.length || game.state.status !== 'playing') {
+      $('#app')?.classList.remove('has-offer');
       if (this.offerSignature) {
         card.classList.add('hidden');
         card.innerHTML = '';
@@ -2014,6 +2074,7 @@ export class App {
       }
       return;
     }
+    $('#app')?.classList.add('has-offer');
     const signature = offers
       .map((offer) => `${offer.id}:${offer.kind ?? 'peace'}:${offer.terms?.province ?? ''}:${offer.terms?.gold ?? ''}`)
       .join(',');
@@ -2047,6 +2108,7 @@ export class App {
       }
     }
     card.classList.remove('hidden');
+    this.#fitOfferCard();
   }
 
   #updateOrders() {
@@ -2218,7 +2280,10 @@ export class App {
     $('#now-bar')?.classList.add('hidden');
     bar.classList.remove('is-replaced');
     bar.textContent = text;
-    bar.classList.add('muted');
+    // «muted» is the state that hides the pill under the province card, so a
+    // hint has to clear it — otherwise the text was written into a hidden bar.
+    bar.classList.remove('muted');
+    this.#syncHint();
     bar.style.opacity = '1';
     clearTimeout(this.hintTimer);
     this.hintTimer = setTimeout(() => {
@@ -2685,6 +2750,40 @@ export class App {
         : 'Все исторические задачи выполнены';
   }
 
+  /**
+   * К6.6: the focus card is an overlay, so everything that would stand under it
+   * (goal line, province card) steps aside on short screens, and the card
+   * itself starts under the HUD/goal line and stops above «В поход».
+   */
+  #setFocusCard(open) {
+    const card = $('#focus-card');
+    if (!card) return;
+    card.classList.toggle('hidden', !open);
+    $('#app').classList.toggle('has-focus', open);
+    if (!open) return;
+    this.#renderFocusCard();
+    const hud = $('.hud-top')?.getBoundingClientRect();
+    const goalEl = $('#goal-line');
+    const goalVisible = goalEl && !goalEl.classList.contains('hidden')
+      && Number(getComputedStyle(goalEl).opacity) > 0.02;
+    const goal = goalVisible ? goalEl.getBoundingClientRect() : null;
+    const top = Math.round(Math.max(hud?.bottom ?? 0, goal?.bottom ?? 0) + 8);
+    card.style.top = `${top}px`;
+    // The card may be taller than a 390 px window: it takes every pixel down to
+    // the bottom edge (the ratio pills step aside while it is open), and only
+    // stops above them where they stay on screen.
+    const ratioEl = $('#send-ratio');
+    const ratioShown = ratioEl && Number(getComputedStyle(ratioEl).opacity) > 0.02
+      && getComputedStyle(ratioEl).visibility !== 'hidden';
+    const ratio = ratioShown ? ratioEl.getBoundingClientRect() : null;
+    let limit = window.innerHeight - 8;
+    if (ratio && ratio.top > top) {
+      const rect = card.getBoundingClientRect();
+      if (rect.left < ratio.right && rect.right > ratio.left) limit = Math.min(limit, ratio.top - 8);
+    }
+    card.style.maxHeight = `${Math.max(120, Math.round(limit - top))}px`;
+  }
+
   #renderFocusCard() {
     const game = this.game;
     const card = $('#focus-card');
@@ -2817,6 +2916,9 @@ export class App {
     list.classList.toggle('hidden', !open);
     more.setAttribute('aria-expanded', String(open));
     more.classList.toggle('is-open', open);
+    // К6.6: at 1024×600 the unfolded row is wider than the free lane between the
+    // province card and the journal, so both step aside while it is open.
+    $('#app').classList.toggle('orders-open', open);
     if (open) sfx.click();
   }
 
@@ -3656,23 +3758,14 @@ export class App {
     }
 
     $('#btn-focus').addEventListener('click', () => {
-      const card = $('#focus-card');
-      if (card.classList.contains('hidden')) {
-        this.#renderFocusCard();
-        card.classList.remove('hidden');
-        // The HUD may wrap to two rows on a narrow screen: the card starts
-        // below it instead of guessing a fixed offset.
-        const hud = $('.hud-top')?.getBoundingClientRect();
-        if (hud) card.style.top = `${Math.round(hud.bottom + 10)}px`;
-        sfx.click();
-      } else {
-        card.classList.add('hidden');
-      }
+      const open = $('#focus-card').classList.contains('hidden');
+      this.#setFocusCard(open);
+      if (open) sfx.click();
     });
 
     $('#focus-card').addEventListener('click', (event) => {
       if (event.target.closest('[data-fc-close]')) {
-        $('#focus-card').classList.add('hidden');
+        this.#setFocusCard(false);
         return;
       }
       const pick = event.target.closest('[data-fc-pick]');
@@ -3949,6 +4042,10 @@ export class App {
     window.addEventListener('resize', () => {
       this.arrowLayer.resize();
       this.#syncSafeArea();
+      // The focus card measures the window it sits in, so a resize has to
+      // re-measure it instead of leaving a card from the old size behind.
+      if (!$('#focus-card')?.classList.contains('hidden')) this.#setFocusCard(true);
+      this.#fitOfferCard();
     });
   }
 
