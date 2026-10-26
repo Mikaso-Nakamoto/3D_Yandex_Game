@@ -508,6 +508,9 @@ export class App {
     clearTimeout(this.panelFoldTimer);
     this.#setFocusCard(false);
     $('#app')?.classList.remove('orders-open');
+    // Leaving the result screen by any route (menu, restart, victory of the
+    // lesson) must drop the flag that hides the toast strip.
+    $('#app')?.classList.remove('has-end');
     $('#btn-focus').classList.add('hidden');
     this.selectedProvince = null;
     this.#setScreen('menu');
@@ -1182,10 +1185,10 @@ export class App {
         ? atlantic
           ? 'Два берега ваши'
           : 'Европа ваша'
-        : goalMet
-        ? 'Цель выполнена'
-        : timeout
-          ? 'Время вышло'
+        // The kicker must not repeat the heading word for word: «Время вышло»
+        // over «Время вышло» read as a rendering bug.
+        : goalMet || timeout
+          ? 'Итог'
           : 'Держава пала';
     $('#end-title').textContent = tutorial
       ? 'Готово'
@@ -1313,6 +1316,10 @@ export class App {
     this.tutorialUI.hide();
     $('#screen-game')?.classList.remove('is-tutorial');
     $('#screen-end').classList.remove('hidden');
+    // Stale match chatter («начался поход на Швецию») used to land on top of
+    // the score. The result screen owns the window; its own note reports
+    // anything that still needs saying.
+    $('#app')?.classList.add('has-end');
     if (won) sfx.victory();
     else sfx.defeat();
     // An ad in the minute after the first tap is how a new player leaves, so
@@ -1355,7 +1362,18 @@ export class App {
       // A refusal or a broken ad costs nothing but the try.
       button.disabled = false;
       if (text) text.textContent = 'Второй шанс';
-      this.#toast('Реклама не загрузилась — второй шанс не потрачен', 'info');
+      // The result card covers the middle of the window, so the toast would be
+      // half-hidden under it: the card's own footnote says it instead.
+      const note = $('#end-ad-note');
+      if (note) {
+        note.textContent = 'Реклама не загрузилась — второй шанс не потрачен';
+        note.classList.remove('hidden');
+        clearTimeout(this.adNoteTimer);
+        this.adNoteTimer = setTimeout(() => {
+          note.textContent = 'Реклама · один раз за партию';
+          this.#updateReviveButton();
+        }, 4000);
+      }
       return;
     }
     const result = game.revive();
@@ -1364,6 +1382,7 @@ export class App {
       return;
     }
     $('#screen-end').classList.add('hidden');
+    $('#app')?.classList.remove('has-end');
     this.#updateReviveButton();
     this.#resumeAfterRevive(result.provinceId);
   }
@@ -2777,9 +2796,20 @@ export class App {
       && getComputedStyle(ratioEl).visibility !== 'hidden';
     const ratio = ratioShown ? ratioEl.getBoundingClientRect() : null;
     let limit = window.innerHeight - 8;
-    if (ratio && ratio.top > top) {
-      const rect = card.getBoundingClientRect();
-      if (rect.left < ratio.right && rect.right > ratio.left) limit = Math.min(limit, ratio.top - 8);
+    const rect = card.getBoundingClientRect();
+    if (ratio && ratio.top > top && rect.left < ratio.right && rect.right > ratio.left) {
+      limit = Math.min(limit, ratio.top - 8);
+    }
+    // The event log sits in the same right-hand column, at the bottom: on a
+    // 600 px tall window the card reached it and the last choice was hidden
+    // under the log's own header. The card stops above the log instead.
+    const dock = $('#log-dock');
+    const dockShown = dock && Number(getComputedStyle(dock).opacity) > 0.02;
+    if (dockShown) {
+      const box = dock.getBoundingClientRect();
+      if (box.height > 0 && box.top > top && rect.left < box.right && rect.right > box.left) {
+        limit = Math.min(limit, box.top - 8);
+      }
     }
     card.style.maxHeight = `${Math.max(120, Math.round(limit - top))}px`;
   }
@@ -3191,6 +3221,21 @@ export class App {
     sync();
   }
 
+  /**
+   * The same fade for the two lists inside «Обстановка». They scroll inside the
+   * dialog, so a row cut by the dialog's edge has no other hint that more is
+   * below — the scrollbar is 8 px and invisible on a touch screen.
+   */
+  #syncScrollFade(el) {
+    if (!el) return;
+    const sync = () => {
+      const more = el.scrollHeight - el.clientHeight - el.scrollTop > 6;
+      el.classList.toggle('has-more', more);
+    };
+    el.__syncFade = sync;
+    sync();
+  }
+
   #renderRules() {
     const rules = this.#rulesTarget();
     const live = this.screen === 'game' && Boolean(this.game);
@@ -3347,7 +3392,7 @@ export class App {
     const totalProvinces = Object.keys(game.state.provinces).length;
     $('#rank-table').innerHTML = `
       <div class="rank-row rank-head">
-        <span>Держава</span><span>Земли</span><span>Армия</span><span>Дух</span><span>Усталость</span><span>Доход</span><span>Рекруты</span>
+        <span>Держава</span><span>Земли</span><span>Армия</span><span>Дух</span><span><span class="th-long">Усталость</span><span class="th-short">Устал.</span></span><span>Доход</span><span>Рекруты</span>
       </div>
       ${rows
         .map(
@@ -3371,6 +3416,12 @@ export class App {
         .join('')}
     `;
     this.#renderDiplomacy();
+    // The lists are rebuilt on every render, their height is not: sync the fade
+    // against the freshly measured content after the browser lays it out.
+    requestAnimationFrame(() => {
+      this.#syncScrollFade(document.querySelector('#modal-rankings .rank-scroll'));
+      this.#syncScrollFade($('#diplo-nations'));
+    });
   }
 
   #renderDiplomacy() {
@@ -3574,6 +3625,10 @@ export class App {
       $('#modal-howto').classList.remove('hidden');
       this.#syncModalScroll('#modal-howto');
     });
+    for (const list of document.querySelectorAll('.rank-scroll, #diplo-nations')) {
+      list.addEventListener('scroll', () => list.__syncFade?.(), { passive: true });
+      new ResizeObserver(() => list.__syncFade?.()).observe(list);
+    }
     for (const body of document.querySelectorAll('.modal-body')) {
       body.addEventListener('scroll', () => body.__sync?.(), { passive: true });
       body.addEventListener('scroll', () => {
@@ -4010,11 +4065,13 @@ export class App {
 
     $('#btn-again').addEventListener('click', () => {
       $('#screen-end').classList.add('hidden');
+      $('#app')?.classList.remove('has-end');
       this.#restart();
     });
     $('#btn-revive').addEventListener('click', () => this.#offerRevive());
     $('#btn-end-menu').addEventListener('click', () => {
       $('#screen-end').classList.add('hidden');
+      $('#app')?.classList.remove('has-end');
       this.showMenu();
     });
 

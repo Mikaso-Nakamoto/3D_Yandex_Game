@@ -2821,6 +2821,10 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+.rank-head .th-short {
+  display: none;
+}
+
 .rank-head {
   font-size: 9.5px;
   letter-spacing: 0.11em;
@@ -3087,14 +3091,29 @@ kbd {
 
 /* While a decision card is open the screen belongs to it: the goal line, the
    toasts and the province card would otherwise be drawn under the same text. */
+/* The result card is the only thing on screen: match chatter behind it is
+   noise at best and a covered number at worst. */
+#app.has-end .toasts {
+  display: none;
+}
+
+/* `!important`, because the hint pill and «Сейчас» are shown by an inline
+   opacity from the script (a 14-second timer owns that pill): a plain rule
+   here lost to the style attribute and the text stayed on screen. */
 #app.has-offer #goal-line,
 #app.has-offer #toasts,
 #app.has-offer #hint-bar,
 #app.has-offer #now-bar,
 #app.has-offer #province-panel,
 #app.has-route #toasts,
-#app.has-route #hint-bar {
-  opacity: 0;
+#app.has-route #hint-bar,
+/* The focus card is a decision, and it owns the middle of the window: a toast
+   or a hint behind it is unreadable at best, and at 1024 px they landed on the
+   card itself. Everything said meanwhile is in the event log. */
+#app.has-focus #toasts,
+#app.has-focus #hint-bar,
+#app.has-focus #now-bar {
+  opacity: 0 !important;
   pointer-events: none;
 }
 
@@ -3492,6 +3511,16 @@ kbd {
   .rank-row > :nth-child(7) {
     display: none;
   }
+
+  /* «Усталость» is 62 px wide and the column is 52: the full word was cut in
+     the middle («УСТАЛОС»). The short form says the same in 34 px. */
+  .rank-head .th-long {
+    display: none;
+  }
+
+  .rank-head .th-short {
+    display: inline;
+  }
 }
 
 
@@ -3758,13 +3787,25 @@ kbd {
     display: none;
   }
 
+  /* 150 px is the narrowest card that still fits «1815» beside a 20 px title
+     without an ellipsis. auto-fit keeps the row full for three scenarios and
+     drops to four columns for the Atlantic theatre. */
   .scenario-list {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 6px;
     max-width: none;
   }
 
+  /* A theatre with one scenario must not stretch that card across the window:
+     a 635 px wide tile with two lines of text reads as a banner, not a card.
+     The card is a column so the corner badges get their own line — their
+     absolute position is undone at the end of the file, after the base rule. */
   .scenario-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    max-width: 210px;
     padding: 8px 9px;
   }
 
@@ -3774,7 +3815,7 @@ kbd {
 
   .scenario-title {
     font-size: 12px;
-    margin: 2px 0 0;
+    margin: 0;
     -webkit-line-clamp: 2;
   }
 
@@ -3784,7 +3825,7 @@ kbd {
   }
 
   .scenario-meta {
-    margin-top: 4px;
+    margin-top: auto;
     padding-top: 4px;
     font-size: 8.5px;
     gap: 2px 6px;
@@ -3849,7 +3890,9 @@ kbd {
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s ease;
-  background: linear-gradient(180deg, rgba(12, 20, 32, 0) 0%, rgba(12, 20, 32, 0.96) 78%);
+  /* Matched to the card's own gradient near its foot (#080e18 → 9,16,27):
+     a flat 12,20,32 left a lighter band across the dialog. */
+  background: linear-gradient(180deg, rgba(9, 16, 27, 0) 0%, rgba(9, 16, 27, 0.97) 78%);
 }
 
 .modal-body.has-more ~ .modal-actions::before,
@@ -5517,6 +5560,12 @@ kbd {
   scrollbar-color: rgba(217, 180, 90, 0.35) transparent;
 }
 
+.rank-scroll.has-more,
+#modal-rankings #diplo-nations.has-more {
+  mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent 100%);
+}
+
 .rank-scroll::-webkit-scrollbar {
   width: 8px;
 }
@@ -6808,22 +6857,6 @@ kbd {
     right: 116px;
   }
 
-  /* Карточка фокуса занимает верх и центр: тост под ней просто не прочитать.
-     На время выбора фокуса лента уходит в свободный левый нижний угол. */
-  #app.has-focus .toasts {
-    top: auto;
-    bottom: 8px;
-    left: 8px;
-    right: auto;
-    transform: none;
-    align-items: flex-start;
-    max-width: calc(100% - 124px);
-  }
-
-  #app.has-focus .toast {
-    white-space: normal;
-  }
-
   #app.has-panel .toast {
     font-size: 11px;
     padding: 5px 10px;
@@ -6903,11 +6936,18 @@ kbd {
   }
 }
 
-/* 667×375: карточка фокуса 320 px стоит по центру, свободного места под тост
-   не остаётся вовсе. На время выбора фокуса лента молчит: всё, что она бы
-   сказала, всё равно записано в журнал событий. */
-@media (max-height: 460px) and (max-width: 759px) {
-  #app.has-focus .toasts {
-    display: none;
+/* ---------------------------------------------------------------- phone cards
+   The base .scenario-stars / .card-lock are absolutely placed in the card
+   corner. On a 150 px wide card the corner is the era itself, so the badges
+   move into the column flow — spelled here, after the base rule, so it wins
+   on equal specificity. */
+@media (max-height: 460px) and (orientation: landscape) {
+  .scenario-stars,
+  .card-lock {
+    position: static;
+    flex: none;
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
   }
 }
