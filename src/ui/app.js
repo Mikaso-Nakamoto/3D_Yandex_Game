@@ -1066,6 +1066,10 @@ export class App {
   }
 
   #enterGameScreen() {
+    // A new match always starts on a clean window: the previous result card and
+    // the flags it sets must never outlive it into the next game.
+    $('#screen-end').classList.add('hidden');
+    $('#app')?.classList.remove('has-end');
     this.#setScreen('game');
     // The HUD is on screen now, so the camera has to know how much room is
     // left *before* it frames the realm.
@@ -3302,15 +3306,36 @@ export class App {
   }
 
   /** Pact / peace with one nation, from the province card or the diplomacy list. */
+  /**
+   * Every answer to a negotiation lands inside «Обстановка»: the toast strip is
+   * a layer under the dialog, so a refusal was written where nobody could read
+   * it. Outside the dialog the same words go to the toast.
+   */
+  #diploAnswer(text, tone = 'info') {
+    const line = $('#diplo-answer');
+    const inDialog = line && !$('#modal-rankings').classList.contains('hidden');
+    if (!inDialog) {
+      this.#toast(text, tone);
+      return;
+    }
+    line.textContent = text;
+    line.className = `diplo-answer ${tone}`;
+    clearTimeout(this.diploAnswerTimer);
+    this.diploAnswerTimer = setTimeout(() => {
+      line.classList.add('hidden');
+      this.diploAnswerTimer = null;
+    }, 6000);
+  }
+
   #askPact(nationId) {
     const result = this.game.proposePact(nationId);
     const name = this.game.state.nations[nationId]?.short ?? 'противник';
-    if (!result.ok) this.#toast(result.reason, 'bad');
+    if (!result.ok) this.#diploAnswer(result.reason, 'bad');
     else if (result.accepted) {
-      this.#toast(result.kind === 'peace' ? `Мир с ${name}` : `Пакт с ${name}`, 'good');
+      this.#diploAnswer(result.kind === 'peace' ? `Мир с ${name}` : `Пакт с ${name}`, 'good');
       sfx.select();
       this.#tip('pact', 'Договоры и войны — меню паузы → «Обстановка» → «Переговоры» (клавиша R)');
-    } else this.#toast(`${name}: отказ. Сила и усталость решают — попробуйте позже`, 'bad');
+    } else this.#diploAnswer(`${name}: отказ. Сила и усталость решают — попробуйте позже`, 'bad');
     this.#afterDiplomacy();
   }
 
@@ -3318,11 +3343,11 @@ export class App {
   #askPassage(nationId) {
     const result = this.game.requestPassage(nationId);
     const name = this.game.state.nations[nationId]?.short ?? 'противник';
-    if (!result.ok) this.#toast(result.reason, 'bad');
+    if (!result.ok) this.#diploAnswer(result.reason, 'bad');
     else if (result.accepted) {
-      this.#toast(`${name}: право прохода на ${Math.round(BAL.passageTruce)} с`, 'good');
+      this.#diploAnswer(`${name}: право прохода на ${Math.round(BAL.passageTruce)} с`, 'good');
       sfx.select();
-    } else this.#toast(`${name}: проход не дали`, 'bad');
+    } else this.#diploAnswer(`${name}: проход не дали`, 'bad');
     this.#afterDiplomacy();
   }
 
@@ -3334,15 +3359,15 @@ export class App {
     const provinceName = target ? game.provinceName(target) : null;
     const result = game.demandPeace(nationId);
     if (!result.ok) {
-      this.#toast(result.reason, 'bad');
+      this.#diploAnswer(result.reason, 'bad');
       return;
     }
     if (result.accepted) {
       const gold = result.gold > 0 ? ` и ${result.gold} золота` : '';
-      this.#toast(`${name} уступает провинцию «${provinceName ?? '?'}»${gold} — мир`, 'good');
+      this.#diploAnswer(`${name} уступает провинцию «${provinceName ?? '?'}»${gold} — мир`, 'good');
       sfx.select();
     } else {
-      this.#toast(`${name}: отказ — ${Math.round(result.chance * 100)}% было мало, укрепитесь и спросите снова`, 'bad');
+      this.#diploAnswer(`${name}: отказ — ${Math.round(result.chance * 100)}% было мало, укрепитесь и спросите снова`, 'bad');
     }
     this.#afterDiplomacy();
   }

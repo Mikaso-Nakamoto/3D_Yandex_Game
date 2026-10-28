@@ -271,6 +271,10 @@
           <p class="modal-sub">
             Пакт — обещание не нападать. Право прохода — договор, по которому ваши колонны идут через чужую землю; на чужой дороге они медленнее, а нападение на хозяина его отменяет.
           </p>
+          <!-- The answer to a request lands right where the request was made:
+               a toast outside this dialog is drawn behind it, so «пакт
+               подписан» / «отказ» used to be invisible. -->
+          <div id="diplo-answer" class="diplo-answer hidden" role="status"></div>
           <div id="diplo-nations"></div>
           <div class="diplo" id="diplo-block"></div>
         </div>
