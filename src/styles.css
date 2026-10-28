@@ -2531,9 +2531,12 @@ kbd {
   /* The HUD wraps to a second row on a landscape phone (nation, date, gold,
      spirit, focus, «Державы», speed): 44 px put every toast on top of it. On
      top of the goal line too — the toasts live outside the game screen, so the
-     gap is read from --goal-extra, which #updateGoalLine keeps in sync. */
+     gap is read from --goal-extra, which #updateGoalLine keeps in sync. The
+     HUD height is measured, not guessed: a hardcoded 84 px was right for a
+     56 px HUD and left the strip across the «Передышка» pill once the HUD
+     grew to 79 px. */
   .toasts {
-    top: calc(84px + var(--goal-extra, 0px));
+    top: calc(var(--hud-bottom, 56px) + 40px + var(--goal-extra, 0px));
   }
 
   .menu-screen {
@@ -3121,6 +3124,11 @@ body:has(.modal:not(.hidden)) #toasts {
 #app.has-focus #hint-bar,
 #app.has-focus #now-bar {
   opacity: 0 !important;
+  /* `visibility` as well: these pills have a 0.25 s opacity transition, so an
+     offer that arrives while «Сейчас» is up left the pill half-drawn under the
+     new card for a quarter of a second. Hidden the same frame, like the muted
+     hint pill. */
+  visibility: hidden;
   pointer-events: none;
 }
 
@@ -4389,11 +4397,10 @@ body:has(.modal:not(.hidden)) #toasts {
    garrison meter — it must never be the thing that hides below the fold. */
 @media (max-height: 340px) and (orientation: landscape) {
   /* At 568×320 the HUD needs a second row (nation, date, progress, gold, spirit,
-     recruits, «Державы», speed, pause do not fit on one), so everything that
-     hangs from the top has to move below 76 px. */
-  .toasts {
-    top: 84px;
-  }
+     recruits, «Державы», speed, pause do not fit on one). The toasts used to be
+     pinned 8 px under it, which is exactly the «Сейчас» pill's slot — the two
+     were drawn on top of each other. The base rule (46 px + --goal-extra)
+     already stacks them under both the goal line and the pill. */
 
   .orders-bar {
     top: 84px;
@@ -5960,14 +5967,10 @@ body:has(.modal:not(.hidden)) #toasts {
     width: 104px;
   }
 
-  .game-screen.has-goal .hint-bar,
-  .game-screen.has-goal .now-bar {
-    top: 56px;
-  }
-
-  #app.has-goal .toasts {
-    top: calc(84px + var(--goal-extra, 0px));
-  }
+  /* Both pills and the toast strip used to be pinned to a hardcoded 56/84 px —
+     the heights of a one-row HUD. With two rows (73–79 px) the strip was drawn
+     across the goal line and across «Передышка». --hud-bottom is measured in
+     #syncSafeArea, so everything now hangs off it. */
 }
 
 /* ---------------------------------------------------------------- К3: один палец */
@@ -6401,7 +6404,15 @@ body:has(.modal:not(.hidden)) #toasts {
 }
 
 @media (max-width: 560px), (max-height: 520px) {
+  /* A centred pill is wider than the free strip on a landscape phone: at 667 px
+     the right 5 px of the instruction were drawn over «Налог». Here the order
+     column owns the right edge (104 px + 8 px), so the pill stretches up to it
+     instead of hiding its last word under the first order. */
   .tut-bar {
+    left: 8px;
+    right: 124px;
+    width: auto;
+    transform: none;
     gap: 7px;
     padding: 6px 7px;
     border-radius: 10px;

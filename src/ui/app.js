@@ -3691,6 +3691,15 @@ export class App {
         sfx.click();
         this.doctrineOpen = !this.doctrineOpen;
         this.#renderNationDetail();
+        // On a 390 px tall window the three doctrines open *below* the fold:
+        // the player presses «сменить» and sees nothing but a faded edge. The
+        // card scrolls to the one thing that just appeared.
+        if (this.doctrineOpen) {
+          requestAnimationFrame(() => {
+            document.querySelector('#nation-detail .doctrine-body')
+              ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          });
+        }
         return;
       }
       const mode = event.target.closest('[data-goal-mode]');
