@@ -2953,6 +2953,9 @@ export class App {
     // К6.6: at 1024×600 the unfolded row is wider than the free lane between the
     // province card and the journal, so both step aside while it is open.
     $('#app').classList.toggle('orders-open', open);
+    // On a 320 px tall window the column scrolls; it must start at the first
+    // order, not somewhere in the middle with a half tile on the edge.
+    if (open) list.scrollTop = 0;
     if (open) sfx.click();
   }
 
@@ -3122,7 +3125,24 @@ export class App {
     const toast = document.createElement('div');
     toast.className = `toast ${kind}`;
     toast.textContent = text;
-    $('#toasts').appendChild(toast);
+    const box = $('#toasts');
+    box.appendChild(toast);
+    // The strip grows downwards, and on a landscape phone «В поход» sits right
+    // below it: a burst of reports (three provinces in one tick) used to cover
+    // the ratio pills. Drop the oldest until the newest fits above the bottom
+    // controls — measured, because a wrapped two-line report is twice as tall
+    // as a short one, and a magic number of messages got it wrong.
+    while (box.children.length > 5) box.firstElementChild.remove();
+    const ratio = $('#send-ratio');
+    const ratioTop =
+      ratio && Number(getComputedStyle(ratio).opacity) > 0.02
+        ? ratio.getBoundingClientRect().top
+        : window.innerHeight;
+    const limit = Math.min(window.innerHeight, ratioTop) - 8;
+    let guard = 6;
+    while (guard-- > 0 && box.children.length > 1 && box.getBoundingClientRect().bottom > limit) {
+      box.firstElementChild.remove();
+    }
     setTimeout(() => {
       toast.style.transition = 'opacity .3s ease';
       toast.style.opacity = '0';

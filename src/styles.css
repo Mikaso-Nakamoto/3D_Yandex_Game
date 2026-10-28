@@ -2409,6 +2409,14 @@ kbd {
     display: none;
   }
 
+  /* Rows keep their own height and the list scrolls: a column of four tiles
+     (the fourth is the rewarded «Ускорить», it exists only while an ad is
+     available) was squeezed to 26 px each and the names and prices were cut
+     off — icons under a clock with no words. */
+  .orders-bar .order-list .order {
+    flex: 0 0 auto;
+  }
+
   .orders-bar .order-row {
     flex: none;
   }
@@ -5913,7 +5921,10 @@ body:has(.modal:not(.hidden)) #toasts {
     top: calc(var(--hud-bottom, 56px) + 4px);
     left: 8px;
     font-size: 10.5px;
-    max-width: calc(100vw - 190px);
+    /* 190 px was 3 px short of «Цель: удержать 13 провинций» at 568: the aim
+       was ellipsised in the middle of a word. The order column starts at
+       100vw − 112, so 180 still leaves a 20 px gap. */
+    max-width: calc(100vw - 180px);
   }
 
   /* The order bar is a right-hand column here; the single button must shrink
@@ -6085,6 +6096,19 @@ body:has(.modal:not(.hidden)) #toasts {
    карточки уходят, а не стоят под ним. */
 @media (min-height: 521px) and (max-width: 1240px) {
   #app.orders-open #province-panel,
+  #app.orders-open #log-dock {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+}
+
+/* The same corner, a little wider: when the rewarded «Ускорить» row is in the
+   sheet (the button exists only while an ad is available), the unfurled bar is
+   one 102 px row wider and reached 24 px under the журнал at 1241–1360. The
+   province card is on the far left there and is not in the way. */
+@media (min-height: 521px) and (min-width: 1241px) and (max-width: 1360px) {
   #app.orders-open #log-dock {
     opacity: 0;
     visibility: hidden;
