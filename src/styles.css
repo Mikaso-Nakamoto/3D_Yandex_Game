@@ -3097,6 +3097,13 @@ kbd {
   display: none;
 }
 
+/* A dialog owns the window. The toast strip is a layer under the dialog's dim
+   backdrop: it could only be read as a ghost line next to the card, and on
+   844×390 it crossed the «Пауза» card itself. */
+body:has(.modal:not(.hidden)) #toasts {
+  opacity: 0;
+}
+
 /* `!important`, because the hint pill and «Сейчас» are shown by an inline
    opacity from the script (a 14-second timer owns that pill): a plain rule
    here lost to the style attribute and the text stayed on screen. */
@@ -3114,6 +3121,14 @@ kbd {
 #app.has-focus #hint-bar,
 #app.has-focus #now-bar {
   opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* Two decision cards at once is one decision too many: an offer pauses the
+   clock, so it can wait behind the focus card without losing a second, and it
+   comes back the moment the card is closed. */
+#app.has-focus #offer-card {
+  opacity: 0;
   pointer-events: none;
 }
 
